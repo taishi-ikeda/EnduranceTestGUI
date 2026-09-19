@@ -14,7 +14,11 @@ if(NOT CMAKE_PREFIX_PATH)
     # build has been observed to have unreliable macOS Accessibility (TCC)
     # permission recognition). Falls back to Homebrew's Qt at /usr/local
     # (Intel prefix; x86_64-only, so the app runs under Rosetta there).
-    file(GLOB _qt_installer_dirs "$ENV{HOME}/Qt/*/macos")
+    if(APPLE)
+    	file(GLOB _qt_installer_dirs "$ENV{HOME}/Qt/*/macos")
+    elseif(UNIX)
+    	file(GLOB _qt_installer_dirs "$ENV{HOME}/Qt/*/gcc_64")
+    endif()
     if(_qt_installer_dirs)
         list(SORT _qt_installer_dirs)
         list(GET _qt_installer_dirs -1 _qt_installer_latest)
@@ -120,6 +124,7 @@ elseif(UNIX)
     target_link_libraries(EnduranceTestGUI PRIVATE
         ${X11_LIBRARIES}
         ${X11_XTest_LIB}
+        gobject-2.0
     )
 
     # Optional: AT-SPI powers the experimental "select a context-menu item"

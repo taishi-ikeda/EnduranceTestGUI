@@ -582,8 +582,18 @@ void MainWindow::updateRegionHighlight()
             m_regionHighlightOverlay->hide();
         return;
     }
-    if (!m_regionHighlightOverlay)
-        m_regionHighlightOverlay = new RegionHighlightOverlay(this);
+    if (!m_regionHighlightOverlay) {
+        // No parent: this is a Qt::Tool top-level window positioned in
+        // absolute screen coordinates (setGeometry() to the virtual
+        // desktop rect, see RegionHighlightOverlay). Passing `this`
+        // (MainWindow) as parent here previously made Qt treat that
+        // geometry as relative to MainWindow's own on-screen position
+        // instead, offsetting every highlighted region by wherever
+        // MainWindow happened to be -- matching RegionSelectorOverlay's
+        // and StopPanel's existing (parent-less) pattern for the same kind
+        // of absolutely-positioned overlay avoids that.
+        m_regionHighlightOverlay = new RegionHighlightOverlay();
+    }
     const NamedRegion &region = m_namedRegions[row];
     m_regionHighlightOverlay->showRegion(region.name, region.regions, region.excludeRegions);
 }

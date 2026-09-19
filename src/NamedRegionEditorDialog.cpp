@@ -9,6 +9,7 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 
 namespace
@@ -79,13 +80,35 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttonBox);
 
+    // Visualize the region being built/edited on screen for as long as
+    // this dialog stays open (SPEC.md 6.3) -- hidden (not destroyed) when
+    // the dialog closes, whether accepted, cancelled, or closed any other
+    // way.
+    connect(this, &QDialog::finished, this, [this](int) {
+        if (m_highlightOverlay)
+            m_highlightOverlay->hide();
+    });
+
     refreshRegionList();
     refreshExcludeList();
+    updateHighlight();
     resize(460, 560);
+}
+
+void NamedRegionEditorDialog::updateHighlight()
+{
+    if (!m_highlightOverlay)
+        m_highlightOverlay = new RegionHighlightOverlay(this);
+    m_highlightOverlay->showRegion(m_nameEdit->text(), m_regions, m_excludeRegions);
 }
 
 void NamedRegionEditorDialog::onDrawRegions()
 {
+    // Hide the persistent highlight while RegionSelectorOverlay (which
+    // already shows the current regions itself while drawing) is up, to
+    // avoid the two always-on-top overlays visually fighting each other.
+    if (m_highlightOverlay)
+        m_highlightOverlay->hide();
     // See StepEditorDialog's equivalent comment: deliberately not
     // hide()/show()-ing this dialog around the overlay.
     const QList<QRect> added =
@@ -94,6 +117,7 @@ void NamedRegionEditorDialog::onDrawRegions()
         m_regions.append(added);
         refreshRegionList();
     }
+    updateHighlight();
 }
 
 void NamedRegionEditorDialog::onRemoveSelectedRegion()
@@ -102,17 +126,21 @@ void NamedRegionEditorDialog::onRemoveSelectedRegion()
     if (row >= 0 && row < m_regions.size()) {
         m_regions.removeAt(row);
         refreshRegionList();
+        updateHighlight();
     }
 }
 
 void NamedRegionEditorDialog::onDrawExcludeRegions()
 {
+    if (m_highlightOverlay)
+        m_highlightOverlay->hide();
     const QList<QRect> added =
         RegionSelectorOverlay::run(RegionSelectorOverlay::Mode::Exclude, m_regions, m_excludeRegions);
     if (!added.isEmpty()) {
         m_excludeRegions.append(added);
         refreshExcludeList();
     }
+    updateHighlight();
 }
 
 void NamedRegionEditorDialog::onRemoveSelectedExcludeRegion()
@@ -121,6 +149,7 @@ void NamedRegionEditorDialog::onRemoveSelectedExcludeRegion()
     if (row >= 0 && row < m_excludeRegions.size()) {
         m_excludeRegions.removeAt(row);
         refreshExcludeList();
+        updateHighlight();
     }
 }
 

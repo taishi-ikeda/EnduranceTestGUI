@@ -13,7 +13,7 @@
 class RegionHighlightScreenWindow : public QWidget
 {
 public:
-    explicit RegionHighlightScreenWindow(QScreen *screen) : QWidget(nullptr), m_screen(screen)
+    explicit RegionHighlightScreenWindow() : QWidget(nullptr)
     {
         // Same window-type flags as RegionSelectorOverlay (known to
         // position itself correctly on screen). Click-through is done
@@ -25,9 +25,10 @@ public:
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
 
-    void setContent(const QString &name, const QList<QRect> &includeRegions,
+    void setContent(QScreen *screen, const QString &name, const QList<QRect> &includeRegions,
                      const QList<QRect> &excludeRegions)
     {
+        m_screen = screen;
         m_name = name;
         m_includeRegions = includeRegions;
         m_excludeRegions = excludeRegions;
@@ -78,7 +79,7 @@ protected:
     }
 
 private:
-    QScreen *m_screen;
+    QScreen *m_screen = nullptr;
     QPoint m_origin;
     QString m_name;
     QList<QRect> m_includeRegions;
@@ -99,22 +100,31 @@ void RegionHighlightOverlay::showRegion(const QString &name, const QList<QRect> 
     m_includeRegions = includeRegions;
     m_excludeRegions = excludeRegions;
 
-    // Rebuilt from scratch every time rather than reused/resized: the set
-    // of screens can change (a monitor connected/disconnected) between
-    // selections, and a stale QScreen* would be a dangling pointer if one
-    // was unplugged. This is cheap since it only happens on a list
-    // selection change, not per frame.
-    qDeleteAll(m_screenWindows);
-    m_screenWindows.clear();
-    for (QScreen *screen : QGuiApplication::screens()) {
-        auto *window = new RegionHighlightScreenWindow(screen);
-        window->setContent(m_name, m_includeRegions, m_excludeRegions);
-        m_screenWindows.append(window);
+    const QList<QScreen *> screens = QGuiApplication::screens();
+
+    // Reused across calls rather than destroyed and recreated every time --
+    // an earlier version did that, and creating/destroying several
+    // always-on-top native windows on every single list-selection change
+    // was slow enough (particularly on macOS, where each is a real
+    // NSWindow) to make the app appear to hang while selecting regions.
+    // Only rebuilt when the number of screens actually changed (a monitor
+    // connected/disconnected), which is rare; otherwise the existing
+    // windows are just repositioned/repainted via setContent() below.
+    if (m_screenWindows.size() != screens.size()) {
+        qDeleteAll(m_screenWindows);
+        m_screenWindows.clear();
+        for (int i = 0; i < screens.size(); ++i)
+            m_screenWindows.append(new RegionHighlightScreenWindow());
     }
+
+    for (int i = 0; i < m_screenWindows.size(); ++i)
+        m_screenWindows[i]->setContent(screens[i], m_name, m_includeRegions, m_excludeRegions);
 }
 
 void RegionHighlightOverlay::hide()
 {
-    qDeleteAll(m_screenWindows);
-    m_screenWindows.clear();
+    // Just hidden, not destroyed -- see the comment in showRegion() about
+    // why these windows are kept around and reused.
+    for (RegionHighlightScreenWindow *w : m_screenWindows)
+        w->hide();
 }

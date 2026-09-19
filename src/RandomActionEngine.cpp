@@ -345,6 +345,19 @@ void RandomActionEngine::performRandomAction()
     }
 
     const RegionStep &step = m_config.steps[m_currentStepIndex];
+
+    if (step.isWaitStep) {
+        // A pure pause: no region/action-kind fields on this step are
+        // meaningful. Doesn't count as an "action" (no iteration-count
+        // increment), and the wait itself replaces the usual randomized
+        // scheduleNext() delay before the next step's first action.
+        emit logMessage(
+            QStringLiteral("ステップ %1: %2 ms 待機します").arg(m_currentStepIndex + 1).arg(step.waitDurationMs));
+        advanceToNextStep();
+        m_timer.start(qMax(1, step.waitDurationMs));
+        return;
+    }
+
     const ActionParams &params = effectiveParams(step);
 
     QList<QRect> includeRegions;

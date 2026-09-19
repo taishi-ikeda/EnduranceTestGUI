@@ -106,6 +106,15 @@ struct NamedRegion
 // limit, manual stop, or target crash) is hit.
 struct RegionStep
 {
+    // If true, this step is a pure pause: it performs no actions at all
+    // (every field below is ignored) and simply waits waitDurationMs
+    // before advancing to the next step. Used to insert a deliberate pause
+    // into a step sequence, e.g. to let the target app settle after a
+    // burst of activity (SPEC.md 6.2). Added/edited via ②'s "待機を追加..."
+    // button rather than StepEditorDialog.
+    bool isWaitStep = false;
+    int waitDurationMs = 1000;
+
     // If true, this step operates over the live target-window bounds
     // (re-queried every iteration, so it follows the window if it moves/
     // resizes) and `regionName`/exclude regions are not used. If false,
@@ -155,6 +164,8 @@ struct RegionStep
 
     bool hasAnyActionEnabled() const
     {
+        if (isWaitStep)
+            return true;  // waiting is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
                enableScrollDown || enableScrollHorizontal || enableShortcut || enableWindowOp;
     }

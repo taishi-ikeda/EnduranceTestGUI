@@ -24,7 +24,6 @@ class QTimer;
 class StopPanel;
 class ActionParamsEditor;
 class ActionKindEditor;
-class RegionHighlightOverlay;
 
 // Main window, laid out (per SPEC.md 6.9) as three columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
@@ -55,9 +54,9 @@ private slots:
     void onAddNamedRegion();
     void onEditSelectedNamedRegion();
     void onRemoveSelectedNamedRegion();
-    void onNamedRegionSelectionChanged();
 
     void onAddStep();
+    void onAddWaitStep();
     void onEditSelectedStep();
     void onRemoveSelectedStep();
     void onMoveStepUp();
@@ -100,9 +99,6 @@ private:
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
     QStringList stepsReferencing(const QString &regionName) const;
-    // Shows/hides RegionHighlightOverlay to match whichever operation
-    // region is currently selected in m_namedRegionListWidget (SPEC.md 6.3).
-    void updateRegionHighlight();
     void flushActionParamsEditor();
     void loadActionParamsEditorForSelection();
     void setControlsEnabled(bool enabled);
@@ -123,16 +119,11 @@ private:
     QPushButton *m_editNamedRegionButton = nullptr;
     QPushButton *m_removeNamedRegionButton = nullptr;
     QList<NamedRegion> m_namedRegions;
-    // Non-interactive on-screen highlight for whichever region is selected
-    // above; created lazily. Internally manages one top-level window per
-    // QScreen (see RegionHighlightOverlay.h) so it stays pixel-accurate
-    // across monitors with different scale factors. Lives until process
-    // exit (no Qt parent).
-    RegionHighlightOverlay *m_regionHighlightOverlay = nullptr;
 
     // Steps
     QListWidget *m_stepListWidget = nullptr;
     QPushButton *m_addStepButton = nullptr;
+    QPushButton *m_addWaitStepButton = nullptr;
     QPushButton *m_editStepButton = nullptr;
     QPushButton *m_removeStepButton = nullptr;
     QPushButton *m_moveStepUpButton = nullptr;

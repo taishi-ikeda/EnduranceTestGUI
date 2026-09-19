@@ -14,6 +14,7 @@
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -34,7 +35,6 @@
 #include "ActionParamsEditor.h"
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
-#include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 #include "StepEditorDialog.h"
 #include "StopPanel.h"
@@ -99,14 +99,28 @@ void MainWindow::buildUi()
     setCentralWidget(central);
     auto *rootLayout = new QVBoxLayout(central);
 
-    auto *splitter = new QSplitter(Qt::Horizontal, central);
-    splitter->addWidget(buildTargetColumn(splitter));
-    splitter->addWidget(buildStepsColumn(splitter));
-    splitter->addWidget(buildActionParamsColumn(splitter));
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 1);
-    splitter->setStretchFactor(2, 2);
-    rootLayout->addWidget(splitter, 1);
+    // SPEC.md 6.9: 3 vertically-stacked rows -- ①対象選択 on top (full
+    // width), ②ステップ構成/③操作パラメータ split horizontally in the
+    // middle row, and execution controls + ログ on the bottom row. Nesting
+    // a horizontal QSplitter inside a vertical one lets the user drag to
+    // resize every one of these (row boundaries and the ②/③ divide alike).
+    auto *outerSplitter = new QSplitter(Qt::Vertical, central);
+
+    outerSplitter->addWidget(buildTargetColumn(outerSplitter));
+
+    auto *middleSplitter = new QSplitter(Qt::Horizontal, outerSplitter);
+    middleSplitter->addWidget(buildStepsColumn(middleSplitter));
+    middleSplitter->addWidget(buildActionParamsColumn(middleSplitter));
+    middleSplitter->setStretchFactor(0, 1);
+    middleSplitter->setStretchFactor(1, 2);
+    outerSplitter->addWidget(middleSplitter);
+
+    // Execution controls and ログ don't belong to any one of ①②③ -- they're
+    // cross-cutting (control/monitor the run as a whole), so they share the
+    // bottom row rather than living inside one of the three sections.
+    auto *bottomWidget = new QWidget(outerSplitter);
+    auto *bottomLayout = new QVBoxLayout(bottomWidget);
+    bottomLayout->setContentsMargins(0, 0, 0, 0);
 
     // --- Controls ---
     // Split across two rows (buttons+status, then the run-progress labels)
@@ -124,7 +138,7 @@ void MainWindow::buildUi()
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_statusLabel);
     controlsRow->addStretch();
-    rootLayout->addLayout(controlsRow);
+    bottomLayout->addLayout(controlsRow);
 
     auto *progressRow = new QHBoxLayout;
     m_resourceUsageLabel = new QLabel(QString(), central);
@@ -134,7 +148,7 @@ void MainWindow::buildUi()
     progressRow->addStretch();
     progressRow->addWidget(m_elapsedLabel);
     progressRow->addWidget(m_iterationLabel);
-    rootLayout->addLayout(progressRow);
+    bottomLayout->addLayout(progressRow);
 
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
@@ -157,7 +171,17 @@ void MainWindow::buildUi()
     connect(clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLog);
     connect(saveLogButton, &QPushButton::clicked, this, &MainWindow::onSaveLog);
 
-    rootLayout->addWidget(logGroup);
+    bottomLayout->addWidget(logGroup, 1);
+    outerSplitter->addWidget(bottomWidget);
+
+    // ①対象選択 row stays compact by default; ②/③ gets the most vertical
+    // space; the controls+ログ row gets a modest share. All are still
+    // freely draggable by the user afterward.
+    outerSplitter->setStretchFactor(0, 0);
+    outerSplitter->setStretchFactor(1, 3);
+    outerSplitter->setStretchFactor(2, 1);
+
+    rootLayout->addWidget(outerSplitter, 1);
 
     refreshNamedRegionList();
     refreshStepList();
@@ -263,8 +287,6 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onEditSelectedNamedRegion);
     connect(m_removeNamedRegionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedNamedRegion);
-    connect(m_namedRegionListWidget, &QListWidget::currentRowChanged, this,
-            &MainWindow::onNamedRegionSelectionChanged);
 
     layout->addWidget(m_namedRegionGroup);
 
@@ -387,9 +409,11 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
 
     auto *stepButtonsRow = new QHBoxLayout;
     m_addStepButton = new QPushButton(QStringLiteral("追加..."), m_stepsGroup);
+    m_addWaitStepButton = new QPushButton(QStringLiteral("待機を追加..."), m_stepsGroup);
     m_editStepButton = new QPushButton(QStringLiteral("編集..."), m_stepsGroup);
     m_removeStepButton = new QPushButton(QStringLiteral("削除"), m_stepsGroup);
     stepButtonsRow->addWidget(m_addStepButton);
+    stepButtonsRow->addWidget(m_addWaitStepButton);
     stepButtonsRow->addWidget(m_editStepButton);
     stepButtonsRow->addWidget(m_removeStepButton);
     stepsLayout->addLayout(stepButtonsRow);
@@ -406,6 +430,7 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
             &MainWindow::onStepSelectionChanged);
     connect(m_addStepButton, &QPushButton::clicked, this, &MainWindow::onAddStep);
+    connect(m_addWaitStepButton, &QPushButton::clicked, this, &MainWindow::onAddWaitStep);
     connect(m_editStepButton, &QPushButton::clicked, this, &MainWindow::onEditSelectedStep);
     connect(m_removeStepButton, &QPushButton::clicked, this, &MainWindow::onRemoveSelectedStep);
     connect(m_moveStepUpButton, &QPushButton::clicked, this, &MainWindow::onMoveStepUp);
@@ -513,6 +538,15 @@ void MainWindow::refreshPermissionLabel()
 
 QString MainWindow::describeStep(const RegionStep &step, int index) const
 {
+    if (step.isWaitStep) {
+        const QString runningPrefix =
+            index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
+        return QStringLiteral("%1ステップ%2: 待機（%3 ms）")
+            .arg(runningPrefix)
+            .arg(index + 1)
+            .arg(step.waitDurationMs);
+    }
+
     QStringList actions;
     if (step.enableClick)
         actions << QStringLiteral("クリック");
@@ -574,37 +608,6 @@ void MainWindow::refreshNamedRegionList()
         m_namedRegionListWidget->addItem(describeNamedRegion(region));
 }
 
-void MainWindow::updateRegionHighlight()
-{
-    const int row = m_namedRegionListWidget->currentRow();
-    if (row < 0 || row >= m_namedRegions.size()) {
-        if (m_regionHighlightOverlay)
-            m_regionHighlightOverlay->hide();
-        return;
-    }
-    if (!m_regionHighlightOverlay)
-        m_regionHighlightOverlay = new RegionHighlightOverlay();
-    const NamedRegion &region = m_namedRegions[row];
-    m_regionHighlightOverlay->showRegion(region.name, region.regions, region.excludeRegions);
-
-    // Diagnostic: log the exact rectangles being highlighted (absolute
-    // screen coordinates, as stored) so a mismatch between "where this says
-    // the region is" and "where the on-screen highlight actually appears"
-    // can be pinned down precisely if the highlight still looks off
-    // (SPEC.md 8章の既知の制約).
-    QStringList rectDescs;
-    for (const QRect &r : region.regions)
-        rectDescs << QStringLiteral("(%1,%2 %3x%4)").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
-    appendLog(QStringLiteral("操作領域「%1」をハイライト表示: %2")
-                  .arg(region.name)
-                  .arg(rectDescs.join(QStringLiteral(", "))));
-}
-
-void MainWindow::onNamedRegionSelectionChanged()
-{
-    updateRegionHighlight();
-}
-
 QStringList MainWindow::stepsReferencing(const QString &regionName) const
 {
     QStringList result;
@@ -638,30 +641,24 @@ QString MainWindow::generateDefaultRegionName() const
 
 void MainWindow::onAddNamedRegion()
 {
-    // Hide the highlight while the dialog's own drawing overlay
-    // (RegionSelectorOverlay) may be in use, to avoid the two overlapping.
-    if (m_regionHighlightOverlay)
-        m_regionHighlightOverlay->hide();
-
     NamedRegion initial;
     initial.name = generateDefaultRegionName();
+    // NamedRegionEditorDialog visualizes the region being built on screen
+    // itself for the duration it's open (SPEC.md 6.3) -- MainWindow no
+    // longer shows any on-screen highlight from the list selection.
     NamedRegionEditorDialog dialog(initial, this);
-    if (dialog.exec() != QDialog::Accepted) {
-        updateRegionHighlight();
+    if (dialog.exec() != QDialog::Accepted)
         return;
-    }
     const NamedRegion region = dialog.result();
     for (const NamedRegion &existing : m_namedRegions) {
         if (existing.name == region.name) {
             QMessageBox::warning(this, QStringLiteral("入力エラー"),
                                   QStringLiteral("同じ名前の操作領域が既に存在します。"));
-            updateRegionHighlight();
             return;
         }
     }
     m_namedRegions.append(region);
     refreshNamedRegionList();
-    // Select the newly added region so it's immediately visible on screen.
     m_namedRegionListWidget->setCurrentRow(m_namedRegions.size() - 1);
 }
 
@@ -672,21 +669,15 @@ void MainWindow::onEditSelectedNamedRegion()
         return;
     const QString oldName = m_namedRegions[row].name;
 
-    if (m_regionHighlightOverlay)
-        m_regionHighlightOverlay->hide();
-
     NamedRegionEditorDialog dialog(m_namedRegions[row], this);
-    if (dialog.exec() != QDialog::Accepted) {
-        updateRegionHighlight();
+    if (dialog.exec() != QDialog::Accepted)
         return;
-    }
     const NamedRegion region = dialog.result();
 
     for (int i = 0; i < m_namedRegions.size(); ++i) {
         if (i != row && m_namedRegions[i].name == region.name) {
             QMessageBox::warning(this, QStringLiteral("入力エラー"),
                                   QStringLiteral("同じ名前の操作領域が既に存在します。"));
-            updateRegionHighlight();
             return;
         }
     }
@@ -709,8 +700,7 @@ void MainWindow::onEditSelectedNamedRegion()
     }
     refreshNamedRegionList();
     // refreshNamedRegionList() clears and re-adds all items, dropping the
-    // selection -- restore it so the (possibly just-edited) rectangles are
-    // still shown on screen.
+    // selection -- restore it so the just-edited region stays selected.
     m_namedRegionListWidget->setCurrentRow(row);
 }
 
@@ -764,6 +754,23 @@ void MainWindow::loadActionParamsEditorForSelection()
     const int row = m_stepListWidget->currentRow();
     if (row < 0 || row >= m_steps.size()) {
         m_actionParamsContextLabel->setText(QStringLiteral("デフォルト値を編集中（ステップ未選択）"));
+        m_stepUseDefaultParamsRadio->blockSignals(true);
+        m_stepUseDefaultParamsRadio->setChecked(true);
+        m_stepUseDefaultParamsRadio->blockSignals(false);
+        m_stepUseDefaultParamsRadio->setEnabled(false);
+        m_stepUseCustomParamsRadio->setEnabled(false);
+        m_actionParamsEditor->setParams(m_defaultActionParams);
+        m_stepKindGroup->setEnabled(false);
+        m_lastEditedStepRow = -1;
+        return;
+    }
+
+    if (m_steps[row].isWaitStep) {
+        // A wait step has no region/action-kind/ActionParams fields to
+        // edit here at all (see RegionStep::isWaitStep) -- disable both
+        // groups entirely rather than showing controls that don't apply.
+        m_actionParamsContextLabel->setText(
+            QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）").arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -864,11 +871,42 @@ void MainWindow::onAddStep()
     m_stepListWidget->setCurrentRow(m_steps.size() - 1);
 }
 
+void MainWindow::onAddWaitStep()
+{
+    bool ok = false;
+    const int ms = QInputDialog::getInt(this, QStringLiteral("待機ステップを追加"),
+                                         QStringLiteral("待機時間 (ms):"), 1000, 1, 600000, 100, &ok);
+    if (!ok)
+        return;
+
+    flushActionParamsEditor();
+    RegionStep step;
+    step.isWaitStep = true;
+    step.waitDurationMs = ms;
+    m_steps.append(step);
+    refreshStepList();
+    m_stepListWidget->setCurrentRow(m_steps.size() - 1);
+}
+
 void MainWindow::onEditSelectedStep()
 {
     const int row = m_stepListWidget->currentRow();
     if (row < 0 || row >= m_steps.size())
         return;
+
+    if (m_steps[row].isWaitStep) {
+        bool ok = false;
+        const int ms = QInputDialog::getInt(this, QStringLiteral("待機ステップを編集"),
+                                             QStringLiteral("待機時間 (ms):"),
+                                             m_steps[row].waitDurationMs, 1, 600000, 100, &ok);
+        if (!ok)
+            return;
+        m_steps[row].waitDurationMs = ms;
+        refreshStepList();
+        m_stepListWidget->setCurrentRow(row);
+        return;
+    }
+
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -957,6 +995,8 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 
     for (int i = 0; i < m_steps.size(); ++i) {
         const RegionStep &step = m_steps[i];
+        if (step.isWaitStep)
+            continue;  // no region/action-kind/ActionParams fields to validate
         if (!step.hasAnyActionEnabled()) {
             errorMessage = QStringLiteral(
                 "ステップ%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
@@ -1020,7 +1060,10 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_namedRegionGroup->setEnabled(enabled);
     m_stepsGroup->setEnabled(enabled);
     m_actionParamsGroup->setEnabled(enabled);
-    m_stepKindGroup->setEnabled(enabled && m_stepListWidget->currentRow() >= 0);
+    const int selectedStepRow = m_stepListWidget->currentRow();
+    const bool kindGroupApplicable =
+        selectedStepRow >= 0 && selectedStepRow < m_steps.size() && !m_steps[selectedStepRow].isWaitStep;
+    m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_timingGroup->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
@@ -1028,9 +1071,6 @@ void MainWindow::setControlsEnabled(bool enabled)
     if (enabled) {
         m_pauseResumeButton->setText(QStringLiteral("‖ 一時停止"));
         m_resourceUsageLabel->clear();
-        updateRegionHighlight();
-    } else if (m_regionHighlightOverlay) {
-        m_regionHighlightOverlay->hide();
     }
 }
 

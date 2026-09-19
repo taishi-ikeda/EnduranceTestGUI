@@ -124,7 +124,9 @@ private:
     QPushButton *m_removeNamedRegionButton = nullptr;
     QList<NamedRegion> m_namedRegions;
     // Non-interactive on-screen highlight for whichever region is selected
-    // above; created lazily, owned/destroyed as a child of MainWindow.
+    // above; created lazily. Deliberately has no Qt parent (see
+    // MainWindow::updateRegionHighlight) so it stays a top-level window in
+    // absolute screen coordinates; lives until process exit.
     RegionHighlightOverlay *m_regionHighlightOverlay = nullptr;
 
     // Steps

@@ -168,6 +168,7 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(contextMenuModeRow);
     connect(m_contextMenuByNameRadio, &QRadioButton::toggled, this,
             &ActionParamsEditor::onContextMenuModeChanged);
+    connect(m_contextMenuCheck, &QCheckBox::toggled, this, &ActionParamsEditor::onContextMenuModeChanged);
 
     auto *contextMenuNameLabel = new QLabel(
         QStringLiteral("候補項目名（開いたメニューにあるものの中からランダムに1つ選択。無ければメニューを閉じる):"),
@@ -377,13 +378,19 @@ void ActionParamsEditor::refreshContextMenuIndexList()
 
 void ActionParamsEditor::onContextMenuModeChanged()
 {
+    // Both the by-name/by-index choice itself and whichever candidate list
+    // goes with it are meaningless while the master checkbox is off, so
+    // gate everything on it too (not just on which radio is selected).
+    const bool enabled = m_contextMenuCheck->isChecked();
     const bool byName = m_contextMenuByNameRadio->isChecked();
-    m_contextMenuListWidget->setEnabled(byName);
-    m_newContextMenuItemEdit->setEnabled(byName);
-    m_addContextMenuItemButton->setEnabled(byName);
-    m_removeContextMenuItemButton->setEnabled(byName);
-    m_contextMenuIndexListWidget->setEnabled(!byName);
-    m_newContextMenuIndexSpin->setEnabled(!byName);
-    m_addContextMenuIndexButton->setEnabled(!byName);
-    m_removeContextMenuIndexButton->setEnabled(!byName);
+    m_contextMenuByNameRadio->setEnabled(enabled);
+    m_contextMenuByIndexRadio->setEnabled(enabled);
+    m_contextMenuListWidget->setEnabled(enabled && byName);
+    m_newContextMenuItemEdit->setEnabled(enabled && byName);
+    m_addContextMenuItemButton->setEnabled(enabled && byName);
+    m_removeContextMenuItemButton->setEnabled(enabled && byName);
+    m_contextMenuIndexListWidget->setEnabled(enabled && !byName);
+    m_newContextMenuIndexSpin->setEnabled(enabled && !byName);
+    m_addContextMenuIndexButton->setEnabled(enabled && !byName);
+    m_removeContextMenuIndexButton->setEnabled(enabled && !byName);
 }

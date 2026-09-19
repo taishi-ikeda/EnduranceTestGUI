@@ -88,6 +88,9 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
         if (m_highlightOverlay)
             m_highlightOverlay->hide();
     });
+    // Keep the on-screen highlight's name label in sync while typing, not
+    // just after a rectangle add/remove.
+    connect(m_nameEdit, &QLineEdit::textChanged, this, &NamedRegionEditorDialog::updateHighlight);
 
     refreshRegionList();
     refreshExcludeList();

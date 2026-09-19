@@ -785,7 +785,16 @@ void MainWindow::loadActionParamsEditorForSelection()
         return;
     }
 
-    const RegionStep &step = m_steps[row];
+    // A *copy*, not a reference into m_steps[row]: ActionKindEditor::changed()
+    // (fired by setKinds() below as it programmatically sets each widget) is
+    // connected to flushActionParamsEditor(), which writes straight back
+    // into m_steps[m_lastEditedStepRow] -- already equal to row by the time
+    // setKinds() runs. If `step` aliased that same array slot, a reentrant
+    // flush partway through setKinds() would overwrite fields setKinds()
+    // hasn't read yet, and setKinds() would then read back its own
+    // just-corrupted data for the remaining fields. A value copy is immune
+    // to that.
+    const RegionStep step = m_steps[row];
     m_actionParamsContextLabel->setText(QStringLiteral("ステップ %1 の操作種別・詳細設定を編集中").arg(row + 1));
     m_stepUseDefaultParamsRadio->setEnabled(true);
     m_stepUseCustomParamsRadio->setEnabled(true);
@@ -1067,6 +1076,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     const bool kindGroupApplicable =
         selectedStepRow >= 0 && selectedStepRow < m_steps.size() && !m_steps[selectedStepRow].isWaitStep;
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
+    m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);

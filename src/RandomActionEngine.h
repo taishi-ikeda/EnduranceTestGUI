@@ -74,6 +74,14 @@ private:
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
     ActionKind pickWeightedActionKind(const RegionStep &step);
+    // Called right after a right-button mouse action (Click or Drag) that
+    // may have opened a native context/popup menu: resolves it (selects a
+    // configured item, or dismisses it with Escape) so it can never be
+    // left open for subsequent random actions to land on. Appends a " →
+    // ..." description of the selection (if any) to `desc`. Returns true
+    // if it called doStop() (target lost focus mid-check) -- the caller
+    // must return immediately without dispatching/logging anything further.
+    bool handlePossibleContextMenu(const ActionParams &params, QString &desc);
     void scheduleNext();
     void doStop(const QString &reason, bool isAnomaly = false);
     void advanceToNextStep();

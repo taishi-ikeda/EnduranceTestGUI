@@ -64,6 +64,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_engine, &RandomActionEngine::pausedChanged, this, &MainWindow::onEnginePausedChanged);
     connect(m_engine, &RandomActionEngine::resourceUsageUpdated, this,
             &MainWindow::onResourceUsageUpdated);
+    connect(m_engine, &RandomActionEngine::currentStepChanged, this,
+            &MainWindow::onCurrentStepChanged);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -104,6 +106,9 @@ void MainWindow::buildUi()
     rootLayout->addWidget(splitter, 1);
 
     // --- Controls ---
+    // Split across two rows (buttons+status, then the run-progress labels)
+    // rather than one long row, so both stay usable when the window is
+    // narrow (SPEC.md 6.9).
     auto *controlsRow = new QHBoxLayout;
     m_startButton = new QPushButton(QStringLiteral("▶ 開始"), central);
     m_stopButton = new QPushButton(QStringLiteral("■ 停止"), central);
@@ -111,18 +116,22 @@ void MainWindow::buildUi()
     m_pauseResumeButton = new QPushButton(QStringLiteral("‖ 一時停止"), central);
     m_pauseResumeButton->setEnabled(false);
     m_statusLabel = new QLabel(QStringLiteral("待機中"), central);
-    m_elapsedLabel = new QLabel(QStringLiteral("経過: 0秒"), central);
-    m_iterationLabel = new QLabel(QStringLiteral("実行回数: 0"), central);
-    m_resourceUsageLabel = new QLabel(QString(), central);
     controlsRow->addWidget(m_startButton);
     controlsRow->addWidget(m_stopButton);
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_statusLabel);
     controlsRow->addStretch();
-    controlsRow->addWidget(m_resourceUsageLabel);
-    controlsRow->addWidget(m_elapsedLabel);
-    controlsRow->addWidget(m_iterationLabel);
     rootLayout->addLayout(controlsRow);
+
+    auto *progressRow = new QHBoxLayout;
+    m_resourceUsageLabel = new QLabel(QString(), central);
+    m_elapsedLabel = new QLabel(QStringLiteral("経過: 0秒"), central);
+    m_iterationLabel = new QLabel(QStringLiteral("実行回数: 0"), central);
+    progressRow->addWidget(m_resourceUsageLabel);
+    progressRow->addStretch();
+    progressRow->addWidget(m_elapsedLabel);
+    progressRow->addWidget(m_iterationLabel);
+    rootLayout->addLayout(progressRow);
 
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
@@ -216,12 +225,13 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     targetRow->addWidget(m_refreshButton);
     targetLayout->addLayout(targetRow);
 
-    auto *permRow = new QHBoxLayout;
+    // Label above, button below (not side-by-side) so the label has room
+    // to wrap instead of squeezing the button when this column is narrow.
     m_permissionLabel = new QLabel(m_targetGroup);
+    m_permissionLabel->setWordWrap(true);
+    targetLayout->addWidget(m_permissionLabel);
     m_openSettingsButton = new QPushButton(QStringLiteral("権限設定を開く"), m_targetGroup);
-    permRow->addWidget(m_permissionLabel, 1);
-    permRow->addWidget(m_openSettingsButton);
-    targetLayout->addLayout(permRow);
+    targetLayout->addWidget(m_openSettingsButton);
 
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
@@ -256,6 +266,10 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     // --- Timing group ---
     m_timingGroup = new QGroupBox(QStringLiteral("タイミング・制限"), container);
     auto *timingForm = new QFormLayout(m_timingGroup);
+    // Some of these row labels are long (e.g. "ステップ全体（シーケンス）の繰り返し回数
+    // （必須）:"); let Qt move the field below the label instead of shrinking it when this
+    // column is narrow (SPEC.md 6.9), rather than a fixed side-by-side layout.
+    timingForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
 
     auto *intervalRow = new QHBoxLayout;
     m_minIntervalSpin = new QSpinBox(m_timingGroup);
@@ -380,6 +394,11 @@ QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
     kindLayout->addWidget(m_stepKindEditor);
     m_stepKindGroup->setEnabled(false);
     scrollLayout->addWidget(m_stepKindGroup);
+    // Keep ②'s step label (action list, count, badge) in sync as the user
+    // edits, rather than only on the next selection change/add/remove
+    // (SPEC.md 6.2/6.4): flushActionParamsEditor() already re-writes the
+    // list item's text after applying the current widget values.
+    connect(m_stepKindEditor, &ActionKindEditor::changed, this, &MainWindow::flushActionParamsEditor);
 
     // --- ActionParams: shared defaults, or a per-step override toggled as
     // a whole (unchanged from before -- SPEC.md 6.4/6.9).
@@ -465,8 +484,11 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
                                            : QStringLiteral("操作領域「%1」").arg(step.regionName));
     const QString paramsBadge =
         step.useDefaultActionParams ? QString() : QStringLiteral(" | [カスタム設定]");
+    const QString runningPrefix =
+        index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
 
-    return QStringLiteral("ステップ%1: %2 | 操作: %3 | 回数: %4%5")
+    return QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6")
+        .arg(runningPrefix)
         .arg(index + 1)
         .arg(regionDesc)
         .arg(actions.isEmpty() ? QStringLiteral("(なし)") : actions.join(QStringLiteral(", ")))
@@ -506,9 +528,27 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
     return result;
 }
 
+QString MainWindow::generateDefaultRegionName() const
+{
+    for (int n = 1;; ++n) {
+        const QString candidate = QStringLiteral("領域%1").arg(n);
+        bool used = false;
+        for (const NamedRegion &existing : m_namedRegions) {
+            if (existing.name == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used)
+            return candidate;
+    }
+}
+
 void MainWindow::onAddNamedRegion()
 {
-    NamedRegionEditorDialog dialog(NamedRegion(), this);
+    NamedRegion initial;
+    initial.name = generateDefaultRegionName();
+    NamedRegionEditorDialog dialog(initial, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -963,6 +1003,12 @@ void MainWindow::onEngineFinished(const QString &reason)
         m_stopPanel->close();
         m_stopPanel->deleteLater();
     }
+
+    if (m_currentRunningStepIndex >= 0 && m_currentRunningStepIndex < m_steps.size()) {
+        if (auto *item = m_stepListWidget->item(m_currentRunningStepIndex))
+            item->setText(describeStep(m_steps[m_currentRunningStepIndex], m_currentRunningStepIndex));
+    }
+    m_currentRunningStepIndex = -1;
 }
 
 void MainWindow::onActionLog(const QString &message)
@@ -981,6 +1027,28 @@ void MainWindow::onIterationCountChanged(qint64 count)
     m_iterationLabel->setText(QStringLiteral("実行回数: %1").arg(count));
     if (m_stopPanel)
         m_stopPanel->setIterationCount(count);
+}
+
+void MainWindow::onCurrentStepChanged(int index)
+{
+    if (index == m_currentRunningStepIndex)
+        return;
+    // Update just the two affected rows' text in place (not a full
+    // refreshStepList(), which would clear/restore the list's current
+    // selection and needlessly re-trigger onStepSelectionChanged while a
+    // run is in progress).
+    const int previous = m_currentRunningStepIndex;
+    m_currentRunningStepIndex = index;
+    if (previous >= 0 && previous < m_steps.size()) {
+        if (auto *item = m_stepListWidget->item(previous))
+            item->setText(describeStep(m_steps[previous], previous));
+    }
+    if (index >= 0 && index < m_steps.size()) {
+        if (auto *item = m_stepListWidget->item(index)) {
+            item->setText(describeStep(m_steps[index], index));
+            m_stepListWidget->scrollToItem(item);
+        }
+    }
 }
 
 void MainWindow::updateElapsedLabel()

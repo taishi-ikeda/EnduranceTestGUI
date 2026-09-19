@@ -73,6 +73,8 @@ void RandomActionEngine::start(const TestConfig &config)
 
     emit logMessage(QStringLiteral("テストを開始しました（ステップ数: %1）").arg(m_config.steps.size()));
     emit iterationCountChanged(m_iterationCount);
+    if (!m_config.steps.isEmpty())
+        emit currentStepChanged(m_currentStepIndex);
     scheduleNext();
     m_resourceTimer.start();
 }
@@ -311,6 +313,7 @@ void RandomActionEngine::advanceToNextStep()
         emit logMessage(QStringLiteral("シーケンス %1 回目の実行を開始します").arg(m_sequenceLoopCount + 1));
     }
     emit logMessage(QStringLiteral("ステップ %1 へ移行します").arg(m_currentStepIndex + 1));
+    emit currentStepChanged(m_currentStepIndex);
 }
 
 void RandomActionEngine::performRandomAction()
@@ -416,14 +419,23 @@ void RandomActionEngine::performRandomAction()
                    .arg(pt.x())
                    .arg(pt.y());
 
-        if (btn == Qt::RightButton && params.enableContextMenuSelection) {
-            QThread::msleep(150);  // let the menu render before introspecting it
+        if (btn == Qt::RightButton) {
+            // A right click may have opened a native context/popup menu,
+            // regardless of whether enableContextMenuSelection is on --
+            // that setting only controls whether we try to pick an item
+            // out of it, not whether one can appear. Always resolve it
+            // (select an item, or dismiss it) before moving on: leaving an
+            // unhandled menu open makes every subsequent random action
+            // land on/interact with that menu instead of the app, which
+            // looks like the whole test "freezing" on a stuck menu.
+            QThread::msleep(150);  // let the menu render before introspecting/dismissing it
 
             // Re-check focus before touching the menu: the introspection
             // below has no way to confirm *whose* menu it found (it just
             // looks at whatever is topmost/visible), so if some other
             // window grabbed focus in the last 150ms, clicking into "the"
-            // menu could mean clicking into a different app entirely.
+            // menu (or even just sending Escape) could affect a different
+            // app entirely.
             if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
                 doStop(QStringLiteral(
                            "メニュー選択の直前に対象アプリがアクティブでなくなったため、安全のため"
@@ -432,41 +444,44 @@ void RandomActionEngine::performRandomAction()
                 return;
             }
 
-            const QStringList openItems =
-                PlatformAutomation::listOpenContextMenuItems(m_config.targetPid);
+            bool selected = false;
+            if (params.enableContextMenuSelection) {
+                const QStringList openItems =
+                    PlatformAutomation::listOpenContextMenuItems(m_config.targetPid);
 
-            if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName) {
-                QStringList matches;
-                for (const QString &name : openItems) {
-                    if (params.contextMenuItemNames.contains(name))
-                        matches.append(name);
-                }
-                if (!matches.isEmpty()) {
-                    const QString chosen = matches[int(m_rng.bounded(quint32(matches.size())))];
-                    if (PlatformAutomation::clickContextMenuItem(chosen, m_config.targetPid))
-                        desc += QStringLiteral(" → メニュー項目「%1」を選択").arg(chosen);
-                    else
-                        PlatformAutomation::dismissContextMenu();
-                } else {
-                    PlatformAutomation::dismissContextMenu();
-                }
-            } else {  // ByIndex
-                QList<int> validIndices;
-                for (int oneBased : params.contextMenuIndices) {
-                    const int zeroBased = oneBased - 1;
-                    if (zeroBased >= 0 && zeroBased < openItems.size())
-                        validIndices.append(zeroBased);
-                }
-                if (!validIndices.isEmpty()) {
-                    const int chosen = validIndices[int(m_rng.bounded(quint32(validIndices.size())))];
-                    if (PlatformAutomation::clickContextMenuItemAt(chosen, m_config.targetPid))
-                        desc += QStringLiteral(" → メニュー項目(上から%1番目)を選択").arg(chosen + 1);
-                    else
-                        PlatformAutomation::dismissContextMenu();
-                } else {
-                    PlatformAutomation::dismissContextMenu();
+                if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName) {
+                    QStringList matches;
+                    for (const QString &name : openItems) {
+                        if (params.contextMenuItemNames.contains(name))
+                            matches.append(name);
+                    }
+                    if (!matches.isEmpty()) {
+                        const QString chosen = matches[int(m_rng.bounded(quint32(matches.size())))];
+                        selected = PlatformAutomation::clickContextMenuItem(chosen, m_config.targetPid);
+                        if (selected)
+                            desc += QStringLiteral(" → メニュー項目「%1」を選択").arg(chosen);
+                    }
+                } else {  // ByIndex
+                    QList<int> validIndices;
+                    for (int oneBased : params.contextMenuIndices) {
+                        const int zeroBased = oneBased - 1;
+                        if (zeroBased >= 0 && zeroBased < openItems.size())
+                            validIndices.append(zeroBased);
+                    }
+                    if (!validIndices.isEmpty()) {
+                        const int chosen = validIndices[int(m_rng.bounded(quint32(validIndices.size())))];
+                        selected =
+                            PlatformAutomation::clickContextMenuItemAt(chosen, m_config.targetPid);
+                        if (selected)
+                            desc += QStringLiteral(" → メニュー項目(上から%1番目)を選択").arg(chosen + 1);
+                    }
                 }
             }
+            // No selectable item was found (or menu-item selection isn't
+            // enabled at all) -- immediately close whatever menu might be
+            // open so the next random action isn't swallowed by it.
+            if (!selected)
+                PlatformAutomation::dismissContextMenu();
         }
         break;
     }

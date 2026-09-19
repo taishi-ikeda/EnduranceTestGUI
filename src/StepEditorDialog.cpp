@@ -15,11 +15,13 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
 
     auto *layout = new QVBoxLayout(this);
 
-    layout->addWidget(
+    auto *introLabel =
         new QLabel(QStringLiteral("このステップで操作する領域を選択してください。\n"
                                     "操作の種類・重み・回数や詳細パラメータは、追加後に③操作パラメータ"
                                     "パネルでこのステップを選択して設定します。"),
-                    this));
+                    this);
+    introLabel->setWordWrap(true);
+    layout->addWidget(introLabel);
     m_wholeWindowRadio = new QRadioButton(QStringLiteral("対象GUIの全領域（自動追従）"), this);
     m_namedRegionRadio = new QRadioButton(QStringLiteral("登録済みの操作領域から選択:"), this);
     layout->addWidget(m_wholeWindowRadio);

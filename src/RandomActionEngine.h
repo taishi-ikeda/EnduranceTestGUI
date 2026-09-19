@@ -34,6 +34,11 @@ signals:
     void actionPerformed(const QString &description);
     void logMessage(const QString &message);
     void iterationCountChanged(qint64 count);
+    // Emitted when execution moves to a different step of TestConfig::steps
+    // (at start, and each time the engine advances past the last step in
+    // the sequence back to index 0) -- lets the UI show which step is
+    // currently running (SPEC.md 6.9).
+    void currentStepChanged(int index);
     void finished(const QString &reason);
     void pausedChanged(bool paused);
     // Emitted periodically (every few seconds) with the target process's

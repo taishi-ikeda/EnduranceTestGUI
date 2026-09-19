@@ -39,7 +39,9 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
     nameRow->addWidget(m_nameEdit, 1);
     layout->addLayout(nameRow);
 
-    layout->addWidget(new QLabel(QStringLiteral("領域を画面上で描画してください（複数可）:"), this));
+    auto *regionLabel = new QLabel(QStringLiteral("領域を画面上で描画してください（複数可）:"), this);
+    regionLabel->setWordWrap(true);
+    layout->addWidget(regionLabel);
     m_regionListWidget = new QListWidget(this);
     m_regionListWidget->setMaximumHeight(100);
     layout->addWidget(m_regionListWidget);
@@ -53,9 +55,11 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
     connect(m_removeRegionButton, &QPushButton::clicked, this,
             &NamedRegionEditorDialog::onRemoveSelectedRegion);
 
-    layout->addWidget(new QLabel(
+    auto *excludeLabel = new QLabel(
         QStringLiteral("この領域内でクリックしたくない除外(マスク)領域があれば指定してください（任意、複数可）:"),
-        this));
+        this);
+    excludeLabel->setWordWrap(true);
+    layout->addWidget(excludeLabel);
     m_excludeListWidget = new QListWidget(this);
     m_excludeListWidget->setMaximumHeight(100);
     layout->addWidget(m_excludeListWidget);

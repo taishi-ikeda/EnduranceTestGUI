@@ -93,7 +93,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(shortcutRow);
 
     auto *windowOpRow = new QHBoxLayout;
-    m_windowOpCheck = new QCheckBox(QStringLiteral("ウィンドウ操作（移動/リサイズ/最小化/最大化）"), this);
+    m_windowOpCheck = new QCheckBox(QStringLiteral("ウィンドウ操作\n（移動/リサイズ/最小化/最大化）"), this);
     windowOpRow->addWidget(m_windowOpCheck);
     windowOpRow->addStretch();
     m_windowOpWeightSpin = new QSpinBox(this);
@@ -108,6 +108,21 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     countRow->addWidget(m_actionCountSpin);
     countRow->addStretch();
     layout->addLayout(countRow);
+
+    const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
+                                        m_doubleClickCheck, m_dragCheck,        m_keyCheck,
+                                        m_scrollUpCheck,    m_scrollDownCheck,  m_scrollHorizontalCheck,
+                                        m_shortcutCheck,    m_windowOpCheck};
+    for (QCheckBox *check : checks)
+        connect(check, &QCheckBox::toggled, this, &ActionKindEditor::changed);
+
+    const QList<QSpinBox *> spins = {m_clickWeightSpin,       m_doubleClickWeightSpin,
+                                      m_dragWeightSpin,        m_keyWeightSpin,
+                                      m_scrollUpWeightSpin,    m_scrollDownWeightSpin,
+                                      m_scrollHorizontalWeightSpin, m_shortcutWeightSpin,
+                                      m_windowOpWeightSpin,    m_actionCountSpin};
+    for (QSpinBox *spin : spins)
+        connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ActionKindEditor::changed);
 }
 
 void ActionKindEditor::setKinds(const RegionStep &step)

@@ -70,6 +70,7 @@ private slots:
     void onEnginePausedChanged(bool paused);
     void onActionLog(const QString &message);
     void onIterationCountChanged(qint64 count);
+    void onCurrentStepChanged(int index);
     void onResourceUsageUpdated(double residentMemoryMB, double cpuPercent);
     void onClearLog();
     void onSaveLog();
@@ -88,6 +89,10 @@ private:
     void refreshStepList();
     void refreshNamedRegionList();
     QString describeNamedRegion(const NamedRegion &region) const;
+    // "領域1", "領域2", ... -- the first of these not already used by an
+    // existing named region, so a new region always starts with a usable
+    // name and the user isn't required to type one (SPEC.md 6.3).
+    QString generateDefaultRegionName() const;
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
     QStringList stepsReferencing(const QString &regionName) const;
@@ -121,6 +126,10 @@ private:
     QPushButton *m_moveStepDownButton = nullptr;
     QPushButton *m_clearStepsButton = nullptr;
     QList<RegionStep> m_steps;
+    // Index into m_steps currently being executed by m_engine, or -1 while
+    // not running; describeStep() marks this one so ②'s list shows
+    // progress during a run (SPEC.md 6.9).
+    int m_currentRunningStepIndex = -1;
 
     // Action parameters (master/detail: default, or selected step's custom)
     QLabel *m_actionParamsContextLabel = nullptr;

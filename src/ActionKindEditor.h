@@ -29,6 +29,15 @@ public:
     // ActionParams-source fields untouched.
     void applyKindsTo(RegionStep &step) const;
 
+signals:
+    // Emitted whenever any checkbox/spinbox changes, including during
+    // setKinds() as it programmatically updates widgets -- callers that
+    // write straight back into a step's fields on every emission still end
+    // up with the correct final values, since setKinds() always finishes
+    // by leaving every widget at its target value regardless of how many
+    // intermediate signals fired along the way.
+    void changed();
+
 private:
     QCheckBox *m_clickCheck = nullptr;
     QCheckBox *m_leftClickCheck = nullptr;

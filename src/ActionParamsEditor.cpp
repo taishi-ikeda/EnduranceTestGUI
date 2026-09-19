@@ -16,28 +16,34 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    auto *dragRow = new QHBoxLayout;
-    dragRow->addWidget(new QLabel(QStringLiteral("ドラッグ距離:")));
+    // Split across two rows (distance, then direction) rather than one long
+    // row, so both stay usable when this panel is narrow (SPEC.md 6.9).
+    auto *dragDistanceRow = new QHBoxLayout;
+    dragDistanceRow->addWidget(new QLabel(QStringLiteral("ドラッグ距離:")));
     m_dragMinSpin = new QSpinBox(this);
     m_dragMinSpin->setRange(1, 5000);
     m_dragMinSpin->setValue(20);
     m_dragMaxSpin = new QSpinBox(this);
     m_dragMaxSpin->setRange(1, 5000);
     m_dragMaxSpin->setValue(200);
-    dragRow->addWidget(m_dragMinSpin);
-    dragRow->addWidget(new QLabel(QStringLiteral("〜")));
-    dragRow->addWidget(m_dragMaxSpin);
-    dragRow->addWidget(new QLabel(QStringLiteral("px")));
-    dragRow->addWidget(new QLabel(QStringLiteral("方向:")));
+    dragDistanceRow->addWidget(m_dragMinSpin);
+    dragDistanceRow->addWidget(new QLabel(QStringLiteral("〜")));
+    dragDistanceRow->addWidget(m_dragMaxSpin);
+    dragDistanceRow->addWidget(new QLabel(QStringLiteral("px")));
+    dragDistanceRow->addStretch();
+    layout->addLayout(dragDistanceRow);
+
+    auto *dragDirectionRow = new QHBoxLayout;
+    dragDirectionRow->addWidget(new QLabel(QStringLiteral("ドラッグ方向:")));
     m_dragDirectionCombo = new QComboBox(this);
     m_dragDirectionCombo->addItem(QStringLiteral("ランダム"), int(DragDirectionMode::Random));
     m_dragDirectionCombo->addItem(QStringLiteral("上"), int(DragDirectionMode::Up));
     m_dragDirectionCombo->addItem(QStringLiteral("下"), int(DragDirectionMode::Down));
     m_dragDirectionCombo->addItem(QStringLiteral("左"), int(DragDirectionMode::Left));
     m_dragDirectionCombo->addItem(QStringLiteral("右"), int(DragDirectionMode::Right));
-    dragRow->addWidget(m_dragDirectionCombo);
-    dragRow->addStretch();
-    layout->addLayout(dragRow);
+    dragDirectionRow->addWidget(m_dragDirectionCombo);
+    dragDirectionRow->addStretch();
+    layout->addLayout(dragDirectionRow);
 
     auto *keyRow = new QHBoxLayout;
     keyRow->addWidget(new QLabel(QStringLiteral("キー入力の使用文字:")));
@@ -45,22 +51,29 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     keyRow->addWidget(m_allowedKeysEdit, 1);
     layout->addLayout(keyRow);
 
-    auto *namedKeyRow = new QHBoxLayout;
-    namedKeyRow->addWidget(new QLabel(QStringLiteral("名前付きキーも候補に含める:")));
+    // Label on its own line, checkboxes split across two rows of three, so
+    // this stays usable when the panel is narrow (SPEC.md 6.9).
+    auto *namedKeyLabel = new QLabel(QStringLiteral("名前付きキーも候補に含める:"), this);
+    namedKeyLabel->setWordWrap(true);
+    layout->addWidget(namedKeyLabel);
     m_keyTabCheck = new QCheckBox(QStringLiteral("Tab"), this);
     m_keyReturnCheck = new QCheckBox(QStringLiteral("Return"), this);
     m_keyEscapeCheck = new QCheckBox(QStringLiteral("Escape"), this);
     m_keyBackspaceCheck = new QCheckBox(QStringLiteral("Backspace"), this);
     m_keyDeleteCheck = new QCheckBox(QStringLiteral("Delete"), this);
     m_keyArrowsCheck = new QCheckBox(QStringLiteral("矢印キー"), this);
-    namedKeyRow->addWidget(m_keyTabCheck);
-    namedKeyRow->addWidget(m_keyReturnCheck);
-    namedKeyRow->addWidget(m_keyEscapeCheck);
-    namedKeyRow->addWidget(m_keyBackspaceCheck);
-    namedKeyRow->addWidget(m_keyDeleteCheck);
-    namedKeyRow->addWidget(m_keyArrowsCheck);
-    namedKeyRow->addStretch();
-    layout->addLayout(namedKeyRow);
+    auto *namedKeyRow1 = new QHBoxLayout;
+    namedKeyRow1->addWidget(m_keyTabCheck);
+    namedKeyRow1->addWidget(m_keyReturnCheck);
+    namedKeyRow1->addWidget(m_keyEscapeCheck);
+    namedKeyRow1->addStretch();
+    layout->addLayout(namedKeyRow1);
+    auto *namedKeyRow2 = new QHBoxLayout;
+    namedKeyRow2->addWidget(m_keyBackspaceCheck);
+    namedKeyRow2->addWidget(m_keyDeleteCheck);
+    namedKeyRow2->addWidget(m_keyArrowsCheck);
+    namedKeyRow2->addStretch();
+    layout->addLayout(namedKeyRow2);
 
     auto *scrollUpRow = new QHBoxLayout;
     scrollUpRow->addWidget(new QLabel(QStringLiteral("スクロール量(上):")));
@@ -104,9 +117,11 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     scrollHorizontalRow->addStretch();
     layout->addLayout(scrollHorizontalRow);
 
-    layout->addWidget(new QLabel(
+    auto *shortcutLabel = new QLabel(
         QStringLiteral("ショートカットキー一覧（例: Ctrl+C, Ctrl+Shift+Z — macOSではCtrlはCmdとして送信されます）:"),
-        this));
+        this);
+    shortcutLabel->setWordWrap(true);
+    layout->addWidget(shortcutLabel);
     m_shortcutListWidget = new QListWidget(this);
     m_shortcutListWidget->setMaximumHeight(80);
     layout->addWidget(m_shortcutListWidget);
@@ -123,8 +138,10 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     connect(m_removeShortcutButton, &QPushButton::clicked, this,
             &ActionParamsEditor::onRemoveSelectedShortcut);
 
+    // Label on its own line (rather than sharing a row with the
+    // checkboxes) so it isn't squeezed out when the panel is narrow.
+    layout->addWidget(new QLabel(QStringLiteral("ウィンドウ操作で許可する種類:"), this));
     auto *windowOpRow = new QHBoxLayout;
-    windowOpRow->addWidget(new QLabel(QStringLiteral("ウィンドウ操作で許可する種類:")));
     m_windowOpMoveCheck = new QCheckBox(QStringLiteral("移動"), this);
     m_windowOpResizeCheck = new QCheckBox(QStringLiteral("リサイズ"), this);
     m_windowOpMinimizeCheck = new QCheckBox(QStringLiteral("最小化"), this);
@@ -137,7 +154,7 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(windowOpRow);
 
     m_contextMenuCheck = new QCheckBox(
-        QStringLiteral("右クリック後にメニュー項目を選択する（実験的機能。macOS/Linuxのアクセシビリティ機能に依存）"),
+        QStringLiteral("右クリック後にメニュー項目を選択する\n（実験的機能。macOS/Linuxのアクセシビリティ機能に依存）"),
         this);
     layout->addWidget(m_contextMenuCheck);
 
@@ -152,9 +169,11 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     connect(m_contextMenuByNameRadio, &QRadioButton::toggled, this,
             &ActionParamsEditor::onContextMenuModeChanged);
 
-    layout->addWidget(new QLabel(
+    auto *contextMenuNameLabel = new QLabel(
         QStringLiteral("候補項目名（開いたメニューにあるものの中からランダムに1つ選択。無ければメニューを閉じる):"),
-        this));
+        this);
+    contextMenuNameLabel->setWordWrap(true);
+    layout->addWidget(contextMenuNameLabel);
     m_contextMenuListWidget = new QListWidget(this);
     m_contextMenuListWidget->setMaximumHeight(80);
     layout->addWidget(m_contextMenuListWidget);
@@ -168,12 +187,14 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     contextMenuRow->addWidget(m_removeContextMenuItemButton);
     layout->addLayout(contextMenuRow);
 
-    layout->addWidget(new QLabel(
+    auto *contextMenuIndexLabel = new QLabel(
         QStringLiteral(
             "候補の番号（上から何番目か、1始まり）。開いたメニューの項目数に収まるものの中からランダムに1つ選択。"
             "無ければメニューを閉じる。※メニューの項目数や並びが状況によって変わる場合、意図しない項目を"
             "選んでしまう可能性があるため注意（項目名指定の方が安全）:"),
-        this));
+        this);
+    contextMenuIndexLabel->setWordWrap(true);
+    layout->addWidget(contextMenuIndexLabel);
     m_contextMenuIndexListWidget = new QListWidget(this);
     m_contextMenuIndexListWidget->setMaximumHeight(80);
     layout->addWidget(m_contextMenuIndexListWidget);

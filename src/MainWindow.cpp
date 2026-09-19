@@ -582,20 +582,22 @@ void MainWindow::updateRegionHighlight()
             m_regionHighlightOverlay->hide();
         return;
     }
-    if (!m_regionHighlightOverlay) {
-        // No parent: this is a Qt::Tool top-level window positioned in
-        // absolute screen coordinates (setGeometry() to the virtual
-        // desktop rect, see RegionHighlightOverlay). Passing `this`
-        // (MainWindow) as parent here previously made Qt treat that
-        // geometry as relative to MainWindow's own on-screen position
-        // instead, offsetting every highlighted region by wherever
-        // MainWindow happened to be -- matching RegionSelectorOverlay's
-        // and StopPanel's existing (parent-less) pattern for the same kind
-        // of absolutely-positioned overlay avoids that.
+    if (!m_regionHighlightOverlay)
         m_regionHighlightOverlay = new RegionHighlightOverlay();
-    }
     const NamedRegion &region = m_namedRegions[row];
     m_regionHighlightOverlay->showRegion(region.name, region.regions, region.excludeRegions);
+
+    // Diagnostic: log the exact rectangles being highlighted (absolute
+    // screen coordinates, as stored) so a mismatch between "where this says
+    // the region is" and "where the on-screen highlight actually appears"
+    // can be pinned down precisely if the highlight still looks off
+    // (SPEC.md 8章の既知の制約).
+    QStringList rectDescs;
+    for (const QRect &r : region.regions)
+        rectDescs << QStringLiteral("(%1,%2 %3x%4)").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+    appendLog(QStringLiteral("操作領域「%1」をハイライト表示: %2")
+                  .arg(region.name)
+                  .arg(rectDescs.join(QStringLiteral(", "))));
 }
 
 void MainWindow::onNamedRegionSelectionChanged()

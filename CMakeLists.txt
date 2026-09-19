@@ -52,6 +52,7 @@ set(SOURCES
     src/MainWindow.cpp
     src/RandomActionEngine.cpp
     src/RegionSelectorOverlay.cpp
+    src/RegionHighlightOverlay.cpp
     src/StopPanel.cpp
     src/StepEditorDialog.cpp
     src/ActionParamsEditor.cpp
@@ -64,6 +65,7 @@ set(HEADERS
     src/MainWindow.h
     src/RandomActionEngine.h
     src/RegionSelectorOverlay.h
+    src/RegionHighlightOverlay.h
     src/StopPanel.h
     src/StepEditorDialog.h
     src/ActionParamsEditor.h

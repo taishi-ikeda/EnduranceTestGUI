@@ -39,14 +39,14 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
     nameRow->addWidget(m_nameEdit, 1);
     layout->addLayout(nameRow);
 
-    auto *regionLabel = new QLabel(QStringLiteral("領域を画面上で描画してください（複数可）:"), this);
+    auto *regionLabel = new QLabel(QStringLiteral("矩形を画面上で描画してください（複数可）:"), this);
     regionLabel->setWordWrap(true);
     layout->addWidget(regionLabel);
     m_regionListWidget = new QListWidget(this);
     m_regionListWidget->setMaximumHeight(100);
     layout->addWidget(m_regionListWidget);
     auto *regionButtonsRow = new QHBoxLayout;
-    m_drawButton = new QPushButton(QStringLiteral("領域を描画..."), this);
+    m_drawButton = new QPushButton(QStringLiteral("矩形を描画..."), this);
     m_removeRegionButton = new QPushButton(QStringLiteral("選択を削除"), this);
     regionButtonsRow->addWidget(m_drawButton);
     regionButtonsRow->addWidget(m_removeRegionButton);
@@ -56,7 +56,7 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
             &NamedRegionEditorDialog::onRemoveSelectedRegion);
 
     auto *excludeLabel = new QLabel(
-        QStringLiteral("この領域内でクリックしたくない除外(マスク)領域があれば指定してください（任意、複数可）:"),
+        QStringLiteral("この操作領域内でクリックしたくない除外(マスク)矩形があれば指定してください（任意、複数可）:"),
         this);
     excludeLabel->setWordWrap(true);
     layout->addWidget(excludeLabel);
@@ -64,7 +64,7 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
     m_excludeListWidget->setMaximumHeight(100);
     layout->addWidget(m_excludeListWidget);
     auto *excludeButtonsRow = new QHBoxLayout;
-    m_drawExcludeButton = new QPushButton(QStringLiteral("除外領域を描画..."), this);
+    m_drawExcludeButton = new QPushButton(QStringLiteral("除外矩形を描画..."), this);
     m_removeExcludeButton = new QPushButton(QStringLiteral("選択を削除"), this);
     excludeButtonsRow->addWidget(m_drawExcludeButton);
     excludeButtonsRow->addWidget(m_removeExcludeButton);
@@ -127,8 +127,13 @@ void NamedRegionEditorDialog::onRemoveSelectedExcludeRegion()
 void NamedRegionEditorDialog::refreshRegionList()
 {
     m_regionListWidget->clear();
+    // "矩形N" (rectangle N), not "領域N" -- this dialog's own "名前" field is
+    // the operation region's name (auto-suggested as "操作領域N" by
+    // MainWindow::generateDefaultRegionName), so reusing "領域N" for the
+    // individual rectangles drawn inside it read as if it were the same
+    // name and was confusing (SPEC.md 6.3).
     for (int i = 0; i < m_regions.size(); ++i)
-        m_regionListWidget->addItem(labeledRect(QStringLiteral("領域"), i, m_regions[i]));
+        m_regionListWidget->addItem(labeledRect(QStringLiteral("矩形"), i, m_regions[i]));
 }
 
 void NamedRegionEditorDialog::refreshExcludeList()

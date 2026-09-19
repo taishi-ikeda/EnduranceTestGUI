@@ -13,6 +13,8 @@ class QLabel;
 class QListWidget;
 class QCheckBox;
 class QSpinBox;
+class QDoubleSpinBox;
+class QStackedWidget;
 class QLineEdit;
 class QRadioButton;
 class QPlainTextEdit;
@@ -22,6 +24,7 @@ class QTimer;
 class StopPanel;
 class ActionParamsEditor;
 class ActionKindEditor;
+class RegionHighlightOverlay;
 
 // Main window, laid out (per SPEC.md 6.9) as three columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
@@ -52,6 +55,7 @@ private slots:
     void onAddNamedRegion();
     void onEditSelectedNamedRegion();
     void onRemoveSelectedNamedRegion();
+    void onNamedRegionSelectionChanged();
 
     void onAddStep();
     void onEditSelectedStep();
@@ -96,6 +100,9 @@ private:
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
     QStringList stepsReferencing(const QString &regionName) const;
+    // Shows/hides RegionHighlightOverlay to match whichever operation
+    // region is currently selected in m_namedRegionListWidget (SPEC.md 6.3).
+    void updateRegionHighlight();
     void flushActionParamsEditor();
     void loadActionParamsEditorForSelection();
     void setControlsEnabled(bool enabled);
@@ -116,6 +123,9 @@ private:
     QPushButton *m_editNamedRegionButton = nullptr;
     QPushButton *m_removeNamedRegionButton = nullptr;
     QList<NamedRegion> m_namedRegions;
+    // Non-interactive on-screen highlight for whichever region is selected
+    // above; created lazily, owned/destroyed as a child of MainWindow.
+    RegionHighlightOverlay *m_regionHighlightOverlay = nullptr;
 
     // Steps
     QListWidget *m_stepListWidget = nullptr;
@@ -157,8 +167,19 @@ private:
     RegionStep m_defaultActionKinds;
 
     // Timing & limits
+    // Operation interval can be specified either directly in ms, or as a
+    // rate (operations/sec, converted to an equivalent ms range when
+    // building TestConfig -- see MainWindow::buildConfigFromUi). Both
+    // widget sets stay populated at all times so switching modes back and
+    // forth doesn't lose either one's values; m_intervalStack shows
+    // whichever is currently selected.
+    QRadioButton *m_intervalModeMsRadio = nullptr;
+    QRadioButton *m_intervalModeRateRadio = nullptr;
+    QStackedWidget *m_intervalStack = nullptr;
     QSpinBox *m_minIntervalSpin = nullptr;
     QSpinBox *m_maxIntervalSpin = nullptr;
+    QDoubleSpinBox *m_minRateSpin = nullptr;
+    QDoubleSpinBox *m_maxRateSpin = nullptr;
     QSpinBox *m_maxIterationsSpin = nullptr;
     QSpinBox *m_maxDurationSecSpin = nullptr;
     QSpinBox *m_maxSequenceLoopsSpin = nullptr;

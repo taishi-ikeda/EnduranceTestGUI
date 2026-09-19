@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -25,6 +26,7 @@
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -32,6 +34,7 @@
 #include "ActionParamsEditor.h"
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
+#include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 #include "StepEditorDialog.h"
 #include "StopPanel.h"
@@ -260,6 +263,8 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onEditSelectedNamedRegion);
     connect(m_removeNamedRegionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedNamedRegion);
+    connect(m_namedRegionListWidget, &QListWidget::currentRowChanged, this,
+            &MainWindow::onNamedRegionSelectionChanged);
 
     layout->addWidget(m_namedRegionGroup);
 
@@ -271,18 +276,69 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     // column is narrow (SPEC.md 6.9), rather than a fixed side-by-side layout.
     timingForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
 
-    auto *intervalRow = new QHBoxLayout;
-    m_minIntervalSpin = new QSpinBox(m_timingGroup);
+    // Operation interval: either an ms range (direct) or a rate range
+    // (operations/sec, converted to an equivalent ms range in
+    // buildConfigFromUi) -- the mode radios switch which page of
+    // m_intervalStack is shown, but both pages keep their own values so
+    // switching back and forth doesn't lose anything (SPEC.md 6.6).
+    auto *intervalContainer = new QWidget(m_timingGroup);
+    auto *intervalContainerLayout = new QVBoxLayout(intervalContainer);
+    intervalContainerLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *intervalModeRow = new QHBoxLayout;
+    m_intervalModeMsRadio = new QRadioButton(QStringLiteral("ms指定"), intervalContainer);
+    m_intervalModeRateRadio = new QRadioButton(QStringLiteral("回数/秒指定"), intervalContainer);
+    m_intervalModeMsRadio->setChecked(true);
+    intervalModeRow->addWidget(m_intervalModeMsRadio);
+    intervalModeRow->addWidget(m_intervalModeRateRadio);
+    intervalModeRow->addStretch();
+    intervalContainerLayout->addLayout(intervalModeRow);
+
+    m_intervalStack = new QStackedWidget(intervalContainer);
+
+    auto *msPage = new QWidget(m_intervalStack);
+    auto *msPageLayout = new QHBoxLayout(msPage);
+    msPageLayout->setContentsMargins(0, 0, 0, 0);
+    m_minIntervalSpin = new QSpinBox(msPage);
     m_minIntervalSpin->setRange(10, 600000);
     m_minIntervalSpin->setValue(20);
-    m_maxIntervalSpin = new QSpinBox(m_timingGroup);
+    m_maxIntervalSpin = new QSpinBox(msPage);
     m_maxIntervalSpin->setRange(10, 600000);
     m_maxIntervalSpin->setValue(100);
-    intervalRow->addWidget(m_minIntervalSpin);
-    intervalRow->addWidget(new QLabel(QStringLiteral("〜")));
-    intervalRow->addWidget(m_maxIntervalSpin);
-    intervalRow->addWidget(new QLabel(QStringLiteral("ms")));
-    timingForm->addRow(QStringLiteral("操作間隔:"), intervalRow);
+    msPageLayout->addWidget(m_minIntervalSpin);
+    msPageLayout->addWidget(new QLabel(QStringLiteral("〜"), msPage));
+    msPageLayout->addWidget(m_maxIntervalSpin);
+    msPageLayout->addWidget(new QLabel(QStringLiteral("ms"), msPage));
+    msPageLayout->addStretch();
+    m_intervalStack->addWidget(msPage);
+
+    // Rate range is the reciprocal of the ms range, so the *min* rate
+    // (slowest pace) corresponds to the *max* ms interval and vice versa --
+    // matching the ms page's defaults (20ms〜100ms == 50〜10回/秒).
+    auto *ratePage = new QWidget(m_intervalStack);
+    auto *ratePageLayout = new QHBoxLayout(ratePage);
+    ratePageLayout->setContentsMargins(0, 0, 0, 0);
+    m_minRateSpin = new QDoubleSpinBox(ratePage);
+    m_minRateSpin->setRange(0.01, 100.0);
+    m_minRateSpin->setDecimals(2);
+    m_minRateSpin->setValue(10.0);
+    m_maxRateSpin = new QDoubleSpinBox(ratePage);
+    m_maxRateSpin->setRange(0.01, 100.0);
+    m_maxRateSpin->setDecimals(2);
+    m_maxRateSpin->setValue(50.0);
+    ratePageLayout->addWidget(m_minRateSpin);
+    ratePageLayout->addWidget(new QLabel(QStringLiteral("〜"), ratePage));
+    ratePageLayout->addWidget(m_maxRateSpin);
+    ratePageLayout->addWidget(new QLabel(QStringLiteral("回/秒"), ratePage));
+    ratePageLayout->addStretch();
+    m_intervalStack->addWidget(ratePage);
+
+    intervalContainerLayout->addWidget(m_intervalStack);
+    connect(m_intervalModeRateRadio, &QRadioButton::toggled, this, [this](bool checked) {
+        m_intervalStack->setCurrentIndex(checked ? 1 : 0);
+    });
+
+    timingForm->addRow(QStringLiteral("操作間隔:"), intervalContainer);
 
     m_maxIterationsSpin = new QSpinBox(m_timingGroup);
     m_maxIterationsSpin->setRange(1, 100000000);
@@ -505,7 +561,7 @@ void MainWindow::refreshStepList()
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
 {
-    return QStringLiteral("%1（領域%2個・除外%3個）")
+    return QStringLiteral("%1（矩形%2個・除外%3個）")
         .arg(region.name)
         .arg(region.regions.size())
         .arg(region.excludeRegions.size());
@@ -516,6 +572,25 @@ void MainWindow::refreshNamedRegionList()
     m_namedRegionListWidget->clear();
     for (const NamedRegion &region : m_namedRegions)
         m_namedRegionListWidget->addItem(describeNamedRegion(region));
+}
+
+void MainWindow::updateRegionHighlight()
+{
+    const int row = m_namedRegionListWidget->currentRow();
+    if (row < 0 || row >= m_namedRegions.size()) {
+        if (m_regionHighlightOverlay)
+            m_regionHighlightOverlay->hide();
+        return;
+    }
+    if (!m_regionHighlightOverlay)
+        m_regionHighlightOverlay = new RegionHighlightOverlay(this);
+    const NamedRegion &region = m_namedRegions[row];
+    m_regionHighlightOverlay->showRegion(region.name, region.regions, region.excludeRegions);
+}
+
+void MainWindow::onNamedRegionSelectionChanged()
+{
+    updateRegionHighlight();
 }
 
 QStringList MainWindow::stepsReferencing(const QString &regionName) const
@@ -531,7 +606,12 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
 QString MainWindow::generateDefaultRegionName() const
 {
     for (int n = 1;; ++n) {
-        const QString candidate = QStringLiteral("領域%1").arg(n);
+        // "操作領域N" (not just "領域N") so this doesn't read the same as
+        // the "領域N"/"除外N" labels NamedRegionEditorDialog gives the
+        // individual rectangles drawn inside one operation region -- those
+        // are a different, unrelated numbering scope and having both say
+        // "領域1" was confusing (SPEC.md 6.3).
+        const QString candidate = QStringLiteral("操作領域%1").arg(n);
         bool used = false;
         for (const NamedRegion &existing : m_namedRegions) {
             if (existing.name == candidate) {
@@ -546,21 +626,31 @@ QString MainWindow::generateDefaultRegionName() const
 
 void MainWindow::onAddNamedRegion()
 {
+    // Hide the highlight while the dialog's own drawing overlay
+    // (RegionSelectorOverlay) may be in use, to avoid the two overlapping.
+    if (m_regionHighlightOverlay)
+        m_regionHighlightOverlay->hide();
+
     NamedRegion initial;
     initial.name = generateDefaultRegionName();
     NamedRegionEditorDialog dialog(initial, this);
-    if (dialog.exec() != QDialog::Accepted)
+    if (dialog.exec() != QDialog::Accepted) {
+        updateRegionHighlight();
         return;
+    }
     const NamedRegion region = dialog.result();
     for (const NamedRegion &existing : m_namedRegions) {
         if (existing.name == region.name) {
             QMessageBox::warning(this, QStringLiteral("入力エラー"),
                                   QStringLiteral("同じ名前の操作領域が既に存在します。"));
+            updateRegionHighlight();
             return;
         }
     }
     m_namedRegions.append(region);
     refreshNamedRegionList();
+    // Select the newly added region so it's immediately visible on screen.
+    m_namedRegionListWidget->setCurrentRow(m_namedRegions.size() - 1);
 }
 
 void MainWindow::onEditSelectedNamedRegion()
@@ -570,15 +660,21 @@ void MainWindow::onEditSelectedNamedRegion()
         return;
     const QString oldName = m_namedRegions[row].name;
 
+    if (m_regionHighlightOverlay)
+        m_regionHighlightOverlay->hide();
+
     NamedRegionEditorDialog dialog(m_namedRegions[row], this);
-    if (dialog.exec() != QDialog::Accepted)
+    if (dialog.exec() != QDialog::Accepted) {
+        updateRegionHighlight();
         return;
+    }
     const NamedRegion region = dialog.result();
 
     for (int i = 0; i < m_namedRegions.size(); ++i) {
         if (i != row && m_namedRegions[i].name == region.name) {
             QMessageBox::warning(this, QStringLiteral("入力エラー"),
                                   QStringLiteral("同じ名前の操作領域が既に存在します。"));
+            updateRegionHighlight();
             return;
         }
     }
@@ -600,6 +696,10 @@ void MainWindow::onEditSelectedNamedRegion()
             m_stepListWidget->setCurrentRow(selectedStepRow);
     }
     refreshNamedRegionList();
+    // refreshNamedRegionList() clears and re-adds all items, dropping the
+    // selection -- restore it so the (possibly just-edited) rectangles are
+    // still shown on screen.
+    m_namedRegionListWidget->setCurrentRow(row);
 }
 
 void MainWindow::onRemoveSelectedNamedRegion()
@@ -882,8 +982,16 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
         }
     }
 
-    config.minIntervalMs = m_minIntervalSpin->value();
-    config.maxIntervalMs = m_maxIntervalSpin->value();
+    if (m_intervalModeRateRadio->isChecked()) {
+        // Rate (ops/sec) is the reciprocal of the interval (ms): the
+        // fastest rate (max回/秒) gives the shortest interval, and the
+        // slowest rate (min回/秒) gives the longest interval.
+        config.minIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_maxRateSpin->value())));
+        config.maxIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_minRateSpin->value())));
+    } else {
+        config.minIntervalMs = m_minIntervalSpin->value();
+        config.maxIntervalMs = m_maxIntervalSpin->value();
+    }
     config.maxIterations = m_maxIterationsSpin->value();
     config.maxDurationSec = m_maxDurationSecSpin->value();
     config.maxSequenceLoops = m_maxSequenceLoopsSpin->value();
@@ -908,6 +1016,9 @@ void MainWindow::setControlsEnabled(bool enabled)
     if (enabled) {
         m_pauseResumeButton->setText(QStringLiteral("‖ 一時停止"));
         m_resourceUsageLabel->clear();
+        updateRegionHighlight();
+    } else if (m_regionHighlightOverlay) {
+        m_regionHighlightOverlay->hide();
     }
 }
 

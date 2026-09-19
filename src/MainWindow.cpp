@@ -288,8 +288,6 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_removeNamedRegionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedNamedRegion);
 
-    layout->addWidget(m_namedRegionGroup);
-
     // --- Timing group ---
     m_timingGroup = new QGroupBox(QStringLiteral("タイミング・制限"), container);
     auto *timingForm = new QFormLayout(m_timingGroup);
@@ -388,7 +386,12 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_rngSeedSpin->setSpecialValueText(QStringLiteral("ランダム"));
     timingForm->addRow(QStringLiteral("乱数シード（クラッシュ再現用。開始時にログに記録される）:"), m_rngSeedSpin);
 
-    layout->addWidget(m_timingGroup);
+    // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
+    // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
+    auto *namedRegionAndTimingRow = new QHBoxLayout;
+    namedRegionAndTimingRow->addWidget(m_namedRegionGroup, 1);
+    namedRegionAndTimingRow->addWidget(m_timingGroup, 1);
+    layout->addLayout(namedRegionAndTimingRow);
     layout->addStretch();
 
     return wrapper;

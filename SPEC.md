@@ -38,11 +38,16 @@ EnduranceTestGUI/
 ├── LICENSE                     # EnduranceTestGUI自身のライセンス（MIT License、6.11節）
 ├── THIRD_PARTY_NOTICES.md      # 動的リンクしているサードパーティライブラリのライセンス一覧（6.11節）
 ├── LICENSES/                   # LGPLv3/GPLv3/LGPLv2.1/GPLv2の条文全文（参考同梱、6.11節）
-├── docs/
-│   ├── manual.html              # エンドユーザー向けHTML操作マニュアル・日本語版（実機スクリーンショット付き）
-│   ├── images/                  # manual.html（日本語版）用のスクリーンショット
-│   ├── manual_en.html           # 同・英語版（UIも英語表示に切り替えて撮影し直したスクリーンショット付き）
-│   └── images_en/                # manual_en.html用のスクリーンショット
+├── docs/                        # GitHub Pages公開用（Settings > Pages > Deploy from a
+│   │                            # branch > /docs を想定したディレクトリ構成。9節 v0.50参照）
+│   ├── index.html                # ランディングページ。ブラウザの言語設定に応じてja//en/へ自動リダイレクト
+│   ├── .nojekyll                  # GitHub PagesにJekyll処理をさせず静的ファイルとして配信させるための空マーカー
+│   ├── ja/
+│   │   ├── index.html            # エンドユーザー向けHTML操作マニュアル・日本語版（実機スクリーンショット付き）
+│   │   └── images/                # 同、スクリーンショット一式
+│   └── en/
+│       ├── index.html            # 同・英語版（UIも英語表示に切り替えて撮影し直したスクリーンショット付き）
+│       └── images/                # 同、スクリーンショット一式
 ├── src/
 │   ├── main.cpp
 │   ├── I18n.h/.cpp             # 日本語/英語のUI文字列切り替え（QSettingsで永続化、次回起動時に反映）
@@ -2096,6 +2101,26 @@ UI表示言語を日本語・英語から選べるようにした。
     「更新」でコンボボックスが新しいpidへ自動的に選び直されること、ステップ・操作領域・
     タイミング設定が保持されたまま「開始」だけで再実行できることを確認した。
     -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
+- v0.50: 先に追加したHTML操作マニュアル（`docs/manual.html`・`docs/manual_en.html`、
+  実機スクリーンショット付き）を、将来GitHub Pages（Settings > Pages > Deploy from
+  a branch > `/docs`）で公開することを見据えてディレクトリ構成を再編した（3節）。
+  - `git mv`で`docs/manual.html`→`docs/ja/index.html`、`docs/images/`→
+    `docs/ja/images/`、`docs/manual_en.html`→`docs/en/index.html`、
+    `docs/images_en/`→`docs/en/images/`へ移動し、履歴を保持した。両ファイル内の
+    相互リンク（言語切り替えバッジ）も新しい相対パス（`../ja/`・`../en/`）に
+    合わせて更新した。
+  - ルートに`docs/index.html`を新設。ブラウザの`navigator.language`を見て
+    `ja/`または`en/`へJavaScriptでリダイレクトするランディングページとし、
+    JavaScript無効時のフォールバック用に両言語へのリンクも直接表示する
+    `<noscript>`対応も入れた。
+  - Jekyll処理を無効化しhtmlをそのまま配信させるため、空の`docs/.nojekyll`を追加した。
+  - `file://`での直接閲覧はディレクトリの`index.html`を自動解決しない
+    （実サーバ・GitHub Pagesとは挙動が異なる）ため、検証は`docs/`直下で
+    `python3 -m http.server`を立てて行った。ルート`/`からのリダイレクトが
+    ブラウザ言語設定通りの言語へ飛ぶこと、`/ja/`・`/en/`それぞれがマニュアル本文と
+    画像（新しい相対パス）を正しく表示すること、言語切り替えバッジの相互リンクが
+    正しく動作することを、ヘッドレスChromiumのスクリーンショットで確認した。
+    アプリ本体のソースコードには変更なし（ドキュメント・ディレクトリ構成のみ）。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

@@ -1,2 +1,4 @@
-/build/
-/build_warn/
+build/
+*.o
+*.obj
+.DS_Store

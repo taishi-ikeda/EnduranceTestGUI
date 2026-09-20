@@ -376,6 +376,8 @@ const QHash<QString, QString> &translationTable()
                                       "保存しました: %1"), QStringLiteral("Saved the test settings at the time of the abnormal stop (should be reproducible with this RNG seed): %1")},
         {QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
                                     "①で対象ウィンドウを選び直してください）"), QStringLiteral("Loaded test settings: %1 (target app at save time: %2 -- please reselect the target window in ①)")},
+        {QStringLiteral("テスト設定を読み込みました: %1（対象アプリ「%2」を自動選択しました）"),
+         QStringLiteral("Loaded test settings: %1 (automatically selected target app \"%2\")")},
         {QStringLiteral("スクリーンショットの保存に失敗しました（macOSでは画面収録の権限が必要な場合があります）"), QStringLiteral("Failed to save the screenshot (macOS may require Screen Recording permission)")},
         {QStringLiteral("対象アプリのクラッシュレポート/コアダンプは見つかりませんでした"
                 "（このシステムでその機能自体が無効になっている可能性があります）"), QStringLiteral("No crash report/core dump was found for the target app (this system may have that feature disabled entirely)")},

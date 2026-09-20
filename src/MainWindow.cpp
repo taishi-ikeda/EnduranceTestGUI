@@ -663,6 +663,16 @@ QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
 
 void MainWindow::onRefreshTargets()
 {
+    // Remember which app is currently selected (if any) *before* clearing
+    // the combo below -- QComboBox::clear() forgets the selection outright,
+    // so without this, every refresh (crash/stop, regaining focus, the
+    // user's own "更新" click, ...) would silently reset ① back to nothing
+    // selected. Captured here rather than via a currentIndexChanged signal
+    // so it also picks up a selection the user made since the last refresh.
+    const int previousIdx = m_targetCombo->currentIndex();
+    if (previousIdx >= 0 && previousIdx < m_windows.size() && !m_windows[previousIdx].appName.isEmpty())
+        m_lastTargetAppName = m_windows[previousIdx].appName;
+
     m_targetCombo->clear();
     m_windows = PlatformAutomation::listWindows();
     for (const WindowInfo &w : m_windows) {
@@ -674,8 +684,23 @@ void MainWindow::onRefreshTargets()
     }
     if (m_targetCombo->count() == 0)
         m_targetCombo->addItem(I18n::t(QStringLiteral("(ウィンドウが見つかりません)")));
+    else
+        tryReselectLastTarget();
 
     refreshPermissionLabel();
+}
+
+bool MainWindow::tryReselectLastTarget()
+{
+    if (m_lastTargetAppName.isEmpty())
+        return false;
+    for (int i = 0; i < m_windows.size(); ++i) {
+        if (m_windows[i].appName == m_lastTargetAppName) {
+            m_targetCombo->setCurrentIndex(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 void MainWindow::refreshPermissionLabel()
@@ -1556,6 +1581,17 @@ void MainWindow::onEngineFinished(const QString &reason)
         m_stopPanel->deleteLater();
     }
 
+    // Re-list windows now rather than waiting for the user to click "更新"
+    // or alt-tab back (SPEC.md 6.1/6.7): most relevant right after a crash,
+    // where ①'s target entry is now stale/gone, so the user sees that
+    // immediately and, once they relaunch the target app, tryReselectLastTarget()
+    // (called by onRefreshTargets()) picks the new instance back up on the
+    // very next refresh without them having to hunt for it in the list --
+    // the steps/regions/timing config was never lost either way (it isn't
+    // tied to a pid), so this is what lets them get back to testing with
+    // the same setup with the least friction.
+    onRefreshTargets();
+
     if (m_currentRunningStepIndex >= 0 && m_currentRunningStepIndex < m_steps.size()) {
         if (auto *item = m_stepListWidget->item(m_currentRunningStepIndex))
             item->setText(describeStep(m_steps[m_currentRunningStepIndex], m_currentRunningStepIndex));
@@ -1911,9 +1947,25 @@ void MainWindow::onLoadPreset()
     loadActionParamsEditorForSelection();
 
     const QString hint = root["targetAppNameHint"].toString();
+    if (!hint.isEmpty()) {
+        // Reuse the same match-by-appName mechanism a crash recovery uses
+        // (tryReselectLastTarget(), see onEngineFinished()) so loading a
+        // preset auto-selects the right target in ① whenever a window for
+        // it is currently open, instead of always making the user pick it
+        // by hand even when it's obvious which one it is.
+        m_lastTargetAppName = hint;
+        onRefreshTargets();
+    }
+    const bool targetSelected =
+        !hint.isEmpty() && m_targetCombo->currentIndex() >= 0 &&
+        m_targetCombo->currentIndex() < m_windows.size() &&
+        m_windows[m_targetCombo->currentIndex()].appName == hint;
     appendLog(hint.isEmpty()
                   ? I18n::t(QStringLiteral("テスト設定を読み込みました: %1")).arg(path)
-                  : I18n::t(QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
+                  : targetSelected
+                        ? I18n::t(QStringLiteral("テスト設定を読み込みました: %1（対象アプリ「%2」を自動選択しました）"))
+                              .arg(path, hint)
+                        : I18n::t(QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
                                     "①で対象ウィンドウを選び直してください）"))
-                        .arg(path, hint));
+                              .arg(path, hint));
 }

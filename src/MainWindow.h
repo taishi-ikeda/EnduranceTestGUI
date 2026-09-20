@@ -152,12 +152,26 @@ private:
     // same way a manually-saved preset is.
     QJsonObject buildPresetJson() const;
 
+    // Tries to select, in the just-(re)populated m_targetCombo/m_windows, a
+    // window whose appName matches m_lastTargetAppName -- so that after a
+    // crash (or any other reason the target list gets rebuilt), the app
+    // keeps pointing at "the same app under test" once the user relaunches
+    // it, without them having to re-pick it from ① by hand (SPEC.md 6.1):
+    // the steps/regions/timing config never needed re-entering to begin
+    // with (they aren't tied to a pid), so this closes the one piece that
+    // did. Returns true if a match was found and selected.
+    bool tryReselectLastTarget();
+
     // Target
     QComboBox *m_targetCombo = nullptr;
     QPushButton *m_refreshButton = nullptr;
     QLabel *m_permissionLabel = nullptr;
     QPushButton *m_openSettingsButton = nullptr;
     QList<WindowInfo> m_windows;
+    // The appName of whichever window ① last had selected (updated on every
+    // onRefreshTargets() call, and set directly from a loaded preset's
+    // targetAppNameHint) -- see tryReselectLastTarget().
+    QString m_lastTargetAppName;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;

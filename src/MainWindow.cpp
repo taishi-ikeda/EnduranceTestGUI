@@ -1688,6 +1688,24 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
                 appendLog(I18n::t(QStringLiteral("異常停止時点の操作領域画像を保存しました: %1")).arg(shotPath));
         }
     }
+
+    // SPEC.md 6.7: pop up a dedicated notification the moment a target-app
+    // crash is detected, on top of the usual log/summary/anomaly-artifact
+    // handling above -- a developer watching the test may not be looking at
+    // the log pane when it happens, and summary.stopReason already names
+    // which step was running (RandomActionEngine::performRandomAction
+    // builds it right before calling doStop()), so this dialog answers both
+    // "did it crash?" and "at what step?" without digging through the log.
+    if (summary.targetCrashed) {
+        QMessageBox::critical(
+            this, I18n::t(QStringLiteral("対象アプリのクラッシュを検知しました")),
+            I18n::t(QStringLiteral("%1\n\n実行回数: %2\n乱数シード: %3\n\n"
+                                    "異常停止時の記録（設定・操作領域画像・ログ等）は自動保存されています。"
+                                    "詳細はログ欄を確認してください。"))
+                .arg(summary.stopReason)
+                .arg(summary.totalIterations)
+                .arg(summary.rngSeedUsed));
+    }
 }
 
 void MainWindow::onSaveSummary()

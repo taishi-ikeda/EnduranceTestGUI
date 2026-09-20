@@ -47,6 +47,14 @@ public:
         // test config as a JSON preset, the operation-region screenshot) so
         // everything from one incident groups together under one prefix.
         QString anomalyArtifactTimestamp;
+        // True only when this run stopped specifically because
+        // PlatformAutomation::isProcessRunning() found the target process
+        // gone (as opposed to the target window merely being lost, a
+        // safety-stop, or a hang) -- MainWindow uses this to pop up a
+        // dedicated crash-notification dialog (SPEC.md 6.7), separate from
+        // its usual anomaly-artifact auto-save which applies to every kind
+        // of anomaly.
+        bool targetCrashed = false;
     };
 
     // Where captureAnomalyArtifacts() saves anomaly screenshots/recording
@@ -208,7 +216,11 @@ private:
     // must return immediately without dispatching/logging anything further.
     bool handlePossibleContextMenu(const ActionParams &params, QString &desc);
     void scheduleNext();
-    void doStop(const QString &reason, bool isAnomaly = false);
+    // `targetCrashed` is a narrower flag than `isAnomaly`: true only for the
+    // specific "target process is gone" stop, so RunSummary::targetCrashed
+    // can drive MainWindow's crash dialog without it having to pattern-match
+    // the (possibly-translated, see I18n.h) `reason` text.
+    void doStop(const QString &reason, bool isAnomaly = false, bool targetCrashed = false);
     void advanceToNextStep();
     // Saves whatever anomaly diagnostics are available under a single
     // shared "yyyyMMdd_HHmmss" timestamp (SPEC.md 6.7/10): a full-screen

@@ -242,9 +242,16 @@ const QHash<QString, QString> &translationTable()
                         "dedicated tool such as coredumpctl, may be required). Only the path has been recorded.")},
         {QStringLiteral("対象アプリの応答確認に失敗しました（%1回連続）"),
          QStringLiteral("Failed to confirm the target app is responding (%1 times in a row)")},
+        {QStringLiteral("対象アプリのクラッシュを検知しました"), QStringLiteral("Target App Crash Detected")},
+        {QStringLiteral("%1\n\n実行回数: %2\n乱数シード: %3\n\n"
+                        "異常停止時の記録（設定・操作領域画像・ログ等）は自動保存されています。"
+                        "詳細はログ欄を確認してください。"),
+         QStringLiteral("%1\n\nActions run: %2\nRNG seed: %3\n\n"
+                        "The abnormal-stop records (settings, operation-region image, log, etc.) have been "
+                        "saved automatically. See the log for details.")},
         {QStringLiteral("対象アプリを常に最前面に保つ"), QStringLiteral("Always keep the target app in front")},
-        {QStringLiteral("対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました"),
-         QStringLiteral("Stopped because the target application's abnormal termination (crash) was detected")},
+        {QStringLiteral("%1の実行中に対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました"),
+         QStringLiteral("Detected the target application's abnormal termination (crash) while %1 was running, and stopped")},
         {QStringLiteral("対象ウィンドウが見つからないため停止しました"), QStringLiteral("Stopped because the target window could not be found")},
         {QStringLiteral("対象ウィンドウの移動に追従させる\n（保存時の対象ウィンドウ位置を基準に記録）"),
          QStringLiteral("Follow the target window if it moves\n(recorded relative to its position when saved)")},

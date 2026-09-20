@@ -223,7 +223,7 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
     return QString();
 }
 
-void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
+void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targetCrashed)
 {
     m_running = false;
     m_paused = false;
@@ -235,6 +235,7 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
     RunSummary summary;
     summary.stopReason = reason;
     summary.anomaly = isAnomaly;
+    summary.targetCrashed = targetCrashed;
     if (isAnomaly)
         summary.anomalyArtifactTimestamp = captureAnomalyArtifacts(reason);
     m_recordingFrames.clear();  // recording is per-run regardless of whether it just got saved above
@@ -847,8 +848,10 @@ void RandomActionEngine::performRandomAction()
         return;
     }
     if (!PlatformAutomation::isProcessRunning(m_config.targetPid)) {
-        doStop(I18n::t(QStringLiteral("対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました")),
-               /*isAnomaly=*/true);
+        const QString stepLabel = I18n::t(QStringLiteral("ステップ %1")).arg(m_currentStepIndex + 1);
+        doStop(I18n::t(QStringLiteral("%1の実行中に対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました"))
+                   .arg(stepLabel),
+               /*isAnomaly=*/true, /*targetCrashed=*/true);
         return;
     }
     if (handleUnexpectedWindows())

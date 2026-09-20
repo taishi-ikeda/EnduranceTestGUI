@@ -306,7 +306,28 @@ bool activateProcess(qint64 pid)
 
 bool isProcessRunning(qint64 pid)
 {
-    return kill((pid_t)pid, 0) == 0 || errno == EPERM;
+    if (kill((pid_t)pid, 0) != 0 && errno != EPERM)
+        return false;
+
+    // kill(pid, 0) alone can't distinguish a zombie (already dead, just not
+    // yet reaped by its own parent process) from a genuinely running
+    // process -- both return 0, since a zombie's pid is still a valid,
+    // allocated table entry. A crashed target can sit as a zombie for a
+    // little while (observed directly in testing: its own launching shell
+    // hadn't reaped it by the time of the very next check), which would
+    // otherwise delay crash detection past this check and into a less
+    // specific "window/region not found" stop instead (SPEC.md 6.7). Cross-
+    // check /proc/<pid>/stat's state field (same parsing approach as
+    // queryProcessStats() below) so a zombie is correctly reported as not
+    // running; 'Z' is the kernel's zombie state character.
+    QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString content = QString::fromUtf8(statFile.readAll());
+        const int closeParen = content.lastIndexOf(')');
+        if (closeParen >= 0 && content.mid(closeParen + 1).trimmed().startsWith(QLatin1Char('Z')))
+            return false;
+    }
+    return true;
 }
 
 ProcessStats queryProcessStats(qint64 pid)

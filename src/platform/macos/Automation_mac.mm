@@ -5,6 +5,7 @@
 #import <Carbon/Carbon.h>
 
 #include <libproc.h>
+#include <sys/proc.h>
 #include <sys/proc_info.h>
 
 #include <errno.h>
@@ -148,7 +149,27 @@ bool isProcessRunning(qint64 pid)
     // Signal 0 sends nothing but still validates that the pid exists and is
     // reachable; ESRCH means it is gone (crashed/quit), EPERM still means
     // it exists (just owned by another user).
-    return kill((pid_t)pid, 0) == 0 || errno == EPERM;
+    if (kill((pid_t)pid, 0) != 0 && errno != EPERM)
+        return false;
+
+    // kill(pid, 0) alone can't distinguish a zombie (already dead, just not
+    // yet reaped by its own parent process) from a genuinely running
+    // process -- both return 0, since a zombie's pid is still a valid,
+    // allocated table entry. A crashed target can sit as a zombie for a
+    // little while (confirmed directly on Linux, where the same underlying
+    // issue exists -- see Automation_linux.cpp's isProcessRunning), which
+    // would otherwise delay crash detection past this check and into a
+    // less specific "window/region not found" stop instead (SPEC.md 6.7).
+    // Cross-check the BSD process status via libproc; SZOMB means zombie.
+    // Not independently verified on real macOS hardware (see SPEC.md 8) --
+    // mirrors the already-used PROC_PIDTASKINFO pattern in
+    // queryProcessStats() below.
+    struct proc_bsdinfo info;
+    const int size = proc_pidinfo((pid_t)pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (size == sizeof(info) && info.pbi_status == SZOMB)
+        return false;
+
+    return true;
 }
 
 ProcessStats queryProcessStats(qint64 pid)

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnduranceTestGUI User Manual</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel-bg: #ffffff;
+    --text: #1c1f26;
+    --text-muted: #5b6270;
+    --border: #e1e4ea;
+    --accent: #3a63f0;
+    --accent-bg: #eef2ff;
+    --code-bg: #f0f1f4;
+    --warn-bg: #fff7e6;
+    --warn-border: #f0c36d;
+    --danger-bg: #fdecec;
+    --danger-border: #e58b8b;
+    --notice-bg: #eef4ff;
+    --notice-border: #9db8f5;
+    --shadow: 0 1px 3px rgba(20, 24, 34, 0.08), 0 1px 2px rgba(20, 24, 34, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181d;
+      --panel-bg: #1e2128;
+      --text: #e7e9ee;
+      --text-muted: #9aa1b0;
+      --border: #2d313b;
+      --accent: #7c9bff;
+      --accent-bg: #232a44;
+      --code-bg: #262a33;
+      --warn-bg: #332a12;
+      --warn-border: #7a5c1e;
+      --danger-bg: #3a2222;
+      --danger-border: #7a3a3a;
+      --notice-bg: #1d2436;
+      --notice-border: #3c4d80;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d;
+    --panel-bg: #1e2128;
+    --text: #e7e9ee;
+    --text-muted: #9aa1b0;
+    --border: #2d313b;
+    --accent: #7c9bff;
+    --accent-bg: #232a44;
+    --code-bg: #262a33;
+    --warn-bg: #332a12;
+    --warn-border: #7a5c1e;
+    --danger-bg: #3a2222;
+    --danger-border: #7a3a3a;
+    --notice-bg: #1d2436;
+    --notice-border: #3c4d80;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 16px 96px;
+  }
+  header.hero {
+    padding: 36px 28px;
+    background: linear-gradient(135deg, var(--accent-bg), var(--panel-bg));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-bottom: 28px;
+    box-shadow: var(--shadow);
+  }
+  header.hero h1 {
+    margin: 0 0 8px;
+    font-size: 1.9rem;
+    letter-spacing: -0.01em;
+  }
+  header.hero p.sub {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 1.02rem;
+  }
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .notice {
+    background: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 0 0 28px;
+    font-size: 0.95rem;
+  }
+  .notice strong { color: var(--accent); }
+  nav.toc {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 32px;
+    box-shadow: var(--shadow);
+  }
+  nav.toc h2 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.3em;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin-bottom: 4px; break-inside: avoid; }
+  nav.toc a { color: var(--text); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  section {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow);
+  }
+  section h2 {
+    margin: 0 0 14px;
+    font-size: 1.35rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    scroll-margin-top: 16px;
+  }
+  section h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.9rem;
+    flex: none;
+  }
+  section h3 {
+    margin: 22px 0 10px;
+    font-size: 1.08rem;
+    scroll-margin-top: 16px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 1.4em; }
+  li { margin-bottom: 6px; }
+  code, kbd {
+    background: var(--code-bg);
+    border-radius: 5px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  figure {
+    margin: 16px 0;
+  }
+  figure img {
+    width: 100%;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  figcaption {
+    margin-top: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .callout {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 14px 0;
+    font-size: 0.94rem;
+  }
+  .callout.tip { background: var(--accent-bg); border: 1px solid var(--accent); }
+  .callout.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+  .callout.danger { background: var(--danger-bg); border: 1px solid var(--danger-border); }
+  .callout .title { font-weight: 600; margin-bottom: 4px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); }
+  footer {
+    margin-top: 40px;
+    padding: 22px 26px;
+    border-radius: 14px;
+    background: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    font-size: 0.92rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  footer strong { color: var(--text); }
+  a { color: var(--accent); }
+  .kbd-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.8rem;
+    margin-right: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>EnduranceTestGUI User Manual</h1>
+    <p class="sub">An endurance-testing tool that keeps sending random clicks and other actions to a GUI application, to check whether problems (crashes, freezes, memory leaks, etc.) show up after running for a long time.</p>
+    <div class="badge-row">
+      <span class="badge">Supported OS: macOS / Linux</span>
+      <span class="badge">UI language: 日本語 / English</span>
+      <span class="badge">License: MIT (app itself)</span>
+    </div>
+    <div class="badge-row">
+      <span class="badge">📄 English (this page) | <a href="manual.html">日本語</a></span>
+    </div>
+  </header>
+
+  <div class="notice">
+    <strong>About this tool:</strong> Most of EnduranceTestGUI's source code was generated by Anthropic's AI assistant "<a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude</a>". Design decisions and verification were also carried out through a dialogue with Claude. Please direct bug reports and improvement suggestions to the developer.
+  </div>
+
+  <nav class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li><a href="#overview">What this tool does</a></li>
+      <li><a href="#requirements">Prerequisites &amp; required permissions</a></li>
+      <li><a href="#layout">Screen layout</a></li>
+      <li><a href="#target">① Selecting the target app</a></li>
+      <li><a href="#steps">② Creating steps</a></li>
+      <li><a href="#params">③ Configuring action parameters</a></li>
+      <li><a href="#timing">Timing / limits &amp; automatic anomaly recording</a></li>
+      <li><a href="#run">Starting and stopping a run</a></li>
+      <li><a href="#crash">Crash detection &amp; re-testing</a></li>
+      <li><a href="#preset">Saving &amp; loading test settings</a></li>
+      <li><a href="#lang">Switching the display language</a></li>
+      <li><a href="#faq">Troubleshooting</a></li>
+      <li><a href="#license">Licensing</a></li>
+    </ol>
+  </nav>
+
+  <section id="overview">
+    <h2><span class="num">1</span>What this tool does</h2>
+    <p>EnduranceTestGUI is an endurance-testing tool that keeps sending random clicks, drags, key input, scrolling, shortcuts, and window operations to a target GUI application, within "operation regions" you define beforehand. It automates the kind of check that's tedious to do by hand: "does anything break if a button is pressed hundreds or thousands of times?"</p>
+    <p>A particular focus is making it possible to trace back <strong>what caused a problem</strong> after it happens. When the target app crashes, the tool automatically saves:</p>
+    <ul>
+      <li>A dialog and log entry naming which step was running when it detected the crash</li>
+      <li>A screenshot of the screen at that moment, plus a recording of the last few seconds leading up to it</li>
+      <li>A full test-settings snapshot, including the RNG seed used, so the run can be reproduced</li>
+      <li>The location of the OS's own crash dump / diagnostic log, when available</li>
+    </ul>
+    <p>See <a href="#crash">Crash detection &amp; re-testing</a> for details.</p>
+  </section>
+
+  <section id="requirements">
+    <h2><span class="num">2</span>Prerequisites &amp; required permissions</h2>
+    <h3>macOS</h3>
+    <p>Grant EnduranceTestGUI access under System Settings → Privacy &amp; Security → Accessibility. If it isn't granted, a dialog prompting for permission appears when you try to start a run.</p>
+    <div class="callout warn">
+      <div class="title">Launching from a terminal</div>
+      Launching directly from a terminal app can cause the Accessibility permission check to be delegated to the terminal app itself instead of EnduranceTestGUI. Double-clicking <code>EnduranceTestGUI.app</code> directly in Finder is the reliable way to launch it.
+    </div>
+    <h3>Linux</h3>
+    <p>No special permission is needed for sending input itself (it works as long as it can reach the X server). Only the right-click context-menu item-selection feature requires the target app's toolkit to support AT-SPI accessibility. Wayland is not supported (X11, or an X11 app running under XWayland, only).</p>
+    <div class="callout tip">
+      <div class="title">Administrator (root) privileges are not required</div>
+      When both the target app and EnduranceTestGUI are launched under a normal user account, every feature has been confirmed to work correctly without root.
+    </div>
+  </section>
+
+  <section id="layout">
+    <h2><span class="num">3</span>Screen layout</h2>
+    <p>The window is divided into three vertical sections.</p>
+    <ul>
+      <li><strong>① Target Selection</strong> (top): choosing the app under test, registering operation regions, and timing/limits settings</li>
+      <li><strong>② Steps / ③ Action Parameters</strong> (middle, split left/right): the order and content of the actions to run</li>
+      <li><strong>Run controls / Log</strong> (bottom): start/stop buttons, run status, and the log</li>
+    </ul>
+    <figure>
+      <img src="images_en/01_overview.png" alt="EnduranceTestGUI's full main window, showing the three vertical sections: Target Selection at top, Steps/Action Parameters in the middle, and the Log at the bottom.">
+      <figcaption>Figure 1: The full main window (the ①②③ three-section layout)</figcaption>
+    </figure>
+  </section>
+
+  <section id="target">
+    <h2><span class="num">4</span>① Selecting the target app</h2>
+    <p>Choose the window you want to test from the "Target" dropdown. If it doesn't appear in the list, click "Update" to re-scan. Once selected, whether EnduranceTestGUI has permission to operate that app is shown in green (granted) or red (not granted); if not granted, "Open Permission Settings" opens the relevant OS settings screen.</p>
+    <div class="callout tip">
+      <div class="title">About operation regions</div>
+      The "Operation Regions" list lets you register named rectangular areas of the screen. Clicking "Add..." opens a semi-transparent overlay you can drag rectangles onto (multiple allowed; areas to exclude can be specified separately too). When creating a step, choosing one of these registered regions instead of "the entire target GUI area" limits random actions to just that part of the screen.
+    </div>
+  </section>
+
+  <section id="steps">
+    <h2><span class="num">5</span>② Creating steps</h2>
+    <p>A test is made up of one or more "steps" that run in order, repeating.</p>
+    <p><span class="step-num">1</span>Clicking "Add..." opens a small dialog for choosing which region this step will operate on. Choose either "Entire target GUI area (auto-follows)" or one of the named operation regions registered in ①, then click "OK".</p>
+    <figure>
+      <img src="images_en/02_step_region_dialog.png" alt="The step-region selection dialog, offering a choice between 'Entire target GUI area (auto-follows)' and a registered operation region.">
+      <figcaption>Figure 2: The operation-region selection dialog shown when adding a step</figcaption>
+    </figure>
+    <p><span class="step-num">2</span>The step is added to the list and automatically selected. Its action types aren't decided yet at this point — that's configured next, in "③ Action Parameters".</p>
+    <p>Steps can be reordered within the list with "Move Up"/"Move Down", or multi-selected and combined into a single group with "Group" (members within a group are picked at random according to their weight). "Add Wait..." lets you insert a "wait step" that does nothing for a specified number of milliseconds.</p>
+  </section>
+
+  <section id="params">
+    <h2><span class="num">6</span>③ Configuring action parameters</h2>
+    <p>Selecting a step in ② shows its settings in the ③ panel. Check the action types you want to enable (Click, Double-click, Drag, Key Input, Scroll, Shortcut Key, Window Operation), and specify how many actions to run for that step (Action count) and how likely each type is to be picked (Weight — higher means more likely).</p>
+    <figure>
+      <img src="images_en/03_step_added_params.png" alt="The Action Parameters panel right after a step is added, with Click and Left checked and Action count set to 50.">
+      <figcaption>Figure 3: The ③ Action Parameters panel right after creating a step (Click / Left are enabled by default)</figcaption>
+    </figure>
+    <p>Detailed settings for each action — click/drag distance and direction, which characters to use for key input, scroll amount, and so on — are also available further down the same panel. The "Default" button in ① lets you edit the shared initial values used for newly created steps.</p>
+  </section>
+
+  <section id="timing">
+    <h2><span class="num">7</span>Timing / limits &amp; automatic anomaly recording</h2>
+    <p>The "Timing / Limits" area of panel ① sets the interval between actions (ms, or actions/sec), the max action count, max run time, and repeat count for the whole step sequence (all three are required — unlimited isn't an option), the RNG seed, and more. Scrolling down reveals the following additional settings.</p>
+    <figure>
+      <img src="images_en/04_timing_limits.png" alt="The Timing/Limits panel scrolled down, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording and collecting crash dumps on an abnormal stop.">
+      <figcaption>Figure 4: Timing/Limits (lower part) — RNG seed, when to capture operation-region screenshots, and the recording/crash-dump options on an abnormal stop</figcaption>
+    </figure>
+    <table>
+      <tr><th>Setting</th><th>Description</th></tr>
+      <tr><td>RNG seed</td><td>Left as "Random", a new one is generated each run. Specifying a value lets the same action sequence be reproduced later (useful for reproducing a crash)</td></tr>
+      <tr><td>When to capture operation-region screenshots</td><td>Choose from: once before the run starts / every time the step changes / at fixed intervals. Captured images can be saved afterward via "Save Operation-Region Image..."</td></tr>
+      <tr><td>Save a recording of the recent screen on abnormal stop</td><td>Off by default. When enabled, keeps a rolling buffer of the screen at 0.5-second intervals (roughly the last 10 seconds) and automatically saves it as numbered PNGs on a crash</td></tr>
+      <tr><td>Collect OS crash dumps/diagnostic logs on abnormal stop</td><td>On by default. Makes a best-effort search for the target app's crash report/core dump and records the path in the log if found</td></tr>
+    </table>
+  </section>
+
+  <section id="run">
+    <h2><span class="num">8</span>Starting and stopping a run</h2>
+    <p>Once configured, click "▶ Start" to begin the run. While it's running, an always-on-top floating panel appears in the upper right (showing the action count and a "■ Stop (STOP)" button), so you can stop it immediately even if focus has moved to the target app. "‖ Pause" lets you pause and resume as well.</p>
+    <figure>
+      <img src="images_en/05_running.png" alt="The screen during a test run. A floating panel with the action count and a stop button appears in the upper right, and the log at the bottom records the coordinates and target-window-relative coordinates of each click.">
+      <figcaption>Figure 5: The screen while a run is in progress — the floating panel in the upper right can stop it at any time</figcaption>
+    </figure>
+    <p>For each action, the log records its coordinates, the coordinates relative to the target window, and (when available) the name of the UI widget that was clicked. The full log is also written incrementally to a file under <code>~/Documents/EnduranceTestGUI_Logs/</code>, so even after older lines scroll out of the on-screen display (capped at the most recent 5000 lines), the complete history remains available afterward.</p>
+    <p>A run stops automatically when any of the following happens:</p>
+    <ul>
+      <li>The max action count, max run time, or sequence repeat count limit is reached</li>
+      <li>The user presses "■ Stop"</li>
+      <li>A crash or the disappearance of the target app's window is detected (<a href="#crash">see next section</a>)</li>
+      <li>An action was about to land on something other than the target app (a fail-closed safety stop)</li>
+      <li>The target app stops responding (hang detection, Linux only)</li>
+    </ul>
+  </section>
+
+  <section id="crash">
+    <h2><span class="num">9</span>Crash detection &amp; re-testing</h2>
+    <p>When the target app's process is detected as gone, the run stops immediately and a dialog like the following appears.</p>
+    <figure>
+      <img src="images_en/06_crash_dialog.png" alt="A dialog titled 'Target App Crash Detected', showing which step was running when it was detected, the action count, and the RNG seed, and noting that records have been saved automatically.">
+      <figcaption>Figure 6: The crash-detection dialog — it's immediately clear which step was running when the app went down</figcaption>
+    </figure>
+    <p>Both the dialog and the log show <strong>which step was running when the crash was detected, how many actions had run so far, and the RNG seed</strong>. At the same time, a JSON snapshot of the test settings (with that seed), a screenshot of the operation region, a recording of the recent screen (if enabled), and the location of the OS's crash dump (if found) are all saved automatically under <code>~/Pictures/EnduranceTestGUI_Screenshots/</code>.</p>
+    <div class="callout tip">
+      <div class="title">You can re-test with the same setup right after a crash</div>
+      The ② step configuration, ① operation regions, and timing settings stay exactly as they were on screen even after a crash. Once you relaunch the target app, ①'s target list refreshes automatically and re-selects the app with the same name on its own. Just click "Start" to begin re-testing with the same configuration.
+    </div>
+  </section>
+
+  <section id="preset">
+    <h2><span class="num">10</span>Saving &amp; loading test settings</h2>
+    <p>"Save Test Settings..." in the "File" menu saves the operation regions, step configuration, and timing settings assembled in ①②③ together into a JSON file. "Load Test Settings..." loads it back and, if the app it was targeting when saved is currently running, automatically selects it again (otherwise a message prompts you to pick it manually). This lets the same configuration be reused across sessions or across different builds, without rebuilding it from scratch each time.</p>
+  </section>
+
+  <section id="lang">
+    <h2><span class="num">11</span>Switching the display language</h2>
+    <p>Choose "日本語" or "English" from the "言語 / Language" menu in the menu bar. Your choice is saved and takes effect <strong>from the next launch onward</strong> (the currently running window doesn't switch live).</p>
+    <figure>
+      <img src="images_en/07_language_menu.png" alt="The 'Language' menu open in the menu bar, showing two options: Japanese and English.">
+      <figcaption>Figure 7: The "言語 / Language" menu</figcaption>
+    </figure>
+  </section>
+
+  <section id="faq">
+    <h2><span class="num">12</span>Troubleshooting</h2>
+    <h3>Clicking "Start" fails with a safety-check error</h3>
+    <p>Check that the target window isn't covered by another window and isn't minimized. If that doesn't help, some environments (particularly certain tiling window managers on Linux) don't support the mechanism used to confirm the target app can be operated safely at all.</p>
+    <h3>The target app doesn't appear in the window list</h3>
+    <p>Click the "Update" button in ① to re-scan. Only normal top-level windows are listed.</p>
+    <h3>Right-click menu item selection isn't working well</h3>
+    <p>This is an experimental feature that relies on macOS/Linux accessibility support. On Linux, the target app's toolkit needs to have its AT-SPI bridge enabled (GTK/Qt apps usually have this on by default).</p>
+  </section>
+
+  <section id="license">
+    <h2><span class="num">13</span>Licensing</h2>
+    <p>EnduranceTestGUI's own source code is released under the <strong>MIT License</strong> (see <code>LICENSE</code> at the repository root). The app uses Qt (the Widgets module); the free-software edition of Qt is distributed under the GNU LGPL version 3 (some modules under the GPL). You can always check exactly which license the Qt build in use is distributed under from "Help" → "About Qt..." inside the app itself. For details on the other dynamically linked libraries, see <code>THIRD_PARTY_NOTICES.md</code> at the repository root.</p>
+  </section>
+
+  <footer>
+    Most of this manual and of EnduranceTestGUI's implementation was generated by Anthropic's AI assistant <strong>Claude</strong>.<br>
+    See the developer-facing document <code>SPEC.md</code> for the full technical specification.
+  </footer>
+
+</div>
+</body>
+</html>

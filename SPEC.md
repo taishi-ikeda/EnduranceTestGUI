@@ -39,8 +39,10 @@ EnduranceTestGUI/
 ├── THIRD_PARTY_NOTICES.md      # 動的リンクしているサードパーティライブラリのライセンス一覧（6.11節）
 ├── LICENSES/                   # LGPLv3/GPLv3/LGPLv2.1/GPLv2の条文全文（参考同梱、6.11節）
 ├── docs/
-│   ├── manual.html              # エンドユーザー向けHTML操作マニュアル（実機スクリーンショット付き）
-│   └── images/                  # manual.html用のスクリーンショット
+│   ├── manual.html              # エンドユーザー向けHTML操作マニュアル・日本語版（実機スクリーンショット付き）
+│   ├── images/                  # manual.html（日本語版）用のスクリーンショット
+│   ├── manual_en.html           # 同・英語版（UIも英語表示に切り替えて撮影し直したスクリーンショット付き）
+│   └── images_en/                # manual_en.html用のスクリーンショット
 ├── src/
 │   ├── main.cpp
 │   ├── I18n.h/.cpp             # 日本語/英語のUI文字列切り替え（QSettingsで永続化、次回起動時に反映）

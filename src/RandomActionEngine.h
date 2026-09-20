@@ -40,7 +40,21 @@ public:
         qint64 sequenceLoopsCompleted = 0;
         qint64 elapsedMs = 0;
         QMap<QString, qint64> actionKindCounts;  // insertion order doesn't matter; QMap sorts by key
+        // Set only when anomaly is true: the "yyyyMMdd_HHmmss" timestamp
+        // this run's anomaly screenshots/recording were saved under, inside
+        // anomalyArtifactsDirectory() (SPEC.md 6.7/10). MainWindow reuses
+        // this exact string when it saves its own additional artifacts (the
+        // test config as a JSON preset, the operation-region screenshot) so
+        // everything from one incident groups together under one prefix.
+        QString anomalyArtifactTimestamp;
     };
+
+    // Where captureAnomalyArtifacts() saves anomaly screenshots/recording
+    // frames, and where MainWindow saves its own anomaly-triggered
+    // artifacts (SPEC.md 6.7/10) -- a single shared location so a bug
+    // report is just "everything with this timestamp prefix in this
+    // folder".
+    static QString anomalyArtifactsDirectory();
 
     // Human-readable multi-line report of a RunSummary, in the same style
     // as the rest of the app's log messages -- used both to append to the
@@ -97,6 +111,7 @@ private slots:
     void performRandomAction();
     void sampleResourceUsage();
     void checkTargetResponsiveness();
+    void captureRecordingFrame();
 
 private:
     enum class ActionKind {
@@ -162,6 +177,12 @@ private:
     // is on can't currently be determined.
     QPixmap renderRegionScreenshot(const QList<QRect> &includeRegions,
                                     const QList<QRect> &excludeRegions) const;
+    // Just the grab, with no region overlay drawn on top -- shared by
+    // renderRegionScreenshot() above and captureRecordingFrame() below, the
+    // latter of which wants a faithful, unannotated view of the target
+    // window as it actually appeared at that moment. Same null-on-failure
+    // contract as renderRegionScreenshot().
+    QPixmap grabTargetWindowScreenshot() const;
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
@@ -177,7 +198,19 @@ private:
     void scheduleNext();
     void doStop(const QString &reason, bool isAnomaly = false);
     void advanceToNextStep();
-    void captureAnomalyScreenshots(const QString &reason);
+    // Saves whatever anomaly diagnostics are available under a single
+    // shared "yyyyMMdd_HHmmss" timestamp (SPEC.md 6.7/10): a full-screen
+    // screenshot per connected screen (as before), the buffered recording
+    // frames if m_config.enableScreenRecording collected any, and -- if
+    // m_config.enableCrashDumpCollection -- a best-effort search for a
+    // native OS crash report referencing the target process. Returns the
+    // timestamp used, so doStop() can hand it to RunSummary for MainWindow
+    // to reuse for its own additional artifacts.
+    QString captureAnomalyArtifacts(const QString &reason);
+    // Writes m_recordingFrames out as frame_0001.png, frame_0002.png, ...
+    // into anomalyArtifactsDirectory()/recording_<timestamp>/, oldest
+    // first, then clears the buffer. No-op if it's empty.
+    void saveRecordingFrames(const QString &timestamp);
     // Checks for a top-level window belonging to the target process other
     // than the one originally selected (config.targetWindowId) -- e.g. a
     // confirmation dialog the target itself popped up, unrelated to the
@@ -251,4 +284,16 @@ private:
     QPixmap m_lastCapturedScreenshot;
     QString m_lastCapturedScreenshotLabel;
     bool m_hasCapturedScreenshot = false;
+
+    // Rolling screen-recording buffer (SPEC.md 6.7/10, opt-in via
+    // TestConfig::enableScreenRecording): captureRecordingFrame() grabs an
+    // unannotated snapshot of the target window every
+    // kRecordingFrameIntervalMs while m_recordingTimer runs, keeping only
+    // the most recent kMaxRecordingFrames (older ones are dropped), so this
+    // never grows past a bounded size regardless of run length. On an
+    // anomaly stop the whole buffer is written out as numbered frames and
+    // cleared (see saveRecordingFrames()); it is also cleared, and the
+    // timer (re)started only if enabled, at the top of every start().
+    QTimer m_recordingTimer;
+    QList<QPixmap> m_recordingFrames;
 };

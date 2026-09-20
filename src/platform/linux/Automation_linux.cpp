@@ -1,6 +1,9 @@
 #include "platform/PlatformAutomation.h"
 
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QVector>
@@ -666,6 +669,25 @@ void dismissContextMenu()
 
 namespace
 {
+// Whether it's even worth trying AT-SPI at all. Confirmed by direct testing:
+// when no AT-SPI accessibility bus is reachable, atspi_init() does not fail
+// gracefully -- internally it hits a GLib g_error(), which by design always
+// aborts the process (SIGTRAP/abort, not a catchable exception or a
+// mask-able "fatal log level") the *first* time any AT-SPI call is made,
+// regardless of GLib fatal-log-mask settings (also confirmed: those don't
+// apply to g_error()). Since that can't be caught after the fact, the only
+// way to keep an unreachable AT-SPI bus from taking the whole endurance-test
+// engine down with it is to never call into libatspi at all unless a D-Bus
+// session bus exists to begin with -- a necessary (if not fully sufficient;
+// the AT-SPI registry could still be unregistered on an existing bus)
+// precondition, but the one headless/CI environments (no desktop session at
+// all) reliably fail, which is the case this matters for in practice.
+bool atspiUsable()
+{
+    static const bool usable = qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS");
+    return usable;
+}
+
 // Experimental: best-effort search of the AT-SPI accessibility tree for a
 // currently-visible popup/context menu (role MENU, state VISIBLE). Bounds
 // the traversal (depth and total nodes visited) since walking the entire
@@ -706,6 +728,8 @@ AtspiAccessible *findOpenMenuRecursive(AtspiAccessible *node, int depth, int &bu
 
 AtspiAccessible *findOpenMenu()
 {
+    if (!atspiUsable())
+        return nullptr;
     static bool inited = false;
     if (!inited) {
         atspi_init();
@@ -797,6 +821,45 @@ bool clickContextMenuItemAt(int index, qint64 /*expectedOwnerPid*/)
     return clicked;
 }
 
+QString accessibleNameAtPoint(const QPoint &pt)
+{
+    if (!atspiUsable())
+        return QString();
+    static bool inited = false;
+    if (!inited) {
+        atspi_init();
+        inited = true;
+    }
+    AtspiAccessible *desktop = atspi_get_desktop(0);
+    if (!desktop)
+        return QString();
+
+    QString result;
+    AtspiComponent *component = atspi_accessible_get_component_iface(desktop);
+    if (component) {
+        AtspiAccessible *hit = atspi_component_get_accessible_at_point(
+            component, pt.x(), pt.y(), ATSPI_COORD_TYPE_SCREEN, nullptr);
+        if (hit) {
+            gchar *name = atspi_accessible_get_name(hit, nullptr);
+            if (name && *name) {
+                result = QString::fromUtf8(name);
+            } else {
+                gchar *roleName = atspi_accessible_get_role_name(hit, nullptr);
+                if (roleName && *roleName)
+                    result = QStringLiteral("(%1)").arg(QString::fromUtf8(roleName));
+                if (roleName)
+                    g_free(roleName);
+            }
+            if (name)
+                g_free(name);
+            g_object_unref(hit);
+        }
+        g_object_unref(component);
+    }
+    g_object_unref(desktop);
+    return result;
+}
+
 #else  // !HAVE_ATSPI
 
 QStringList listOpenContextMenuItems(qint64 /*expectedOwnerPid*/)
@@ -812,6 +875,11 @@ bool clickContextMenuItem(const QString & /*itemName*/, qint64 /*expectedOwnerPi
 bool clickContextMenuItemAt(int /*index*/, qint64 /*expectedOwnerPid*/)
 {
     return false;
+}
+
+QString accessibleNameAtPoint(const QPoint & /*pt*/)
+{
+    return QString();  // AT-SPI not available at build time; see CMakeLists.txt.
 }
 
 #endif  // HAVE_ATSPI
@@ -952,6 +1020,50 @@ bool maximizeWindow(qint64 pid, quint32 windowId)
                        (unsigned int)target.height());
     XFlush(dpy);
     return true;
+}
+
+QString findRecentCrashReport(qint64 pid, const QString &appName)
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString pidStr = QString::number(pid);
+
+    // systemd-coredump's store, and Ubuntu/Debian apport's -- whichever (if
+    // either) this system actually has enabled. Neither directory existing,
+    // or existing but unreadable by this process, are both normal and just
+    // mean "nothing found" (see PlatformAutomation.h).
+    const QStringList candidateDirs = {
+        QStringLiteral("/var/lib/systemd/coredump"),
+        QStringLiteral("/var/crash"),
+    };
+
+    QString bestPath;
+    QDateTime bestTime;
+    for (const QString &dirPath : candidateDirs) {
+        QDir dir(dirPath);
+        if (!dir.exists())
+            continue;
+        const QFileInfoList entries = dir.entryInfoList(QDir::Files, QDir::Time);
+        for (const QFileInfo &info : entries) {
+            const QString name = info.fileName();
+            // systemd-coredump filenames embed the pid (e.g.
+            // "core.<comm>.<uid>.<boot-id>.<pid>.<timestamp>.zst"); apport's
+            // embed the executable's basename instead -- match either,
+            // since which one is actually present isn't known in advance.
+            const bool matchesPid = name.contains(pidStr);
+            const bool matchesName = !appName.isEmpty() && name.contains(appName, Qt::CaseInsensitive);
+            if (!matchesPid && !matchesName)
+                continue;
+            // Only trust a match written recently -- an old file with a
+            // coincidentally-matching name would mislead more than help.
+            if (info.lastModified().secsTo(now) > 300)
+                continue;
+            if (bestPath.isEmpty() || info.lastModified() > bestTime) {
+                bestPath = info.absoluteFilePath();
+                bestTime = info.lastModified();
+            }
+        }
+    }
+    return bestPath;
 }
 
 }  // namespace PlatformAutomation

@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
@@ -32,6 +33,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -458,6 +460,25 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     screenshotLayout->addWidget(m_screenshotModePerStepRadio);
     screenshotLayout->addLayout(screenshotIntervalRow);
     timingForm->addRow(QStringLiteral("操作領域スクリーンショットの撮影タイミング:"), screenshotContainer);
+
+    // Opt-in anomaly diagnostics (SPEC.md 6.7/10) -- see TestConfig::
+    // enableScreenRecording/enableCrashDumpCollection.
+    m_recordingCheck =
+        new QCheckBox(QStringLiteral("異常停止時に直近の画面を録画として保存する（追加負荷あり）"), m_timingGroup);
+    m_recordingCheck->setChecked(false);
+    m_recordingCheck->setToolTip(
+        QStringLiteral("実行中、画面を一定間隔で撮影してリングバッファに保持し続けます。"
+                        "異常停止時に、そこまでの数秒間の画面推移を連番PNGとして保存します。"));
+    timingForm->addRow(QString(), m_recordingCheck);
+
+    m_crashDumpCollectionCheck =
+        new QCheckBox(QStringLiteral("異常停止時にOSのクラッシュダンプ・診断ログを収集する"), m_timingGroup);
+    m_crashDumpCollectionCheck->setChecked(true);
+    m_crashDumpCollectionCheck->setToolTip(
+        QStringLiteral("対象アプリのものと思われるクラッシュレポート/コアダンプがシステム上に"
+                        "見つかった場合、そのパスを異常停止時のログと記録一式に含めます。"
+                        "見つからなくても実行には影響しません。"));
+    timingForm->addRow(QString(), m_crashDumpCollectionCheck);
 
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
@@ -1343,6 +1364,8 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     else
         config.screenshotCaptureMode = ScreenshotCaptureMode::PerStepChange;
     config.screenshotCaptureIntervalActions = m_screenshotIntervalSpin->value();
+    config.enableScreenRecording = m_recordingCheck->isChecked();
+    config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
 
     ok = true;
     return config;
@@ -1442,6 +1465,26 @@ void MainWindow::onStart()
     m_stopPanel->show();
 
     m_logView->clear();
+
+    // Full, uncapped write-through log for this run (SPEC.md 6.8/10) -- see
+    // the m_fullLogFile field comment for why this exists separately from
+    // m_logView's capped display. Opened fresh per run; closed in
+    // onEngineFinished().
+    if (m_fullLogFile.isOpen())
+        m_fullLogFile.close();
+    const QString logDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/EnduranceTestGUI_Logs");
+    QDir().mkpath(logDir);
+    const QString logPath = QStringLiteral("%1/run_%2.log").arg(
+        logDir, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_fullLogFile.setFileName(logPath);
+    if (m_fullLogFile.open(QIODevice::WriteOnly | QIODevice::Text))
+        appendLog(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
+                                  "切れることなく全操作を記録): %1")
+                       .arg(logPath));
+    else
+        appendLog(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1").arg(logPath));
+
     m_engine->start(config);
 }
 
@@ -1487,6 +1530,9 @@ void MainWindow::onEngineFinished(const QString &reason)
             item->setText(describeStep(m_steps[m_currentRunningStepIndex], m_currentRunningStepIndex));
     }
     m_currentRunningStepIndex = -1;
+
+    if (m_fullLogFile.isOpen())
+        m_fullLogFile.close();
 }
 
 void MainWindow::onActionLog(const QString &message)
@@ -1497,7 +1543,18 @@ void MainWindow::onActionLog(const QString &message)
 void MainWindow::appendLog(const QString &message)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
-    m_logView->appendPlainText(QStringLiteral("[%1] %2").arg(timestamp, message));
+    const QString line = QStringLiteral("[%1] %2").arg(timestamp, message);
+    m_logView->appendPlainText(line);
+    // m_logView above silently drops its oldest lines past 5000 blocks
+    // (display performance); this file does not, so nothing from a long
+    // run is ever lost before "ログを保存..." gets a chance to run (SPEC.md
+    // 6.8/10). Only open while a run is in progress -- see onStart()/
+    // onEngineFinished().
+    if (m_fullLogFile.isOpen()) {
+        m_fullLogFile.write(line.toUtf8());
+        m_fullLogFile.write("\n");
+        m_fullLogFile.flush();
+    }
 }
 
 void MainWindow::onIterationCountChanged(qint64 count)
@@ -1563,6 +1620,40 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
     // away without a separate save step, and is included in "ログを保存...".
     for (const QString &line : RandomActionEngine::formatSummaryText(summary).split(QLatin1Char('\n')))
         appendLog(line);
+
+    // Auto-save the exact test setup used (as a JSON preset) and the
+    // operation-region screenshot alongside RandomActionEngine's own
+    // anomaly screenshots/recording/crash-report search, all under the
+    // same timestamp prefix, so a bug report is just "everything with this
+    // prefix" (SPEC.md 6.7/10) -- no separate manual "save preset" step to
+    // remember in the moment right after something went wrong.
+    if (summary.anomaly && !summary.anomalyArtifactTimestamp.isEmpty()) {
+        const QString baseDir = RandomActionEngine::anomalyArtifactsDirectory();
+        QDir().mkpath(baseDir);
+
+        QJsonObject preset = buildPresetJson();
+        // The UI's own rngSeed field may be 0 ("ランダム"); what actually
+        // reproduces this run is the seed the engine ended up using.
+        QJsonObject timing = preset["timing"].toObject();
+        timing["rngSeed"] = int(summary.rngSeedUsed);
+        preset["timing"] = timing;
+        const QString presetPath =
+            QStringLiteral("%1/anomaly_%2_preset.json").arg(baseDir, summary.anomalyArtifactTimestamp);
+        QFile presetFile(presetPath);
+        if (presetFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            presetFile.write(QJsonDocument(preset).toJson(QJsonDocument::Indented));
+            appendLog(QStringLiteral("異常停止時のテスト設定（この乱数シードで再現できるはずです）を"
+                                      "保存しました: %1")
+                           .arg(presetPath));
+        }
+
+        if (m_engine->hasRegionScreenshot()) {
+            const QString shotPath =
+                QStringLiteral("%1/anomaly_%2_region.png").arg(baseDir, summary.anomalyArtifactTimestamp);
+            if (m_engine->lastRegionScreenshot().save(shotPath))
+                appendLog(QStringLiteral("異常停止時点の操作領域画像を保存しました: %1").arg(shotPath));
+        }
+    }
 }
 
 void MainWindow::onSaveSummary()
@@ -1627,16 +1718,8 @@ void MainWindow::onOpenAccessibilitySettings()
     PlatformAutomation::openAccessibilitySettings();
 }
 
-void MainWindow::onSavePreset()
+QJsonObject MainWindow::buildPresetJson() const
 {
-    flushActionParamsEditor();
-
-    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("テスト設定を保存"),
-                                                        QStringLiteral("preset.json"),
-                                                        QStringLiteral("JSON (*.json)"));
-    if (path.isEmpty())
-        return;
-
     QJsonObject root;
     root["formatVersion"] = 1;
     // Reference only -- pids aren't stable across runs, so the target still
@@ -1674,14 +1757,28 @@ void MainWindow::onSavePreset()
                                        : m_screenshotModeIntervalRadio->isChecked() ? QStringLiteral("fixedInterval")
                                                                                     : QStringLiteral("perStepChange");
     timing["screenshotCaptureIntervalActions"] = m_screenshotIntervalSpin->value();
+    timing["enableScreenRecording"] = m_recordingCheck->isChecked();
+    timing["enableCrashDumpCollection"] = m_crashDumpCollectionCheck->isChecked();
     root["timing"] = timing;
+    return root;
+}
+
+void MainWindow::onSavePreset()
+{
+    flushActionParamsEditor();
+
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("テスト設定を保存"),
+                                                        QStringLiteral("preset.json"),
+                                                        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
         return;
     }
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    file.write(QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Indented));
     appendLog(QStringLiteral("テスト設定を保存しました: %1").arg(path));
 }
 
@@ -1748,6 +1845,9 @@ void MainWindow::onLoadPreset()
         m_screenshotModePerStepRadio->setChecked(true);
     m_screenshotIntervalSpin->setValue(
         timing["screenshotCaptureIntervalActions"].toInt(m_screenshotIntervalSpin->value()));
+    m_recordingCheck->setChecked(timing["enableScreenRecording"].toBool(m_recordingCheck->isChecked()));
+    m_crashDumpCollectionCheck->setChecked(
+        timing["enableCrashDumpCollection"].toBool(m_crashDumpCollectionCheck->isChecked()));
 
     m_lastEditedStepRow = -1;
     refreshNamedRegionList();

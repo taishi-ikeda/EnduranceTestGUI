@@ -258,6 +258,24 @@ struct TestConfig
     ScreenshotCaptureMode screenshotCaptureMode = ScreenshotCaptureMode::PerStepChange;
     int screenshotCaptureIntervalActions = 50;
 
+    // If true, RandomActionEngine keeps a rolling buffer of periodic
+    // screenshots (see kRecordingFrameIntervalMs/kMaxRecordingFrames in
+    // RandomActionEngine.cpp) while running, and writes them out as a
+    // numbered sequence of PNG frames when a run stops abnormally --
+    // showing the seconds of on-screen activity leading up to the anomaly,
+    // not just its final frame (SPEC.md 6.7/10). Off by default: capturing
+    // and holding these frames is extra CPU/memory/disk overhead a normal
+    // (non-diagnostic) run doesn't need, so this is opt-in per run.
+    bool enableScreenRecording = false;
+
+    // If true, when a run stops abnormally RandomActionEngine also does a
+    // best-effort search for a native OS crash report/core dump referencing
+    // the target process (PlatformAutomation::findRecentCrashReport()) and
+    // logs/saves whatever it finds alongside the anomaly screenshots
+    // (SPEC.md 6.7/10). On by default: unlike screen recording this is a
+    // one-shot filesystem lookup with no ongoing overhead during the run.
+    bool enableCrashDumpCollection = true;
+
     // 0 = pick a fresh random seed each run (and log it). Any other value
     // seeds the run's random generator directly, so the exact same
     // sequence of actions can be reproduced later by re-entering the seed

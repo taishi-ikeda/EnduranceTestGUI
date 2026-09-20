@@ -543,6 +543,89 @@ void dismissContextMenu()
     CFRelease(up);
 }
 
+QString accessibleNameAtPoint(const QPoint &pt)
+{
+    AXUIElementRef systemWide = AXUIElementCreateSystemWide();
+    AXUIElementRef element = nullptr;
+    const AXError err =
+        AXUIElementCopyElementAtPosition(systemWide, (float)pt.x(), (float)pt.y(), &element);
+    CFRelease(systemWide);
+    if (err != kAXErrorSuccess || !element)
+        return QString();
+
+    QString result;
+    CFStringRef title = nullptr;
+    if (AXUIElementCopyAttributeValue(element, kAXTitleAttribute, (CFTypeRef *)&title) ==
+            kAXErrorSuccess &&
+        title) {
+        result = QString::fromCFString(title);
+        CFRelease(title);
+    }
+    if (result.isEmpty()) {
+        CFStringRef description = nullptr;
+        if (AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute, (CFTypeRef *)&description) ==
+                kAXErrorSuccess &&
+            description) {
+            result = QString::fromCFString(description);
+            CFRelease(description);
+        }
+    }
+    if (result.isEmpty()) {
+        CFStringRef role = nullptr;
+        if (AXUIElementCopyAttributeValue(element, kAXRoleAttribute, (CFTypeRef *)&role) ==
+                kAXErrorSuccess &&
+            role) {
+            result = QStringLiteral("(%1)").arg(QString::fromCFString(role));
+            CFRelease(role);
+        }
+    }
+    CFRelease(element);
+    return result;
+}
+
+QString findRecentCrashReport(qint64 /*pid*/, const QString &appName)
+{
+    if (appName.isEmpty())
+        return QString();
+
+    NSString *dirPath =
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:dirPath error:&error];
+    if (!entries)
+        return QString();
+
+    NSString *needle = appName.toNSString();
+    NSString *bestPath = nil;
+    NSDate *bestDate = nil;
+    const NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    for (NSString *name in entries) {
+        // Modern macOS writes ".ips" (JSON) reports; older versions wrote
+        // ".crash" (plain text). Match either, by the crashed executable's
+        // name, which both formats include as a filename prefix.
+        if (![name.lowercaseString hasSuffix:@".ips"] && ![name.lowercaseString hasSuffix:@".crash"])
+            continue;
+        if ([name rangeOfString:needle options:NSCaseInsensitiveSearch].location == NSNotFound)
+            continue;
+
+        NSString *fullPath = [dirPath stringByAppendingPathComponent:name];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+        NSDate *modified = attrs[NSFileModificationDate];
+        if (!modified)
+            continue;
+        // Only trust a match written recently -- see the Linux
+        // implementation's equivalent comment.
+        if (now - modified.timeIntervalSince1970 > 300.0)
+            continue;
+        if (!bestDate || [modified compare:bestDate] == NSOrderedDescending) {
+            bestDate = modified;
+            bestPath = fullPath;
+        }
+    }
+    return bestPath ? QString::fromNSString(bestPath) : QString();
+}
+
 void keyShortcut(Qt::Key key, Qt::KeyboardModifiers modifiers)
 {
     CGKeyCode keyCode = 0;

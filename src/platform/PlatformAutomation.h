@@ -190,4 +190,32 @@ bool clickContextMenuItemAt(int index, qint64 expectedOwnerPid);
 // Dismisses an open popup/context menu (sends Escape).
 void dismissContextMenu();
 
+// --- Diagnostics (SPEC.md 6.7/6.8/10) -----------------------------------
+// Best-effort hints for reproducing/diagnosing a bug found during an
+// endurance-test run, gathered the same way the context-menu introspection
+// above is: OS accessibility trees and standard crash-report locations.
+// Both are allowed to simply return an empty string when nothing useful
+// could be found -- callers must treat that as "no information available",
+// never as an error.
+
+// Accessible name (or, if it has none, role) of whatever UI element is at
+// this screen point, for more readable action logs -- e.g. so a log line
+// can say `クリック(左) at (837, 291) [ボタン "OK"]` instead of bare
+// coordinates that mean nothing without also knowing the window's on-screen
+// position at that exact moment. Uses the same accessibility backend as
+// listOpenContextMenuItems() above (macOS Accessibility API / Linux AT-SPI)
+// and is just as best-effort/unscoped -- not guaranteed to work with every
+// toolkit, and on Linux not scoped to a particular process.
+QString accessibleNameAtPoint(const QPoint &pt);
+
+// Searches for a native crash report or core dump generated recently for
+// `pid`/`appName` (macOS: ~/Library/Logs/DiagnosticReports; Linux:
+// systemd-coredump's /var/lib/systemd/coredump and apport's /var/crash).
+// Returns the found file's path, or an empty string if none could be
+// located -- which is common: many systems don't keep crash reports at
+// all, don't have the relevant service enabled, or this process lacks
+// permission to read that location. Meant to be called once, right after
+// noticing the target process has crashed (SPEC.md 6.7).
+QString findRecentCrashReport(qint64 pid, const QString &appName);
+
 }  // namespace PlatformAutomation

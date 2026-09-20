@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QElapsedTimer>
+#include <QFile>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QPointer>
 
@@ -141,6 +143,12 @@ private:
     TestConfig buildConfigFromUi(bool &ok, QString &errorMessage) const;
     void appendLog(const QString &message);
     QString describeStep(const RegionStep &step, int index) const;
+    // The current ①②③ setup (named regions, steps, default action params/
+    // kinds, timing & limits) as the same JSON shape a preset file is saved
+    // in (SPEC.md 10) -- shared by onSavePreset() and the anomaly auto-save
+    // in onRunSummaryReady(), so a bug report's config file is produced the
+    // same way a manually-saved preset is.
+    QJsonObject buildPresetJson() const;
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -245,6 +253,17 @@ private:
     QRadioButton *m_screenshotModeIntervalRadio = nullptr;
     QSpinBox *m_screenshotIntervalSpin = nullptr;
 
+    // Opt-in diagnostics for an abnormal stop (SPEC.md 6.7/10), chosen
+    // before starting a run like the screenshot-timing radios above:
+    // - 録画: RandomActionEngine keeps a rolling buffer of screenshots and
+    //   writes them out as numbered frames on an anomaly stop (extra
+    //   ongoing CPU/memory/disk cost while running, hence opt-in/default off).
+    // - クラッシュダンプ: a one-shot best-effort filesystem search for a
+    //   native OS crash report when a run stops abnormally (negligible
+    //   cost, hence default on).
+    QCheckBox *m_recordingCheck = nullptr;
+    QCheckBox *m_crashDumpCollectionCheck = nullptr;
+
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;
     QGroupBox *m_namedRegionGroup = nullptr;
@@ -271,6 +290,14 @@ private:
     // Enabled once the engine has ever captured one (persists across runs,
     // like m_saveSummaryButton above).
     QPushButton *m_saveRegionScreenshotButton = nullptr;
+    // Write-through copy of every log line for the run in progress, opened
+    // fresh in onStart() and closed in onEngineFinished() (SPEC.md 6.8/10).
+    // m_logView above is capped at 5000 blocks for display performance and
+    // silently drops older lines once a long run exceeds that -- this file
+    // is not, so "ログを保存..." after a very long run is never missing the
+    // earlier part of what happened. Null/not open when no run has started
+    // yet this session.
+    QFile m_fullLogFile;
 
     RandomActionEngine *m_engine = nullptr;
     QPointer<StopPanel> m_stopPanel;

@@ -45,6 +45,10 @@ QString RandomActionEngine::formatSummaryText(const RunSummary &summary)
     lines << QStringLiteral("完走したシーケンス回数: %1").arg(summary.sequenceLoopsCompleted);
     lines << QStringLiteral("経過時間: %1 秒").arg(summary.elapsedMs / 1000.0, 0, 'f', 1);
     lines << QStringLiteral("使用した乱数シード: %1").arg(summary.rngSeedUsed);
+    if (summary.anomaly && !summary.anomalyArtifactTimestamp.isEmpty()) {
+        lines << QStringLiteral("異常停止時の記録一式: %1 内の「anomaly_%2」で始まるファイル/フォルダ")
+                     .arg(RandomActionEngine::anomalyArtifactsDirectory(), summary.anomalyArtifactTimestamp);
+    }
     if (summary.actionKindCounts.isEmpty()) {
         lines << QStringLiteral("操作種別ごとの回数: (なし)");
     } else {
@@ -65,12 +69,30 @@ QJsonObject RandomActionEngine::summaryToJson(const RunSummary &summary)
     obj["sequenceLoopsCompleted"] = double(summary.sequenceLoopsCompleted);
     obj["elapsedMs"] = double(summary.elapsedMs);
     obj["rngSeedUsed"] = double(summary.rngSeedUsed);
+    if (!summary.anomalyArtifactTimestamp.isEmpty())
+        obj["anomalyArtifactTimestamp"] = summary.anomalyArtifactTimestamp;
     QJsonObject counts;
     for (auto it = summary.actionKindCounts.constBegin(); it != summary.actionKindCounts.constEnd(); ++it)
         counts[it.key()] = double(it.value());
     obj["actionKindCounts"] = counts;
     return obj;
 }
+
+QString RandomActionEngine::anomalyArtifactsDirectory()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
+           QStringLiteral("/EnduranceTestGUI_Screenshots");
+}
+
+namespace
+{
+// Recording-buffer sizing (SPEC.md 6.7/10, TestConfig::enableScreenRecording):
+// 20 frames at 500ms apart keeps roughly the last 10 seconds of on-screen
+// activity leading up to an anomaly, bounded regardless of how long the run
+// has been going.
+constexpr int kRecordingFrameIntervalMs = 500;
+constexpr int kMaxRecordingFrames = 20;
+}  // namespace
 
 RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng(0)
 {
@@ -79,6 +101,9 @@ RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng
 
     m_resourceTimer.setInterval(5000);
     connect(&m_resourceTimer, &QTimer::timeout, this, &RandomActionEngine::sampleResourceUsage);
+
+    m_recordingTimer.setInterval(kRecordingFrameIntervalMs);
+    connect(&m_recordingTimer, &QTimer::timeout, this, &RandomActionEngine::captureRecordingFrame);
 
     // 8-second cadence: PlatformAutomation::checkWindowResponsive()'s
     // "trailing evaluation" design means this interval doubles as the
@@ -114,6 +139,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_capturedThisRun = false;
     m_lastScreenshotStepIndex = -1;
     m_lastScreenshotIterationCount = -1;
+    m_recordingFrames.clear();
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -137,6 +163,11 @@ void RandomActionEngine::start(const TestConfig &config)
     scheduleNext();
     m_resourceTimer.start();
     m_hangCheckTimer.start();
+    if (m_config.enableScreenRecording) {
+        emit logMessage(QStringLiteral("画面録画（直近%1秒分をリングバッファ保持）を有効にしました")
+                             .arg(kRecordingFrameIntervalMs * kMaxRecordingFrames / 1000));
+        m_recordingTimer.start();
+    }
 }
 
 void RandomActionEngine::stop()
@@ -195,12 +226,14 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
     m_timer.stop();
     m_resourceTimer.stop();
     m_hangCheckTimer.stop();
-    if (isAnomaly)
-        captureAnomalyScreenshots(reason);
+    m_recordingTimer.stop();
 
     RunSummary summary;
     summary.stopReason = reason;
     summary.anomaly = isAnomaly;
+    if (isAnomaly)
+        summary.anomalyArtifactTimestamp = captureAnomalyArtifacts(reason);
+    m_recordingFrames.clear();  // recording is per-run regardless of whether it just got saved above
     summary.rngSeedUsed = m_rngSeedUsed;
     summary.totalIterations = m_iterationCount;
     summary.sequenceLoopsCompleted = m_sequenceLoopCount;
@@ -218,14 +251,13 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
     emit finished(reason);
 }
 
-void RandomActionEngine::captureAnomalyScreenshots(const QString &reason)
+QString RandomActionEngine::captureAnomalyArtifacts(const QString &reason)
 {
     Q_UNUSED(reason);
-    const QString baseDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
-                             QStringLiteral("/EnduranceTestGUI_Screenshots");
+    const QString baseDir = anomalyArtifactsDirectory();
     if (!QDir().mkpath(baseDir)) {
-        emit logMessage(QStringLiteral("スクリーンショット保存先の作成に失敗しました: %1").arg(baseDir));
-        return;
+        emit logMessage(QStringLiteral("異常停止時の記録の保存先作成に失敗しました: %1").arg(baseDir));
+        return QString();
     }
 
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
@@ -248,6 +280,64 @@ void RandomActionEngine::captureAnomalyScreenshots(const QString &reason)
         emit logMessage(QStringLiteral(
             "スクリーンショットの保存に失敗しました（macOSでは画面収録の権限が必要な場合があります）"));
     }
+
+    if (m_config.enableScreenRecording)
+        saveRecordingFrames(timestamp);
+
+    if (m_config.enableCrashDumpCollection) {
+        const QString crashReportPath =
+            PlatformAutomation::findRecentCrashReport(m_config.targetPid, m_config.targetAppName);
+        if (!crashReportPath.isEmpty()) {
+            emit logMessage(QStringLiteral("対象アプリのものと思われるクラッシュレポートを見つけました: %1")
+                                 .arg(crashReportPath));
+            const QString refPath =
+                QStringLiteral("%1/anomaly_%2_crashreport_location.txt").arg(baseDir, timestamp);
+            QFile refFile(refPath);
+            if (refFile.open(QIODevice::WriteOnly | QIODevice::Text))
+                refFile.write(crashReportPath.toUtf8());
+        } else {
+            emit logMessage(QStringLiteral(
+                "対象アプリのクラッシュレポート/コアダンプは見つかりませんでした"
+                "（このシステムでその機能自体が無効になっている可能性があります）"));
+        }
+    }
+
+    return timestamp;
+}
+
+void RandomActionEngine::saveRecordingFrames(const QString &timestamp)
+{
+    if (m_recordingFrames.isEmpty())
+        return;
+
+    const QString dir = QStringLiteral("%1/anomaly_%2_recording").arg(anomalyArtifactsDirectory(), timestamp);
+    if (!QDir().mkpath(dir)) {
+        emit logMessage(QStringLiteral("録画フレームの保存先作成に失敗しました: %1").arg(dir));
+        return;
+    }
+
+    int saved = 0;
+    for (int i = 0; i < m_recordingFrames.size(); ++i) {
+        const QString path = QStringLiteral("%1/frame_%2.png").arg(dir).arg(i + 1, 4, 10, QChar('0'));
+        if (m_recordingFrames[i].save(path))
+            ++saved;
+    }
+    emit logMessage(QStringLiteral("異常停止直前の画面録画（%1フレーム、約%2秒分）を保存しました: %3")
+                         .arg(saved)
+                         .arg(saved * kRecordingFrameIntervalMs / 1000)
+                         .arg(dir));
+}
+
+void RandomActionEngine::captureRecordingFrame()
+{
+    if (!m_running || m_paused)
+        return;
+    const QPixmap frame = grabTargetWindowScreenshot();
+    if (frame.isNull())
+        return;
+    m_recordingFrames.append(frame);
+    if (m_recordingFrames.size() > kMaxRecordingFrames)
+        m_recordingFrames.removeFirst();
 }
 
 void RandomActionEngine::checkTargetResponsiveness()
@@ -413,12 +503,8 @@ void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel,
     emit regionScreenshotCaptured();
 }
 
-QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRegions,
-                                                     const QList<QRect> &excludeRegions) const
+QPixmap RandomActionEngine::grabTargetWindowScreenshot() const
 {
-    if (includeRegions.isEmpty())
-        return QPixmap();
-
     QRect windowBounds;
     if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
         return QPixmap();
@@ -433,8 +519,21 @@ QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRe
     // origin, not the virtual desktop's -- translate windowBounds into that
     // screen's local coordinates before grabbing.
     const QRect localBounds = windowBounds.translated(-screen->geometry().topLeft());
-    QPixmap shot = screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
-                                       localBounds.height());
+    return screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
+                               localBounds.height());
+}
+
+QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRegions,
+                                                     const QList<QRect> &excludeRegions) const
+{
+    if (includeRegions.isEmpty())
+        return QPixmap();
+
+    QRect windowBounds;
+    if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
+        return QPixmap();
+
+    QPixmap shot = grabTargetWindowScreenshot();
     if (shot.isNull())
         return shot;
 
@@ -1077,6 +1176,25 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         }
         break;
     }
+    }
+
+    // For point-based actions, append the target-window-relative coordinate
+    // (screen coordinates alone mean little once the window has moved from
+    // where it was during this run) and, best-effort, the name of whatever
+    // UI element was actually at that point -- both purely to make the log
+    // more useful for reproducing/diagnosing a bug later (SPEC.md 6.8/10);
+    // neither affects what was actually dispatched above. Based on `pt`
+    // (drag's starting point) even for Drag, since that's what was clicked
+    // down on.
+    if (kindNeedsPoint) {
+        QRect windowBounds;
+        if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds)) {
+            const QPoint rel = pt - windowBounds.topLeft();
+            desc += QStringLiteral(" [対象ウィンドウ相対: (%1, %2)]").arg(rel.x()).arg(rel.y());
+        }
+        const QString widgetName = PlatformAutomation::accessibleNameAtPoint(pt);
+        if (!widgetName.isEmpty())
+            desc += QStringLiteral(" [%1]").arg(widgetName);
     }
 
     outDesc = desc;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -15,6 +16,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -37,7 +41,10 @@
 #include "NamedRegionEditorDialog.h"
 #include "RegionSelectorOverlay.h"
 #include "StepEditorDialog.h"
+#include "StepGroupEditorDialog.h"
 #include "StopPanel.h"
+#include "TestConfigJson.h"
+#include "platform/GlobalHotkey.h"
 
 namespace
 {
@@ -69,6 +76,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             &MainWindow::onResourceUsageUpdated);
     connect(m_engine, &RandomActionEngine::currentStepChanged, this,
             &MainWindow::onCurrentStepChanged);
+    connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -87,6 +95,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     buildUi();
     onRefreshTargets();
+
+    // SPEC.md 6.7/10: a global hotkey backstop for the floating StopPanel
+    // button, in case the target has captured input in a way that makes
+    // even that panel hard to reach. Best-effort -- if the combo can't be
+    // grabbed (e.g. already used by the desktop environment), the app
+    // simply continues without it; the panel/main-window buttons remain
+    // the primary way to stop a run either way.
+    m_globalHotkey = new GlobalHotkey(this);
+    connect(m_globalHotkey, &GlobalHotkey::triggered, this, &MainWindow::onGlobalEmergencyStop);
+    appendLog(m_globalHotkey->start()
+                  ? QStringLiteral("グローバル緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を登録しました。")
+                  : QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
+                                    "（他のアプリが同じ組み合わせを使用している可能性があります）。"
+                                    "「■ 停止」ボタンは通常どおり使用できます。"));
 }
 
 void MainWindow::buildUi()
@@ -164,12 +186,17 @@ void MainWindow::buildUi()
     auto *logButtonsRow = new QHBoxLayout;
     auto *clearLogButton = new QPushButton(QStringLiteral("ログをクリア"), logGroup);
     auto *saveLogButton = new QPushButton(QStringLiteral("ログを保存..."), logGroup);
+    m_saveSummaryButton = new QPushButton(QStringLiteral("実行結果サマリーを保存..."), logGroup);
+    m_saveSummaryButton->setEnabled(false);
+    m_saveSummaryButton->setToolTip(QStringLiteral("テストを一度実行すると保存できるようになります。"));
     logButtonsRow->addWidget(clearLogButton);
     logButtonsRow->addWidget(saveLogButton);
+    logButtonsRow->addWidget(m_saveSummaryButton);
     logButtonsRow->addStretch();
     logLayout->addLayout(logButtonsRow);
     connect(clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLog);
     connect(saveLogButton, &QPushButton::clicked, this, &MainWindow::onSaveLog);
+    connect(m_saveSummaryButton, &QPushButton::clicked, this, &MainWindow::onSaveSummary);
 
     bottomLayout->addWidget(logGroup, 1);
     outerSplitter->addWidget(bottomWidget);
@@ -192,6 +219,16 @@ void MainWindow::buildUi()
 
 void MainWindow::buildMenuBar()
 {
+    // SPEC.md 10: save/load the whole editable test setup as a reusable
+    // preset file, so the same ①②③ configuration doesn't have to be
+    // rebuilt by hand for every run (e.g. against a new build of the same
+    // target app, or on another machine).
+    auto *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
+    m_savePresetAction = fileMenu->addAction(QStringLiteral("テスト設定を保存..."));
+    connect(m_savePresetAction, &QAction::triggered, this, &MainWindow::onSavePreset);
+    m_loadPresetAction = fileMenu->addAction(QStringLiteral("テスト設定を読み込む..."));
+    connect(m_loadPresetAction, &QAction::triggered, this, &MainWindow::onLoadPreset);
+
     auto *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
 
     auto *aboutAppAction = helpMenu->addAction(QStringLiteral("EnduranceTestGUIについて..."));
@@ -408,6 +445,9 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
         QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行"), wrapper);
     auto *stepsLayout = new QVBoxLayout(m_stepsGroup);
     m_stepListWidget = new QListWidget(m_stepsGroup);
+    // Multiple steps can be selected at once so they can be combined into a
+    // group (SPEC.md 6.2, m_groupStepsButton below).
+    m_stepListWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
     stepsLayout->addWidget(m_stepListWidget, 1);
 
     auto *stepButtonsRow = new QHBoxLayout;
@@ -430,8 +470,21 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     stepOrderRow->addWidget(m_clearStepsButton);
     stepsLayout->addLayout(stepOrderRow);
 
+    // SPEC.md 6.2: select 2+ plain steps and combine them into a group that
+    // repeatedly performs one random action from a randomly (weight-)
+    // chosen member until a configured total call count is reached, then
+    // advances like any other step. "グループ解除" reverses this.
+    auto *groupButtonsRow = new QHBoxLayout;
+    m_groupStepsButton = new QPushButton(QStringLiteral("グループ化"), m_stepsGroup);
+    m_ungroupStepButton = new QPushButton(QStringLiteral("グループ解除"), m_stepsGroup);
+    groupButtonsRow->addWidget(m_groupStepsButton);
+    groupButtonsRow->addWidget(m_ungroupStepButton);
+    stepsLayout->addLayout(groupButtonsRow);
+
     connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
             &MainWindow::onStepSelectionChanged);
+    connect(m_stepListWidget, &QListWidget::itemSelectionChanged, this,
+            &MainWindow::updateGroupButtonsEnabled);
     connect(m_addStepButton, &QPushButton::clicked, this, &MainWindow::onAddStep);
     connect(m_addWaitStepButton, &QPushButton::clicked, this, &MainWindow::onAddWaitStep);
     connect(m_editStepButton, &QPushButton::clicked, this, &MainWindow::onEditSelectedStep);
@@ -439,6 +492,8 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_moveStepUpButton, &QPushButton::clicked, this, &MainWindow::onMoveStepUp);
     connect(m_moveStepDownButton, &QPushButton::clicked, this, &MainWindow::onMoveStepDown);
     connect(m_clearStepsButton, &QPushButton::clicked, this, &MainWindow::onClearSteps);
+    connect(m_groupStepsButton, &QPushButton::clicked, this, &MainWindow::onGroupSelectedSteps);
+    connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
     return wrapper;
@@ -550,6 +605,16 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
             .arg(step.waitDurationMs);
     }
 
+    if (step.isGroup) {
+        const QString runningPrefix =
+            index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
+        return QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）")
+            .arg(runningPrefix)
+            .arg(index + 1)
+            .arg(step.groupMembers.size())
+            .arg(step.groupTotalCallCount);
+    }
+
     QStringList actions;
     if (step.enableClick)
         actions << QStringLiteral("クリック");
@@ -594,14 +659,16 @@ void MainWindow::refreshStepList()
     m_stepListWidget->clear();
     for (int i = 0; i < m_steps.size(); ++i)
         m_stepListWidget->addItem(describeStep(m_steps[i], i));
+    updateGroupButtonsEnabled();
 }
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
 {
-    return QStringLiteral("%1（矩形%2個・除外%3個）")
+    return QStringLiteral("%1（矩形%2個・除外%3個）%4")
         .arg(region.name)
         .arg(region.regions.size())
-        .arg(region.excludeRegions.size());
+        .arg(region.excludeRegions.size())
+        .arg(region.followsTargetWindow ? QStringLiteral(" [ウィンドウ追従]") : QString());
 }
 
 void MainWindow::refreshNamedRegionList()
@@ -615,10 +682,29 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
 {
     QStringList result;
     for (int i = 0; i < m_steps.size(); ++i) {
-        if (!m_steps[i].useWholeWindow && m_steps[i].regionName == regionName)
+        const RegionStep &step = m_steps[i];
+        if (step.isGroup) {
+            for (int j = 0; j < step.groupMembers.size(); ++j) {
+                const RegionStep &member = step.groupMembers[j];
+                if (!member.useWholeWindow && member.regionName == regionName)
+                    result << QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1);
+            }
+        } else if (!step.useWholeWindow && step.regionName == regionName) {
             result << QStringLiteral("ステップ%1").arg(i + 1);
+        }
     }
     return result;
+}
+
+void MainWindow::renameRegionReferences(QList<RegionStep> &steps, const QString &oldName,
+                                          const QString &newName) const
+{
+    for (RegionStep &step : steps) {
+        if (step.isGroup)
+            renameRegionReferences(step.groupMembers, oldName, newName);
+        else if (!step.useWholeWindow && step.regionName == oldName)
+            step.regionName = newName;
+    }
 }
 
 QString MainWindow::generateDefaultRegionName() const
@@ -642,14 +728,29 @@ QString MainWindow::generateDefaultRegionName() const
     }
 }
 
+bool MainWindow::currentTargetTopLeft(QPoint &outTopLeft) const
+{
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size())
+        return false;
+    QRect bounds;
+    const WindowInfo &target = m_windows[idx];
+    if (!PlatformAutomation::queryWindowBounds(target.windowId, target.pid, bounds))
+        return false;
+    outTopLeft = bounds.topLeft();
+    return true;
+}
+
 void MainWindow::onAddNamedRegion()
 {
     NamedRegion initial;
     initial.name = generateDefaultRegionName();
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
     // NamedRegionEditorDialog visualizes the region being built on screen
     // itself for the duration it's open (SPEC.md 6.3) -- MainWindow no
     // longer shows any on-screen highlight from the list selection.
-    NamedRegionEditorDialog dialog(initial, this);
+    NamedRegionEditorDialog dialog(initial, targetTopLeft, hasTarget, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -672,7 +773,9 @@ void MainWindow::onEditSelectedNamedRegion()
         return;
     const QString oldName = m_namedRegions[row].name;
 
-    NamedRegionEditorDialog dialog(m_namedRegions[row], this);
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
+    NamedRegionEditorDialog dialog(m_namedRegions[row], targetTopLeft, hasTarget, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -687,12 +790,10 @@ void MainWindow::onEditSelectedNamedRegion()
 
     m_namedRegions[row] = region;
     if (oldName != region.name) {
-        // Keep steps that referenced the old name pointing at the same
-        // region rather than silently breaking them.
-        for (RegionStep &step : m_steps) {
-            if (!step.useWholeWindow && step.regionName == oldName)
-                step.regionName = region.name;
-        }
+        // Keep steps (top-level or inside a group) that referenced the old
+        // name pointing at the same region rather than silently breaking
+        // them.
+        renameRegionReferences(m_steps, oldName, region.name);
         // refreshStepList() clears and re-adds all items, which drops the
         // list's current selection -- restore it so column ③'s kind/
         // ActionParams editors (keyed on that selection) aren't reset.
@@ -774,6 +875,23 @@ void MainWindow::loadActionParamsEditorForSelection()
         // groups entirely rather than showing controls that don't apply.
         m_actionParamsContextLabel->setText(
             QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）").arg(row + 1));
+        m_stepUseDefaultParamsRadio->blockSignals(true);
+        m_stepUseDefaultParamsRadio->setChecked(true);
+        m_stepUseDefaultParamsRadio->blockSignals(false);
+        m_stepUseDefaultParamsRadio->setEnabled(false);
+        m_stepUseCustomParamsRadio->setEnabled(false);
+        m_actionParamsEditor->setParams(m_defaultActionParams);
+        m_stepKindGroup->setEnabled(false);
+        m_lastEditedStepRow = -1;
+        return;
+    }
+
+    if (m_steps[row].isGroup) {
+        // A group's members each have their own region/action-kind/
+        // ActionParams settings, edited in StepGroupEditorDialog (via ②'s
+        // "編集..." button) rather than here -- see RegionStep::isGroup.
+        m_actionParamsContextLabel->setText(
+            QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください").arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -919,6 +1037,17 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    if (m_steps[row].isGroup) {
+        StepGroupEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams,
+                                      m_defaultActionKinds, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        m_steps[row] = dialog.result();
+        refreshStepList();
+        m_stepListWidget->setCurrentRow(row);
+        return;
+    }
+
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -982,6 +1111,116 @@ void MainWindow::onClearSteps()
     loadActionParamsEditorForSelection();
 }
 
+void MainWindow::onGroupSelectedSteps()
+{
+    QList<int> rows;
+    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
+        rows.append(m_stepListWidget->row(item));
+    std::sort(rows.begin(), rows.end());
+    if (rows.size() < 2)
+        return;
+    for (int row : rows) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup) {
+            QMessageBox::warning(
+                this, QStringLiteral("グループ化できません"),
+                QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
+                                "（グループの入れ子は未対応です）。"));
+            return;
+        }
+    }
+
+    flushActionParamsEditor();
+
+    RegionStep group;
+    group.isGroup = true;
+    group.groupTotalCallCount = 50;
+    for (int row : rows) {
+        RegionStep member = m_steps[row];
+        // Reset fields that only make sense at the top level or that this
+        // step doesn't already carry a meaningful value for -- a step
+        // being grouped for the first time defaults to equal weight among
+        // its new siblings.
+        member.isGroup = false;
+        member.groupMembers.clear();
+        member.groupWeight = 1;
+        group.groupMembers.append(member);
+    }
+
+    const int insertAt = rows.first();
+    for (int i = rows.size() - 1; i >= 0; --i)  // remove highest index first so earlier ones stay valid
+        m_steps.removeAt(rows[i]);
+    m_steps.insert(insertAt, group);
+
+    refreshStepList();
+    m_stepListWidget->setCurrentRow(insertAt);
+}
+
+void MainWindow::onUngroupSelectedStep()
+{
+    const int row = m_stepListWidget->currentRow();
+    if (row < 0 || row >= m_steps.size() || !m_steps[row].isGroup)
+        return;
+
+    flushActionParamsEditor();
+    const QList<RegionStep> members = m_steps[row].groupMembers;
+    m_steps.removeAt(row);
+    for (int i = 0; i < members.size(); ++i)
+        m_steps.insert(row + i, members[i]);
+
+    refreshStepList();
+    if (!members.isEmpty())
+        m_stepListWidget->setCurrentRow(row);
+    else
+        loadActionParamsEditorForSelection();
+}
+
+bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
+                                            QString &errorMessage) const
+{
+    if (step.isWaitStep || step.isGroup)
+        return true;  // nothing here to validate (a group's members are validated individually)
+    if (!step.hasAnyActionEnabled()) {
+        errorMessage = QStringLiteral(
+            "%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
+            "パネルで操作種別を1つ以上有効にしてください。")
+                           .arg(stepLabel);
+        return false;
+    }
+    const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
+    if (step.enableKey && params.allowedKeyChars.isEmpty()) {
+        errorMessage = QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
+                                        "（デフォルトまたはそのステップの専用設定）。")
+                           .arg(stepLabel);
+        return false;
+    }
+    if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
+        errorMessage = QStringLiteral(
+            "ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
+            "（デフォルトまたはそのステップの専用設定）。")
+                           .arg(stepLabel);
+        return false;
+    }
+    if (step.enableClick && step.enableRightClick && params.enableContextMenuSelection) {
+        if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName &&
+            params.contextMenuItemNames.isEmpty()) {
+            errorMessage = QStringLiteral(
+                "メニュー項目選択（項目名指定）を有効にした%1があります。候補項目名を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。")
+                               .arg(stepLabel);
+            return false;
+        }
+        if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByIndex &&
+            params.contextMenuIndices.isEmpty()) {
+            errorMessage = QStringLiteral(
+                "メニュー項目選択（番号指定）を有効にした%1があります。候補の番号を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。")
+                               .arg(stepLabel);
+            return false;
+        }
+    }
+    return true;
+}
+
 TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 {
     ok = false;
@@ -1009,41 +1248,23 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
         const RegionStep &step = m_steps[i];
         if (step.isWaitStep)
             continue;  // no region/action-kind/ActionParams fields to validate
-        if (!step.hasAnyActionEnabled()) {
-            errorMessage = QStringLiteral(
-                "ステップ%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
-                "パネルで操作種別を1つ以上有効にしてください。")
-                               .arg(i + 1);
-            return config;
-        }
-        const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
-        if (step.enableKey && params.allowedKeyChars.isEmpty()) {
-            errorMessage = QStringLiteral("キー入力を有効にしたステップがあります。使用文字を指定してください"
-                                            "（デフォルトまたはそのステップの専用設定）。");
-            return config;
-        }
-        if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
-            errorMessage = QStringLiteral(
-                "ショートカットキーを有効にしたステップがあります。ショートカットを最低1つ追加してください"
-                "（デフォルトまたはそのステップの専用設定）。");
-            return config;
-        }
-        if (step.enableClick && step.enableRightClick && params.enableContextMenuSelection) {
-            if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName &&
-                params.contextMenuItemNames.isEmpty()) {
-                errorMessage = QStringLiteral(
-                    "メニュー項目選択（項目名指定）を有効にしたステップがあります。候補項目名を最低1つ追加してください"
-                    "（デフォルトまたはそのステップの専用設定）。");
+        if (step.isGroup) {
+            if (step.groupMembers.isEmpty()) {
+                errorMessage =
+                    QStringLiteral("ステップ%1（グループ）にステップが登録されていません。").arg(i + 1);
                 return config;
             }
-            if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByIndex &&
-                params.contextMenuIndices.isEmpty()) {
-                errorMessage = QStringLiteral(
-                    "メニュー項目選択（番号指定）を有効にしたステップがあります。候補の番号を最低1つ追加してください"
-                    "（デフォルトまたはそのステップの専用設定）。");
-                return config;
+            for (int j = 0; j < step.groupMembers.size(); ++j) {
+                if (!validateStepActionConfig(
+                        step.groupMembers[j],
+                        QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1),
+                        errorMessage))
+                    return config;
             }
+            continue;
         }
+        if (!validateStepActionConfig(step, QStringLiteral("ステップ%1").arg(i + 1), errorMessage))
+            return config;
     }
 
     if (m_intervalModeRateRadio->isChecked()) {
@@ -1073,11 +1294,14 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_stepsGroup->setEnabled(enabled);
     m_actionParamsGroup->setEnabled(enabled);
     const int selectedStepRow = m_stepListWidget->currentRow();
-    const bool kindGroupApplicable =
-        selectedStepRow >= 0 && selectedStepRow < m_steps.size() && !m_steps[selectedStepRow].isWaitStep;
+    const bool kindGroupApplicable = selectedStepRow >= 0 && selectedStepRow < m_steps.size() &&
+                                      !m_steps[selectedStepRow].isWaitStep &&
+                                      !m_steps[selectedStepRow].isGroup;
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
+    m_savePresetAction->setEnabled(enabled);
+    m_loadPresetAction->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
@@ -1085,6 +1309,23 @@ void MainWindow::setControlsEnabled(bool enabled)
         m_pauseResumeButton->setText(QStringLiteral("‖ 一時停止"));
         m_resourceUsageLabel->clear();
     }
+    updateGroupButtonsEnabled();
+}
+
+void MainWindow::updateGroupButtonsEnabled()
+{
+    const QList<QListWidgetItem *> selected = m_stepListWidget->selectedItems();
+    int plainCount = 0;
+    for (QListWidgetItem *item : selected) {
+        const int row = m_stepListWidget->row(item);
+        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup)
+            ++plainCount;
+    }
+    m_groupStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
+                                    plainCount == selected.size());
+    const int row = m_stepListWidget->currentRow();
+    m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
+                                     row < m_steps.size() && m_steps[row].isGroup);
 }
 
 void MainWindow::onStart()
@@ -1251,7 +1492,172 @@ void MainWindow::onSaveLog()
     }
 }
 
+void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary)
+{
+    m_lastSummary = summary;
+    m_hasLastSummary = true;
+    m_saveSummaryButton->setEnabled(true);
+    m_saveSummaryButton->setToolTip(QString());
+    // Also written straight into the log (SPEC.md 10) so it's visible right
+    // away without a separate save step, and is included in "ログを保存...".
+    for (const QString &line : RandomActionEngine::formatSummaryText(summary).split(QLatin1Char('\n')))
+        appendLog(line);
+}
+
+void MainWindow::onSaveSummary()
+{
+    if (!m_hasLastSummary)
+        return;
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("実行結果サマリーを保存"), QStringLiteral("summary.json"),
+        QStringLiteral("JSON (*.json);;テキスト (*.txt)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        return;
+    }
+    if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+        const QJsonDocument doc(RandomActionEngine::summaryToJson(m_lastSummary));
+        file.write(doc.toJson(QJsonDocument::Indented));
+    } else {
+        file.write(RandomActionEngine::formatSummaryText(m_lastSummary).toUtf8());
+    }
+}
+
+void MainWindow::onGlobalEmergencyStop()
+{
+    if (!m_engine->isRunning())
+        return;
+    appendLog(QStringLiteral("グローバル緊急停止ホットキーが押されました。"));
+    m_engine->stop();
+}
+
 void MainWindow::onOpenAccessibilitySettings()
 {
     PlatformAutomation::openAccessibilitySettings();
+}
+
+void MainWindow::onSavePreset()
+{
+    flushActionParamsEditor();
+
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("テスト設定を保存"),
+                                                        QStringLiteral("preset.json"),
+                                                        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    QJsonObject root;
+    root["formatVersion"] = 1;
+    // Reference only -- pids aren't stable across runs, so the target still
+    // has to be picked from ①'s live-enumerated list after loading; this
+    // just helps the user recognize which entry to pick.
+    const int targetIdx = m_targetCombo->currentIndex();
+    root["targetAppNameHint"] =
+        (targetIdx >= 0 && targetIdx < m_windows.size()) ? m_windows[targetIdx].appName : QString();
+
+    QJsonArray regionsArr;
+    for (const NamedRegion &r : m_namedRegions)
+        regionsArr.append(namedRegionToJson(r));
+    root["namedRegions"] = regionsArr;
+
+    QJsonArray stepsArr;
+    for (const RegionStep &s : m_steps)
+        stepsArr.append(regionStepToJson(s));
+    root["steps"] = stepsArr;
+
+    root["defaultActionParams"] = actionParamsToJson(m_defaultActionParams);
+    root["defaultActionKinds"] = regionStepToJson(m_defaultActionKinds);
+
+    QJsonObject timing;
+    timing["intervalMode"] = m_intervalModeRateRadio->isChecked() ? QStringLiteral("rate") : QStringLiteral("ms");
+    timing["minIntervalMs"] = m_minIntervalSpin->value();
+    timing["maxIntervalMs"] = m_maxIntervalSpin->value();
+    timing["minRate"] = m_minRateSpin->value();
+    timing["maxRate"] = m_maxRateSpin->value();
+    timing["maxIterations"] = m_maxIterationsSpin->value();
+    timing["maxDurationSec"] = m_maxDurationSecSpin->value();
+    timing["maxSequenceLoops"] = m_maxSequenceLoopsSpin->value();
+    timing["keepTargetActive"] = m_keepActiveCheck->isChecked();
+    timing["rngSeed"] = m_rngSeedSpin->value();
+    root["timing"] = timing;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        return;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    appendLog(QStringLiteral("テスト設定を保存しました: %1").arg(path));
+}
+
+void MainWindow::onLoadPreset()
+{
+    if (!m_steps.isEmpty() || !m_namedRegions.isEmpty()) {
+        const auto reply = QMessageBox::question(
+            this, QStringLiteral("確認"),
+            QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？"));
+        if (reply != QMessageBox::Yes)
+            return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("テスト設定を読み込む"), QString(),
+                                                        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("読み込みエラー"), QStringLiteral("ファイルを開けませんでした。"));
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        QMessageBox::warning(this, QStringLiteral("読み込みエラー"),
+                              QStringLiteral("JSONとして解釈できませんでした: %1").arg(parseError.errorString()));
+        return;
+    }
+    const QJsonObject root = doc.object();
+
+    m_namedRegions.clear();
+    for (const QJsonValue &v : root["namedRegions"].toArray())
+        m_namedRegions.append(namedRegionFromJson(v.toObject()));
+
+    m_steps.clear();
+    for (const QJsonValue &v : root["steps"].toArray())
+        m_steps.append(regionStepFromJson(v.toObject()));
+
+    m_defaultActionParams = actionParamsFromJson(root["defaultActionParams"].toObject());
+    m_defaultActionKinds = regionStepFromJson(root["defaultActionKinds"].toObject());
+
+    const QJsonObject timing = root["timing"].toObject();
+    if (timing["intervalMode"].toString() == QStringLiteral("rate"))
+        m_intervalModeRateRadio->setChecked(true);
+    else
+        m_intervalModeMsRadio->setChecked(true);
+    m_minIntervalSpin->setValue(timing["minIntervalMs"].toInt(m_minIntervalSpin->value()));
+    m_maxIntervalSpin->setValue(timing["maxIntervalMs"].toInt(m_maxIntervalSpin->value()));
+    m_minRateSpin->setValue(timing["minRate"].toDouble(m_minRateSpin->value()));
+    m_maxRateSpin->setValue(timing["maxRate"].toDouble(m_maxRateSpin->value()));
+    m_maxIterationsSpin->setValue(timing["maxIterations"].toInt(m_maxIterationsSpin->value()));
+    m_maxDurationSecSpin->setValue(timing["maxDurationSec"].toInt(m_maxDurationSecSpin->value()));
+    m_maxSequenceLoopsSpin->setValue(timing["maxSequenceLoops"].toInt(m_maxSequenceLoopsSpin->value()));
+    m_keepActiveCheck->setChecked(timing["keepTargetActive"].toBool(m_keepActiveCheck->isChecked()));
+    m_rngSeedSpin->setValue(timing["rngSeed"].toInt(m_rngSeedSpin->value()));
+
+    m_lastEditedStepRow = -1;
+    refreshNamedRegionList();
+    refreshStepList();
+    loadActionParamsEditorForSelection();
+
+    const QString hint = root["targetAppNameHint"].toString();
+    appendLog(hint.isEmpty()
+                  ? QStringLiteral("テスト設定を読み込みました: %1").arg(path)
+                  : QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
+                                    "①で対象ウィンドウを選び直してください）")
+                        .arg(path, hint));
 }

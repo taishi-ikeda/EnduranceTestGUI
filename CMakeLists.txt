@@ -59,6 +59,8 @@ set(SOURCES
     src/NamedRegionEditorDialog.cpp
     src/DefaultActionParamsDialog.cpp
     src/ActionKindEditor.cpp
+    src/StepGroupEditorDialog.cpp
+    src/TestConfigJson.cpp
 )
 
 set(HEADERS
@@ -72,19 +74,21 @@ set(HEADERS
     src/NamedRegionEditorDialog.h
     src/DefaultActionParamsDialog.h
     src/ActionKindEditor.h
+    src/StepGroupEditorDialog.h
     src/TestConfig.h
+    src/TestConfigJson.h
 )
 
-list(APPEND HEADERS src/platform/PlatformAutomation.h)
+list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h)
 
 if(APPLE)
     enable_language(OBJCXX)
-    list(APPEND SOURCES src/platform/macos/Automation_mac.mm)
-    set_source_files_properties(src/platform/macos/Automation_mac.mm PROPERTIES
+    list(APPEND SOURCES src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm)
+    set_source_files_properties(src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
     )
 elseif(UNIX)
-    list(APPEND SOURCES src/platform/linux/Automation_linux.cpp)
+    list(APPEND SOURCES src/platform/linux/Automation_linux.cpp src/platform/linux/GlobalHotkey_linux.cpp)
 endif()
 
 add_executable(EnduranceTestGUI ${SOURCES} ${HEADERS})

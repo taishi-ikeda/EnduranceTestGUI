@@ -228,6 +228,16 @@ bool queryWindowBounds(quint32 windowId, qint64 pid, QRect &outBounds)
     return false;
 }
 
+QList<quint32> listWindowIdsForPid(qint64 pid)
+{
+    QList<quint32> result;
+    for (const WindowInfo &w : collectWindows()) {
+        if (w.pid == pid)
+            result.append(w.windowId);
+    }
+    return result;
+}
+
 // Unlike collectWindows(), this isn't filtered to only currently-viewable
 // (mapped) windows, so it can still find a window that's been minimized/
 // iconified -- needed so activateProcess() can restore one.
@@ -334,6 +344,129 @@ ProcessStats queryProcessStats(qint64 pid)
     stats.ok = statusFile.isOpen() || statFile.isOpen() ||
                QFile::exists(QStringLiteral("/proc/%1").arg(pid));
     return stats;
+}
+
+namespace
+{
+// State for the single in-flight _NET_WM_PING probe (SPEC.md 8/10). Only
+// one target is ever tested at a time (one RandomActionEngine per process),
+// so a single static slot is enough -- keyed by windowId so a probe left
+// over from a previous run against a different window is simply ignored
+// rather than misread as a reply for the new one.
+struct PingState
+{
+    quint32 windowId = 0;
+    quint32 nonce = 0;
+    bool haveOutstanding = false;
+};
+PingState g_pingState;
+quint32 g_pingCounter = 0;
+
+bool windowSupportsPing(Display *dpy, Window w)
+{
+    Atom *protocols = nullptr;
+    int count = 0;
+    if (!XGetWMProtocols(dpy, w, &protocols, &count))
+        return false;
+    const Atom netWmPing = XInternAtom(dpy, "_NET_WM_PING", True);
+    bool supported = false;
+    for (int i = 0; i < count; ++i) {
+        if (protocols[i] == netWmPing) {
+            supported = true;
+            break;
+        }
+    }
+    if (protocols)
+        XFree(protocols);
+    return supported;
+}
+
+// Sent straight to the client window (not via SubstructureRedirect the way
+// activateProcess()'s _NET_ACTIVE_WINDOW message is) -- this is the ping
+// *request*; per the EWMH spec, a responsive client's event loop echoes the
+// identical ClientMessage back to the *root* window, which is what
+// hasPingReply() below watches for.
+void sendPing(Display *dpy, Window w, quint32 nonce)
+{
+    const Atom wmProtocols = XInternAtom(dpy, "WM_PROTOCOLS", True);
+    const Atom netWmPing = XInternAtom(dpy, "_NET_WM_PING", True);
+    if (wmProtocols == None || netWmPing == None)
+        return;
+
+    XEvent ev = {};
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = w;
+    ev.xclient.message_type = wmProtocols;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = long(netWmPing);
+    // A small counter, not a real timestamp: ClientMessage data fields are
+    // 32-bit on the wire regardless of `long`'s width on this platform, so
+    // anything wider (e.g. a 64-bit epoch-ms value) would get silently
+    // truncated in transit and no longer match what's stored here for
+    // comparison. A monotonically increasing counter never needs more than
+    // 32 bits in any realistic run.
+    ev.xclient.data.l[1] = long(nonce);
+    ev.xclient.data.l[2] = long(w);
+    XSendEvent(dpy, w, False, NoEventMask, &ev);
+    XFlush(dpy);
+}
+
+bool hasPingReply(Display *dpy, Window root, Window w, Atom netWmPing, quint32 expectedNonce)
+{
+    const Atom wmProtocols = XInternAtom(dpy, "WM_PROTOCOLS", True);
+    XEvent ev;
+    // Non-blocking: only drains events already queued/available. Any
+    // ClientMessage on root that doesn't match is some other client's
+    // business (we're not the window manager), not an error here.
+    while (XCheckTypedWindowEvent(dpy, root, ClientMessage, &ev)) {
+        if (Atom(ev.xclient.message_type) == wmProtocols &&
+            Atom(ev.xclient.data.l[0]) == netWmPing &&
+            quint32(ev.xclient.data.l[1]) == expectedNonce && Window(ev.xclient.data.l[2]) == w) {
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
+ResponsivenessCheck checkWindowResponsive(quint32 windowId, qint64 /*pid*/)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return ResponsivenessCheck::Unsupported;
+
+    const Window w = Window(windowId);
+    const Window root = DefaultRootWindow(dpy);
+    const Atom netWmPing = XInternAtom(dpy, "_NET_WM_PING", True);
+    if (netWmPing == None || !windowSupportsPing(dpy, w))
+        return ResponsivenessCheck::Unsupported;
+
+    // Multiple clients may select SubstructureNotifyMask on root at once
+    // (unlike SubstructureRedirectMask, which is exclusive to the window
+    // manager), so adding ourselves as a second listener here doesn't
+    // fight the real WM for it.
+    static bool selectedRootInput = false;
+    if (!selectedRootInput) {
+        XSelectInput(dpy, root, SubstructureNotifyMask);
+        selectedRootInput = true;
+    }
+
+    // Pending (not Responding) when there's no previous probe for this
+    // window to evaluate yet -- see the enum's own doc comment for why
+    // that distinction matters to callers.
+    ResponsivenessCheck result = ResponsivenessCheck::Pending;
+    if (g_pingState.haveOutstanding && g_pingState.windowId == windowId) {
+        result = hasPingReply(dpy, root, w, netWmPing, g_pingState.nonce)
+                     ? ResponsivenessCheck::Responding
+                     : ResponsivenessCheck::NotResponding;
+    }
+
+    g_pingState.windowId = windowId;
+    g_pingState.nonce = ++g_pingCounter;
+    g_pingState.haveOutstanding = true;
+    sendPing(dpy, w, g_pingState.nonce);
+
+    return result;
 }
 
 qint64 windowPidAtPoint(const QPoint &pt)

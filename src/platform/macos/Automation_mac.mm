@@ -99,6 +99,16 @@ bool queryWindowBounds(quint32 windowId, qint64 pid, QRect &outBounds)
     return false;
 }
 
+QList<quint32> listWindowIdsForPid(qint64 pid)
+{
+    QList<quint32> result;
+    for (const WindowInfo &w : collectWindows()) {
+        if (w.pid == pid)
+            result.append(w.windowId);
+    }
+    return result;
+}
+
 bool activateProcess(qint64 pid)
 {
     NSRunningApplication *app =
@@ -152,6 +162,19 @@ ProcessStats queryProcessStats(qint64 pid)
     stats.residentMemoryMB = double(info.pti_resident_size) / (1024.0 * 1024.0);
     stats.cpuTimeSeconds = double(info.pti_total_user + info.pti_total_system) / 1e9;
     return stats;
+}
+
+ResponsivenessCheck checkWindowResponsive(quint32 /*windowId*/, qint64 /*pid*/)
+{
+    // Activity Monitor / "System Events... is not responding" get this from
+    // an undocumented private CoreGraphics/SkyLight symbol
+    // (CGSEventIsAppUnresponsive), not any public API. Rather than depend
+    // on a private symbol that Apple could change or remove without notice
+    // in an OS update, hang detection is intentionally left unimplemented
+    // on macOS -- RandomActionEngine treats Unsupported as "skip
+    // hang-checking, degrade gracefully" the same way it already does when
+    // AT-SPI is unavailable on Linux (see SPEC.md 8/10).
+    return ResponsivenessCheck::Unsupported;
 }
 
 static CGPoint toCGPoint(const QPoint &pt)

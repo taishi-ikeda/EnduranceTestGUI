@@ -101,13 +101,15 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     windowOpRow->addWidget(m_windowOpWeightSpin);
     layout->addLayout(windowOpRow);
 
-    auto *countRow = new QHBoxLayout;
-    countRow->addWidget(new QLabel(QStringLiteral("操作回数:"), this));
-    m_actionCountSpin = new QSpinBox(this);
+    m_countRowWidget = new QWidget(this);
+    auto *countRow = new QHBoxLayout(m_countRowWidget);
+    countRow->setContentsMargins(0, 0, 0, 0);
+    countRow->addWidget(new QLabel(QStringLiteral("操作回数:"), m_countRowWidget));
+    m_actionCountSpin = new QSpinBox(m_countRowWidget);
     m_actionCountSpin->setRange(1, 1000000);
     countRow->addWidget(m_actionCountSpin);
     countRow->addStretch();
-    layout->addLayout(countRow);
+    layout->addWidget(m_countRowWidget);
 
     const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
                                         m_doubleClickCheck, m_dragCheck,        m_keyCheck,
@@ -173,4 +175,9 @@ void ActionKindEditor::applyKindsTo(RegionStep &step) const
     step.enableWindowOp = m_windowOpCheck->isChecked();
     step.windowOpWeight = m_windowOpWeightSpin->value();
     step.actionCount = m_actionCountSpin->value();
+}
+
+void ActionKindEditor::setActionCountRowVisible(bool visible)
+{
+    m_countRowWidget->setVisible(visible);
 }

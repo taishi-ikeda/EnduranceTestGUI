@@ -1,5 +1,6 @@
 #include "NamedRegionEditorDialog.h"
 
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -26,8 +27,15 @@ QString labeledRect(const QString &prefix, int index, const QRect &r)
 }
 }  // namespace
 
-NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWidget *parent)
-    : QDialog(parent), m_regions(initial.regions), m_excludeRegions(initial.excludeRegions)
+NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, const QPoint &targetTopLeft,
+                                                   bool hasTarget, QWidget *parent)
+    : QDialog(parent),
+      m_regions(initial.regions),
+      m_excludeRegions(initial.excludeRegions),
+      m_targetTopLeft(targetTopLeft),
+      m_hasTarget(hasTarget),
+      m_existingAnchorTopLeft(initial.anchorTopLeft),
+      m_hadExistingAnchor(initial.followsTargetWindow)
 {
     setWindowTitle(QStringLiteral("操作領域の設定"));
 
@@ -74,6 +82,23 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, QWi
             &NamedRegionEditorDialog::onDrawExcludeRegions);
     connect(m_removeExcludeButton, &QPushButton::clicked, this,
             &NamedRegionEditorDialog::onRemoveSelectedExcludeRegion);
+
+    // SPEC.md 10: named regions are fixed screen coordinates by default, so
+    // they don't follow the target window if it moves. Opting in here
+    // records the target's current top-left as this region's anchor;
+    // RandomActionEngine translates the rectangles by however far the
+    // target has moved from that anchor each time the region is used.
+    // QCheckBox has no setWordWrap(); break the long label manually instead
+    // (same technique used elsewhere in this app -- SPEC.md 6.9).
+    m_followTargetCheck = new QCheckBox(
+        QStringLiteral("対象ウィンドウの移動に追従させる\n（保存時の対象ウィンドウ位置を基準に記録）"), this);
+    m_followTargetCheck->setChecked(m_hadExistingAnchor);
+    m_followTargetCheck->setEnabled(m_hasTarget);
+    m_followTargetCheck->setToolTip(
+        m_hasTarget ? QStringLiteral("OKを押した時点の対象ウィンドウの位置を基準点として記録します。")
+                    : QStringLiteral("対象ウィンドウが選択されていないため、今は変更できません"
+                                     "（既存の設定はそのまま保持されます）。"));
+    layout->addWidget(m_followTargetCheck);
 
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &NamedRegionEditorDialog::onAccept);
@@ -195,5 +220,14 @@ NamedRegion NamedRegionEditorDialog::result() const
     region.name = m_nameEdit->text().trimmed();
     region.regions = m_regions;
     region.excludeRegions = m_excludeRegions;
+    region.followsTargetWindow = m_followTargetCheck->isChecked();
+    if (region.followsTargetWindow) {
+        // Rebase to the live target position when one is available (the
+        // checkbox is only interactively toggleable in that case anyway);
+        // otherwise this is an already-following region being re-saved
+        // with no target currently selected, so keep its existing anchor
+        // rather than losing track of it.
+        region.anchorTopLeft = m_hasTarget ? m_targetTopLeft : m_existingAnchorTopLeft;
+    }
     return region;
 }

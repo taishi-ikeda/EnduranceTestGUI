@@ -29,6 +29,14 @@ public:
     // ActionParams-source fields untouched.
     void applyKindsTo(RegionStep &step) const;
 
+    // Hides the "操作回数" row entirely -- used when this editor is
+    // editing a step that is a member of a step group (SPEC.md 6.2),
+    // where the *group's* total call count governs how many actions
+    // happen overall, not this member's own actionCount (which
+    // applyKindsTo() still writes, but StepGroupEditorDialog simply
+    // doesn't read it back). Visible by default.
+    void setActionCountRowVisible(bool visible);
+
 signals:
     // Emitted whenever any checkbox/spinbox changes, including during
     // setKinds() as it programmatically updates widgets -- callers that
@@ -60,4 +68,5 @@ private:
     QCheckBox *m_windowOpCheck = nullptr;
     QSpinBox *m_windowOpWeightSpin = nullptr;
     QSpinBox *m_actionCountSpin = nullptr;
+    QWidget *m_countRowWidget = nullptr;  // wraps the "操作回数" row so it can be hidden as a unit
 };

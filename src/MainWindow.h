@@ -21,9 +21,11 @@ class QPlainTextEdit;
 class QPushButton;
 class QGroupBox;
 class QTimer;
+class QAction;
 class StopPanel;
 class ActionParamsEditor;
 class ActionKindEditor;
+class GlobalHotkey;
 
 // Main window, laid out (per SPEC.md 6.9) as three columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
@@ -62,6 +64,8 @@ private slots:
     void onMoveStepUp();
     void onMoveStepDown();
     void onClearSteps();
+    void onGroupSelectedSteps();
+    void onUngroupSelectedStep();
     void onStepSelectionChanged();
     void onStepParamsModeChanged();
     void onEditDefaultParams();
@@ -77,10 +81,15 @@ private slots:
     void onResourceUsageUpdated(double residentMemoryMB, double cpuPercent);
     void onClearLog();
     void onSaveLog();
+    void onRunSummaryReady(const RandomActionEngine::RunSummary &summary);
+    void onSaveSummary();
     void onOpenAccessibilitySettings();
     void updateElapsedLabel();
     void onAboutApp();
     void onAboutQt();
+    void onSavePreset();
+    void onLoadPreset();
+    void onGlobalEmergencyStop();
 
 private:
     void buildUi();
@@ -91,6 +100,11 @@ private:
 
     void refreshStepList();
     void refreshNamedRegionList();
+    // Live bounds top-left of whatever target is currently selected in
+    // m_targetCombo, if any -- used as the anchor point for a named
+    // region's "follow target window" option (SPEC.md 6.3/10). Returns
+    // false (outTopLeft left unset) if no target is currently selectable.
+    bool currentTargetTopLeft(QPoint &outTopLeft) const;
     QString describeNamedRegion(const NamedRegion &region) const;
     // "領域1", "領域2", ... -- the first of these not already used by an
     // existing named region, so a new region always starts with a usable
@@ -98,10 +112,30 @@ private:
     QString generateDefaultRegionName() const;
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
+    // Recurses into group members (a step inside a group can reference a
+    // named region just like a top-level one).
     QStringList stepsReferencing(const QString &regionName) const;
+    // Renames `regionName` to `newName` in every step that references it,
+    // top-level or inside a group (SPEC.md 6.2/6.3) -- called when a named
+    // region is renamed so existing references keep pointing at it.
+    void renameRegionReferences(QList<RegionStep> &steps, const QString &oldName, const QString &newName) const;
+    // True if every enabled action kind on `step` (or, when it's a group,
+    // on every one of its members) has the configuration it needs to
+    // actually run (e.g. enableKey needs a non-empty character set) --
+    // used by buildConfigFromUi() to validate top-level steps and group
+    // members alike. On failure, fills in `errorMessage` (referencing
+    // `stepLabel`) and returns false.
+    bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
+                                   QString &errorMessage) const;
     void flushActionParamsEditor();
     void loadActionParamsEditorForSelection();
     void setControlsEnabled(bool enabled);
+    // Enables m_groupStepsButton/m_ungroupStepButton based on the current
+    // ②list selection (2+ plain steps -> グループ化; exactly one group ->
+    // グループ解除) and whether the steps panel is enabled at all (i.e.
+    // not mid-run) -- called both when the selection changes and whenever
+    // setControlsEnabled() toggles run state.
+    void updateGroupButtonsEnabled();
     TestConfig buildConfigFromUi(bool &ok, QString &errorMessage) const;
     void appendLog(const QString &message);
     QString describeStep(const RegionStep &step, int index) const;
@@ -129,6 +163,13 @@ private:
     QPushButton *m_moveStepUpButton = nullptr;
     QPushButton *m_moveStepDownButton = nullptr;
     QPushButton *m_clearStepsButton = nullptr;
+    // Combines the currently multi-selected steps into a single group step
+    // (SPEC.md 6.2): enabled only when 2+ plain steps (no wait steps, no
+    // groups -- groups cannot be nested) are selected. "グループ解除" is
+    // the reverse: enabled only when exactly one group is selected, and
+    // replaces it with its member steps as standalone top-level steps.
+    QPushButton *m_groupStepsButton = nullptr;
+    QPushButton *m_ungroupStepButton = nullptr;
     QList<RegionStep> m_steps;
     // Index into m_steps currently being executed by m_engine, or -1 while
     // not running; describeStep() marks this one so ②'s list shows
@@ -199,9 +240,26 @@ private:
 
     // Log
     QPlainTextEdit *m_logView = nullptr;
+    QPushButton *m_saveSummaryButton = nullptr;
+    RandomActionEngine::RunSummary m_lastSummary;
+    bool m_hasLastSummary = false;
 
     RandomActionEngine *m_engine = nullptr;
     QPointer<StopPanel> m_stopPanel;
     QTimer *m_uiTimer = nullptr;
     QElapsedTimer m_runElapsed;
+
+    // "ファイル" menu: save/load the whole editable test setup (named
+    // regions, steps, default action params/kinds, timing & limits) as a
+    // JSON preset file (SPEC.md 10) -- disabled while a run is in progress,
+    // alongside the rest of the ①②③ panels (setControlsEnabled()).
+    QAction *m_savePresetAction = nullptr;
+    QAction *m_loadPresetAction = nullptr;
+
+    // System-wide emergency-stop hotkey (Ctrl+Alt+Shift+Esc), a backstop
+    // for the floating StopPanel button -- see GlobalHotkey.h and SPEC.md
+    // 6.7/10. May be null-effective (registered but never fires) if the
+    // combo couldn't be grabbed on this system; that's a soft failure, not
+    // a fatal one.
+    GlobalHotkey *m_globalHotkey = nullptr;
 };

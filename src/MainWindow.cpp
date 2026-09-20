@@ -970,6 +970,8 @@ void MainWindow::loadActionParamsEditorForSelection()
 
 void MainWindow::onStepSelectionChanged()
 {
+    if (m_suppressStepSelectionHandling)
+        return;
     flushActionParamsEditor();
     loadActionParamsEditorForSelection();
 }
@@ -1108,13 +1110,15 @@ void MainWindow::onRemoveSelectedStep()
     if (row < 0 || row >= m_steps.size())
         return;
     flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
     m_steps.removeAt(row);
     refreshStepList();
     const int newRow = qMin(row, m_steps.size() - 1);
     if (newRow >= 0)
         m_stepListWidget->setCurrentRow(newRow);
-    else
-        loadActionParamsEditorForSelection();
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onMoveStepUp()
@@ -1122,9 +1126,13 @@ void MainWindow::onMoveStepUp()
     const int row = m_stepListWidget->currentRow();
     if (row > 0 && row < m_steps.size()) {
         flushActionParamsEditor();
+        m_lastEditedStepRow = -1;
+        m_suppressStepSelectionHandling = true;
         m_steps.move(row, row - 1);
         refreshStepList();
         m_stepListWidget->setCurrentRow(row - 1);
+        m_suppressStepSelectionHandling = false;
+        loadActionParamsEditorForSelection();
     }
 }
 
@@ -1133,9 +1141,13 @@ void MainWindow::onMoveStepDown()
     const int row = m_stepListWidget->currentRow();
     if (row >= 0 && row < m_steps.size() - 1) {
         flushActionParamsEditor();
+        m_lastEditedStepRow = -1;
+        m_suppressStepSelectionHandling = true;
         m_steps.move(row, row + 1);
         refreshStepList();
         m_stepListWidget->setCurrentRow(row + 1);
+        m_suppressStepSelectionHandling = false;
+        loadActionParamsEditorForSelection();
     }
 }
 
@@ -1166,6 +1178,8 @@ void MainWindow::onGroupSelectedSteps()
     }
 
     flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
 
     RegionStep group;
     group.isGroup = true;
@@ -1189,6 +1203,8 @@ void MainWindow::onGroupSelectedSteps()
 
     refreshStepList();
     m_stepListWidget->setCurrentRow(insertAt);
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onUngroupSelectedStep()
@@ -1198,6 +1214,8 @@ void MainWindow::onUngroupSelectedStep()
         return;
 
     flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
     const QList<RegionStep> members = m_steps[row].groupMembers;
     m_steps.removeAt(row);
     for (int i = 0; i < members.size(); ++i)
@@ -1206,8 +1224,8 @@ void MainWindow::onUngroupSelectedStep()
     refreshStepList();
     if (!members.isEmpty())
         m_stepListWidget->setCurrentRow(row);
-    else
-        loadActionParamsEditorForSelection();
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
 }
 
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,

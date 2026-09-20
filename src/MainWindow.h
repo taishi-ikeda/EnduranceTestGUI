@@ -185,6 +185,17 @@ private:
     ActionParamsEditor *m_actionParamsEditor = nullptr;
     ActionParams m_defaultActionParams;
     int m_lastEditedStepRow = -1;  // row whose params/kinds the editors currently reflect, -1 = defaults
+    // Set around any sequence that mutates m_steps' indices (move/remove/
+    // group/ungroup) and then re-populates/reselects m_stepListWidget:
+    // QListWidget::clear() and setCurrentRow() both fire currentRowChanged
+    // synchronously, which would otherwise re-enter onStepSelectionChanged()
+    // mid-mutation and flush the (by-then-stale) editor contents into
+    // whichever step has shifted into that index -- silently corrupting it
+    // (or, once m_lastEditedStepRow is invalidated, into m_defaultActionParams
+    // instead). While this is true, onStepSelectionChanged() does nothing;
+    // the caller calls loadActionParamsEditorForSelection() itself once,
+    // after the dust settles.
+    bool m_suppressStepSelectionHandling = false;
 
     // Step-level: which action kinds the selected step performs, their
     // relative weight, and its action count (SPEC.md 6.2/6.3). There is no

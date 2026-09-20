@@ -1602,6 +1602,45 @@ macOS上ではQtがこの種のメニュー項目を自動的にアプリケー�
   グループメンバーのどちらから呼ばれても同じ経路を通る。JSONプリセットにも設定を保存/
   復元するようにした。実機（Xvfb + openbox）で3つの撮影タイミングそれぞれについて実行→
   保存までの一連の流れを確認済み。
+- v0.45: コードレビューを実施し、【重要度高】②ステップ構成・グループ編集ダイアログの
+  「↑上へ/↓下へ/削除/グループ化/グループ解除」操作が、無関係な別のステップ（または
+  グループメンバー）の設定を破損させうる不具合を発見・修正した。
+  - **原因**: `MainWindow::onMoveStepUp`等は「③の編集中の内容を`m_steps[m_lastEditedStepRow]`
+    へ`flushActionParamsEditor()`で書き込む→`m_steps`を並べ替え/削除→
+    `refreshStepList()`→`setCurrentRow(newRow)`」という順で処理する。ところが
+    `QListWidget::clear()`（`refreshStepList()`内）と`setCurrentRow()`はどちらも
+    `currentRowChanged`シグナルを**同期的に**発火し、`MainWindow::onStepSelectionChanged`
+    （`flushActionParamsEditor()`→`loadActionParamsEditorForSelection()`）を再入させる。
+    この再入時点では`m_steps`は既に並べ替え/削除済みだが`m_lastEditedStepRow`は
+    まだ移動前の古いインデックスのままのため、再入したflushが「移動後にそのインデックスへ
+    シフトしてきた別のステップ」へ、表示されたままの（別ステップの）編集内容を書き込んで
+    しまう（インデックスが無効化されている場合はさらに、`flushActionParamsEditor`の
+    `m_lastEditedStepRow < 0`分岐により共有の`m_defaultActionParams`が別ステップの
+    カスタム設定で上書きされる、という2次的な不具合も生じうる）。v0.39で見つかった
+    参照エイリアシングの不具合（本章参照）と根は同じ「flushの再入」だが、あちらは
+    ステップ選択そのものが変わらないケースの話で、今回はステップの**インデックスが
+    ミューテーションの前後で変わる**操作（並べ替え/削除/グループ化/グループ解除）に
+    特有の別パターン。
+  - **修正**: `MainWindow`に`m_suppressStepSelectionHandling`フラグを追加し、
+    `onStepSelectionChanged()`の先頭でこれが立っている間は何もしないようにした上で、
+    上記5つの操作それぞれで「flush（移動前のインデックスへ）→
+    `m_lastEditedStepRow = -1`→抑制フラグON→`m_steps`をミューテーション→
+    `refreshStepList()`→`setCurrentRow()`→抑制フラグOFF→
+    `loadActionParamsEditorForSelection()`を1回明示的に呼ぶ」という一連の流れに書き換えた。
+    `StepGroupEditorDialog::onMoveMemberUp/Down`（グループ編集ダイアログのメンバー並べ替え）
+    にも同型の不具合があったが、こちらは`flushMemberEditor()`が無効なインデックスに対して
+    単に何もしない（`MainWindow`のような「共有デフォルトへ書き込む」副作用がない）ため、
+    既存の`onRemoveSelectedMember`と同じ「ミューテーション前に`m_lastEditedMemberRow = -1`
+    にする」という単純な修正で十分だった。
+  - **実機確認**（Xvfb + openbox）: 操作回数や使用文字（カスタムActionParams）に
+    それぞれ異なる値を設定した3つのステップを作り、末尾のステップを選択した状態で
+    「↑上へ」を押したところ、修正前の設計のまま再現させると別のステップの設定が
+    上書きされて失われるはずのところ、修正後は移動元/移動先いずれのステップの設定も
+    正しく保たれ、かつ共有デフォルト（キー入力の使用文字）も書き換わっていないことを
+    「デフォルトの操作設定」ダイアログで確認した。同様に、削除操作でも隣接ステップの
+    設定が保たれることを確認。グループ編集ダイアログのメンバー並べ替えについても、
+    重みに異なる値（1と9）を設定した2メンバーで並べ替えを行い、双方の重みが正しく
+    保たれることを確認した。-Wall -Wextra -Wpedantic付きビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

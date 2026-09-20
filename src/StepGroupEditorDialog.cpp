@@ -324,6 +324,12 @@ void StepGroupEditorDialog::onMoveMemberUp()
     const int row = m_memberListWidget->currentRow();
     if (row > 0 && row < m_members.size()) {
         flushMemberEditor();
+        // See onRemoveSelectedMember(): m_members.move() shifts which
+        // member lives at `row`, and refreshMemberList()'s clear() re-enters
+        // onMemberSelectionChanged() synchronously -- without invalidating
+        // this first, its flushMemberEditor() would use the now-stale index
+        // and overwrite a *different* member's data with this one's.
+        m_lastEditedMemberRow = -1;
         m_members.move(row, row - 1);
         refreshMemberList();
         m_memberListWidget->setCurrentRow(row - 1);
@@ -335,6 +341,7 @@ void StepGroupEditorDialog::onMoveMemberDown()
     const int row = m_memberListWidget->currentRow();
     if (row >= 0 && row < m_members.size() - 1) {
         flushMemberEditor();
+        m_lastEditedMemberRow = -1;  // see onMoveMemberUp()
         m_members.move(row, row + 1);
         refreshMemberList();
         m_memberListWidget->setCurrentRow(row + 1);

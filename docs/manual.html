@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnduranceTestGUI 操作マニュアル</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel-bg: #ffffff;
+    --text: #1c1f26;
+    --text-muted: #5b6270;
+    --border: #e1e4ea;
+    --accent: #3a63f0;
+    --accent-bg: #eef2ff;
+    --code-bg: #f0f1f4;
+    --warn-bg: #fff7e6;
+    --warn-border: #f0c36d;
+    --danger-bg: #fdecec;
+    --danger-border: #e58b8b;
+    --notice-bg: #eef4ff;
+    --notice-border: #9db8f5;
+    --shadow: 0 1px 3px rgba(20, 24, 34, 0.08), 0 1px 2px rgba(20, 24, 34, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181d;
+      --panel-bg: #1e2128;
+      --text: #e7e9ee;
+      --text-muted: #9aa1b0;
+      --border: #2d313b;
+      --accent: #7c9bff;
+      --accent-bg: #232a44;
+      --code-bg: #262a33;
+      --warn-bg: #332a12;
+      --warn-border: #7a5c1e;
+      --danger-bg: #3a2222;
+      --danger-border: #7a3a3a;
+      --notice-bg: #1d2436;
+      --notice-border: #3c4d80;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d;
+    --panel-bg: #1e2128;
+    --text: #e7e9ee;
+    --text-muted: #9aa1b0;
+    --border: #2d313b;
+    --accent: #7c9bff;
+    --accent-bg: #232a44;
+    --code-bg: #262a33;
+    --warn-bg: #332a12;
+    --warn-border: #7a5c1e;
+    --danger-bg: #3a2222;
+    --danger-border: #7a3a3a;
+    --notice-bg: #1d2436;
+    --notice-border: #3c4d80;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Segoe UI", Roboto, sans-serif;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 16px 96px;
+  }
+  header.hero {
+    padding: 36px 28px;
+    background: linear-gradient(135deg, var(--accent-bg), var(--panel-bg));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-bottom: 28px;
+    box-shadow: var(--shadow);
+  }
+  header.hero h1 {
+    margin: 0 0 8px;
+    font-size: 1.9rem;
+    letter-spacing: -0.01em;
+  }
+  header.hero p.sub {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 1.02rem;
+  }
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .notice {
+    background: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 0 0 28px;
+    font-size: 0.95rem;
+  }
+  .notice strong { color: var(--accent); }
+  nav.toc {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 32px;
+    box-shadow: var(--shadow);
+  }
+  nav.toc h2 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.3em;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin-bottom: 4px; break-inside: avoid; }
+  nav.toc a { color: var(--text); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); text-decoration: underline; }
+
+  section {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px 28px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow);
+  }
+  section h2 {
+    margin: 0 0 14px;
+    font-size: 1.35rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    scroll-margin-top: 16px;
+  }
+  section h2 .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.9rem;
+    flex: none;
+  }
+  section h3 {
+    margin: 22px 0 10px;
+    font-size: 1.08rem;
+    scroll-margin-top: 16px;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 1.4em; }
+  li { margin-bottom: 6px; }
+  code, kbd {
+    background: var(--code-bg);
+    border-radius: 5px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  figure {
+    margin: 16px 0;
+  }
+  figure img {
+    width: 100%;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  figcaption {
+    margin-top: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .callout {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 14px 0;
+    font-size: 0.94rem;
+  }
+  .callout.tip { background: var(--accent-bg); border: 1px solid var(--accent); }
+  .callout.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); }
+  .callout.danger { background: var(--danger-bg); border: 1px solid var(--danger-border); }
+  .callout .title { font-weight: 600; margin-bottom: 4px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); }
+  footer {
+    margin-top: 40px;
+    padding: 22px 26px;
+    border-radius: 14px;
+    background: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    font-size: 0.92rem;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  footer strong { color: var(--text); }
+  a { color: var(--accent); }
+  .kbd-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.8rem;
+    margin-right: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>EnduranceTestGUI 操作マニュアル</h1>
+    <p class="sub">GUIアプリケーションにランダムなクリック・操作を送り続けて、長時間稼働させたときに不具合（クラッシュ・フリーズ・メモリリーク等）が出ないかを確認するための耐久テストツールです。</p>
+    <div class="badge-row">
+      <span class="badge">対応OS: macOS / Linux</span>
+      <span class="badge">表示言語: 日本語 / English</span>
+      <span class="badge">ライセンス: MIT（本体）</span>
+    </div>
+  </header>
+
+  <div class="notice">
+    <strong>本ツールについて:</strong> EnduranceTestGUIのソースコードの大部分は、Anthropic社のAIアシスタント「<a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude</a>」によって生成されています。設計判断や動作確認もClaudeとの対話を通じて行われました。バグ報告や改善提案は開発者までお願いします。
+  </div>
+
+  <nav class="toc">
+    <h2>目次</h2>
+    <ol>
+      <li><a href="#overview">このツールでできること</a></li>
+      <li><a href="#requirements">事前準備・必要な権限</a></li>
+      <li><a href="#layout">画面構成</a></li>
+      <li><a href="#target">① 対象アプリを選択する</a></li>
+      <li><a href="#steps">② ステップを作成する</a></li>
+      <li><a href="#params">③ 操作パラメータを設定する</a></li>
+      <li><a href="#timing">タイミング・制限と異常時の自動記録</a></li>
+      <li><a href="#run">テストの開始・停止</a></li>
+      <li><a href="#crash">クラッシュ検知と再テスト</a></li>
+      <li><a href="#preset">テスト設定の保存・読み込み</a></li>
+      <li><a href="#lang">表示言語の切り替え</a></li>
+      <li><a href="#faq">困ったときは</a></li>
+      <li><a href="#license">ライセンスについて</a></li>
+    </ol>
+  </nav>
+
+  <section id="overview">
+    <h2><span class="num">1</span>このツールでできること</h2>
+    <p>EnduranceTestGUIは、テスト対象のGUIアプリケーションに対して、あらかじめ決めた「操作領域」の中でクリック・ドラッグ・キー入力・スクロール・ショートカット・ウィンドウ操作などをランダムに送り続ける耐久テストツールです。人手では時間がかかる「何百回、何千回とボタンを押し続けたらどこかで壊れないか」という確認を自動化できます。</p>
+    <p>特に力を入れているのは、<strong>不具合が起きたときに「何が原因だったか」を後から追いかけられること</strong>です。対象アプリがクラッシュした場合は、</p>
+    <ul>
+      <li>どのステップの実行中に落ちたかをダイアログとログで通知</li>
+      <li>その時点の画面のスクリーンショットと、直前数秒間の画面録画</li>
+      <li>再現に使える乱数シード付きのテスト設定一式</li>
+      <li>（可能なら）OS側のクラッシュダンプ・診断ログの場所</li>
+    </ul>
+    <p>を自動的に保存します。詳しくは <a href="#crash">クラッシュ検知と再テスト</a> を参照してください。</p>
+  </section>
+
+  <section id="requirements">
+    <h2><span class="num">2</span>事前準備・必要な権限</h2>
+    <h3>macOS</h3>
+    <p>システム設定の「プライバシーとセキュリティ」→「アクセシビリティ」で EnduranceTestGUI を許可してください。未許可のまま開始しようとすると、許可を促すダイアログが表示されます。</p>
+    <div class="callout warn">
+      <div class="title">ターミナルから起動する場合の注意</div>
+      ターミナルアプリから直接起動すると、アクセシビリティ権限のチェックがターミナルアプリ自身に委譲されてしまうことがあります。<code>EnduranceTestGUI.app</code> をFinderから直接ダブルクリックして起動するのが確実です。
+    </div>
+    <h3>Linux</h3>
+    <p>入力送信そのものに特別な権限は不要です（Xサーバーにアクセスできれば動作します）。右クリックメニューの項目選択機能を使う場合のみ、対象アプリ側がAT-SPIアクセシビリティに対応している必要があります。Waylandには対応していません（X11、またはXWayland経由のみ）。</p>
+    <div class="callout tip">
+      <div class="title">管理者権限（root）は不要です</div>
+      通常のユーザーアカウントで対象アプリ・EnduranceTestGUIの両方を起動する使い方であれば、全機能が問題なく動作することを確認済みです。
+    </div>
+  </section>
+
+  <section id="layout">
+    <h2><span class="num">3</span>画面構成</h2>
+    <p>ウィンドウは縦に3段構成になっています。</p>
+    <ul>
+      <li><strong>① 対象選択</strong>（上段）: テスト対象のアプリ選択、操作領域の登録、タイミング・制限の設定</li>
+      <li><strong>② ステップ構成 / ③ 操作パラメータ</strong>（中段、左右2分割）: 実行する操作の順番と内容の設定</li>
+      <li><strong>実行制御・ログ</strong>（下段）: 開始/停止ボタン、実行状況、ログ表示</li>
+    </ul>
+    <figure>
+      <img src="images/01_overview.png" alt="EnduranceTestGUIのメイン画面全体。上から①対象選択、②ステップ構成/③操作パラメータ、ログの3段構成になっている。">
+      <figcaption>図1: メイン画面全体（①②③の3段構成）</figcaption>
+    </figure>
+  </section>
+
+  <section id="target">
+    <h2><span class="num">4</span>① 対象アプリを選択する</h2>
+    <p>「対象 (Target)」のプルダウンから、テストしたいアプリのウィンドウを選びます。一覧に出てこない場合は「更新」ボタンで再取得してください。選択すると、そのアプリを操作するための権限があるかどうかが緑（許可済み）または赤（未許可）で表示されます。未許可の場合は「権限設定を開く」からOSの設定画面を開けます。</p>
+    <div class="callout tip">
+      <div class="title">操作領域について</div>
+      「操作領域（名前付き）」欄で、画面上の特定の矩形範囲を名前を付けて登録しておくことができます。「追加...」を押すと画面上に半透明のオーバーレイが表示されるので、ドラッグで矩形を描画してください（複数可、除外したい範囲も別途指定できます）。ステップを作る際に「対象GUIの全領域」の代わりにこの登録済み領域を指定すると、画面の特定の部分だけにランダム操作を限定できます。
+    </div>
+  </section>
+
+  <section id="steps">
+    <h2><span class="num">5</span>② ステップを作成する</h2>
+    <p>テストは1つ以上の「ステップ」を順番に繰り返し実行する形で構成します。</p>
+    <p><span class="step-num">1</span>「追加...」ボタンを押すと、そのステップで操作する範囲を選ぶ小さなダイアログが開きます。「対象GUIの全領域（自動追従）」か、①で登録した名前付き操作領域のどちらかを選んで「OK」を押します。</p>
+    <figure>
+      <img src="images/02_step_region_dialog.png" alt="ステップの操作領域を選択するダイアログ。「対象GUIの全領域（自動追従）」と登録済みの操作領域から選べる。">
+      <figcaption>図2: ステップ追加時の操作領域選択ダイアログ</figcaption>
+    </figure>
+    <p><span class="step-num">2</span>ステップが一覧に追加され、自動的に選択された状態になります。この時点で操作の種類はまだ決まっていないので、次の「③ 操作パラメータ」で設定します。</p>
+    <p>ステップは一覧内で「↑ 上へ」「↓ 下へ」で順番を入れ替えたり、複数選択して「グループ化」でまとめて1つのグループとして扱うこともできます（グループ内ではメンバーが重みに応じてランダムに選ばれます）。「待機を追加...」で、指定ミリ秒だけ何もしない「待機ステップ」を挟むこともできます。</p>
+  </section>
+
+  <section id="params">
+    <h2><span class="num">6</span>③ 操作パラメータを設定する</h2>
+    <p>②でステップを選択すると、③のパネルにそのステップの設定が表示されます。有効にする操作の種類（クリック・ダブルクリック・ドラッグ・キー入力・スクロール・ショートカットキー・ウィンドウ操作）にチェックを入れ、そのステップで実行する回数（操作回数）と、各操作の発生しやすさ（重み。大きいほど選ばれやすい）を指定します。</p>
+    <figure>
+      <img src="images/03_step_added_params.png" alt="ステップ追加後、③操作パラメータパネルに「クリック」「左」がチェックされ操作回数50が設定された状態。">
+      <figcaption>図3: ステップ作成直後の③操作パラメータパネル（デフォルトでクリック・左が有効）</figcaption>
+    </figure>
+    <p>クリックやドラッグ距離、キー入力で使う文字種、スクロール量など、操作ごとの詳しい設定も同じパネルの下部で行えます。①の「デフォルト」ボタンから、新しく作るステップ共通の初期値を編集することもできます。</p>
+  </section>
+
+  <section id="timing">
+    <h2><span class="num">7</span>タイミング・制限と異常時の自動記録</h2>
+    <p>①パネルの「タイミング・制限」欄では、操作の間隔（ms、または回数/秒）、最大実行回数・最大実行時間・シーケンスの繰り返し回数（いずれも必須。無制限は選べません）、乱数シードなどを設定します。下にスクロールすると、以下の項目も設定できます。</p>
+    <figure>
+      <img src="images/04_timing_limits.png" alt="タイミング・制限パネルを下にスクロールした状態。乱数シード、操作領域スクリーンショットの撮影タイミング、異常停止時の録画・クラッシュダンプ収集のチェックボックスが見える。">
+      <figcaption>図4: タイミング・制限（下部）。乱数シード・操作領域スクリーンショットの撮影タイミング・異常時の録画/クラッシュダンプ収集を設定できる</figcaption>
+    </figure>
+    <table>
+      <tr><th>項目</th><th>説明</th></tr>
+      <tr><td>乱数シード</td><td>「ランダム」のままなら毎回自動生成。値を指定すると同じ操作列を再現できる（クラッシュ再現用）</td></tr>
+      <tr><td>操作領域スクリーンショットの撮影タイミング</td><td>実行前に一度だけ / ステップが変わるたび / 一定間隔ごと、から選択。撮影された画像は後から「操作領域画像を保存...」で保存可能</td></tr>
+      <tr><td>異常停止時に直近の画面を録画として保存する</td><td>デフォルトOFF。有効にすると0.5秒間隔で直近約10秒分の画面をリングバッファに保持し、クラッシュ時に連番PNGとして自動保存</td></tr>
+      <tr><td>異常停止時にOSのクラッシュダンプ・診断ログを収集する</td><td>デフォルトON。対象アプリのクラッシュレポート/コアダンプをベストエフォートで探し、見つかればパスをログに記録</td></tr>
+    </table>
+  </section>
+
+  <section id="run">
+    <h2><span class="num">8</span>テストの開始・停止</h2>
+    <p>設定が済んだら「▶ 開始」ボタンでテストを開始します。実行中は画面右上に常時最前面のフローティングパネル（実行回数と「■ 停止 (STOP)」ボタン）が表示されるので、対象アプリにフォーカスが移っていてもすぐに止められます。「‖ 一時停止」で一時停止・再開も可能です。</p>
+    <figure>
+      <img src="images/05_running.png" alt="テスト実行中の画面。右上に実行回数と停止ボタンを持つフローティングパネルが表示され、下部のログには各クリックの座標と対象ウィンドウ相対座標が記録されている。">
+      <figcaption>図5: 実行中の画面。右上のフローティングパネルからいつでも停止できる</figcaption>
+    </figure>
+    <p>ログには操作ごとに、座標・対象ウィンドウ相対座標・（取得できれば）クリックしたUI部品名が記録されます。実行中のログは全行が <code>~/Documents/EnduranceTestGUI_Logs/</code> 以下のファイルへも逐次保存されるため、画面表示（直近5000行まで）から流れて消えても後から全履歴を確認できます。</p>
+    <p>次の場合、テストは自動的に停止します。</p>
+    <ul>
+      <li>最大実行回数・最大実行時間・シーケンス繰り返し回数の上限に到達</li>
+      <li>ユーザーが「■ 停止」を押した</li>
+      <li>対象アプリのクラッシュ・ウィンドウ消失を検知した（<a href="#crash">次節参照</a>）</li>
+      <li>対象アプリ以外を誤操作しそうになった（安全のためのfail-close停止）</li>
+      <li>対象アプリが応答しなくなった（ハング検知、Linuxのみ）</li>
+    </ul>
+  </section>
+
+  <section id="crash">
+    <h2><span class="num">9</span>クラッシュ検知と再テスト</h2>
+    <p>対象アプリのプロセスが消えたことを検知すると、テストは即座に停止し、次のようなダイアログが表示されます。</p>
+    <figure>
+      <img src="images/06_crash_dialog.png" alt="「対象アプリのクラッシュを検知しました」というタイトルのダイアログ。どのステップの実行中に検知したか、実行回数、乱数シードが表示され、記録が自動保存されている旨が書かれている。">
+      <figcaption>図6: クラッシュ検知ダイアログ。どのステップの実行中に落ちたかが一目で分かる</figcaption>
+    </figure>
+    <p>ダイアログとログには、<strong>どのステップの実行中に検知したか・それまでの実行回数・乱数シード</strong>が表示されます。同時に、その乱数シード付きのテスト設定（JSON）・操作領域のスクリーンショット・（有効なら）直近の画面録画・（見つかれば）OSのクラッシュダンプの場所が、自動的に <code>~/Pictures/EnduranceTestGUI_Screenshots/</code> 以下へ保存されます。</p>
+    <div class="callout tip">
+      <div class="title">クラッシュ後、すぐに同じ条件で再テストできます</div>
+      ②ステップ構成・①操作領域・タイミング設定は、クラッシュしても画面上にそのまま残ります。対象アプリを再起動すると、①の対象アプリ一覧が自動的に更新され、同じ名前のアプリが再び自動的に選び直されます。あとは「開始」を押すだけで、同じ設定のまま再テストを始められます。
+    </div>
+  </section>
+
+  <section id="preset">
+    <h2><span class="num">10</span>テスト設定の保存・読み込み</h2>
+    <p>「ファイル」メニューの「テスト設定を保存...」で、①②③で組んだ操作領域・ステップ構成・タイミング設定をまとめてJSONファイルに保存できます。「テスト設定を読み込む...」で読み込むと、保存時に対象にしていたアプリが現在も起動していれば自動的に選択されます（起動していない場合は手動での選び直しを促すメッセージが表示されます）。同じ構成を毎回作り直さずに、別の機会やビルドに対して使い回せます。</p>
+  </section>
+
+  <section id="lang">
+    <h2><span class="num">11</span>表示言語の切り替え</h2>
+    <p>メニューバーの「言語 / Language」から「日本語」「English」を選べます。選択内容は保存され、<strong>次回起動時から</strong>反映されます（実行中の画面がその場で切り替わるわけではありません）。</p>
+    <figure>
+      <img src="images/07_language_menu.png" alt="メニューバーの「言語 / Language」を開いたところ。日本語とEnglishの2つの選択肢が表示されている。">
+      <figcaption>図7: 「言語 / Language」メニュー</figcaption>
+    </figure>
+  </section>
+
+  <section id="faq">
+    <h2><span class="num">12</span>困ったときは</h2>
+    <h3>「開始」を押しても安全確認に失敗して開始できない</h3>
+    <p>対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認してください。それでも解決しない場合、環境（特にLinuxの一部のタイル型ウィンドウマネージャ）によっては、対象アプリを安全に操作できるかどうかを確認する仕組み自体が動作しないことがあります。</p>
+    <h3>ウィンドウ一覧に対象アプリが出てこない</h3>
+    <p>①の「更新」ボタンを押して一覧を再取得してください。通常のトップレベルウィンドウのみが一覧に表示されます。</p>
+    <h3>右クリックメニューの項目選択がうまくいかない</h3>
+    <p>この機能は実験的なもので、macOS/Linuxのアクセシビリティ機能に依存しています。Linuxでは対象アプリのツールキットがAT-SPIブリッジを有効にしている必要があります（GTK/Qtアプリは通常デフォルトで有効）。</p>
+  </section>
+
+  <section id="license">
+    <h2><span class="num">13</span>ライセンスについて</h2>
+    <p>EnduranceTestGUI自体のソースコードは <strong>MIT License</strong> で公開されています（リポジトリ直下の <code>LICENSE</code>）。本アプリはQt（Widgetsモジュール）を使用しており、Qtのフリーソフトウェア版はGNU LGPL バージョン3（一部モジュールはGPL）の下で配布されています。使用しているQtが実際にどのライセンスで配布されているかは、アプリ内の「ヘルプ」→「Qtについて...」からいつでも確認できます。動的リンクしているその他のライブラリも含めた詳細は、リポジトリ直下の <code>THIRD_PARTY_NOTICES.md</code> を参照してください。</p>
+  </section>
+
+  <footer>
+    本マニュアルおよびEnduranceTestGUIの実装の大部分は、Anthropic社のAIアシスタント <strong>Claude</strong> によって生成されました。<br>
+    詳細な技術仕様は開発者向けドキュメント <code>SPEC.md</code> を参照してください。
+  </footer>
+
+</div>
+</body>
+</html>

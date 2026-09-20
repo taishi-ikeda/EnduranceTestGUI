@@ -38,6 +38,9 @@ EnduranceTestGUI/
 ├── LICENSE                     # EnduranceTestGUI自身のライセンス（MIT License、6.11節）
 ├── THIRD_PARTY_NOTICES.md      # 動的リンクしているサードパーティライブラリのライセンス一覧（6.11節）
 ├── LICENSES/                   # LGPLv3/GPLv3/LGPLv2.1/GPLv2の条文全文（参考同梱、6.11節）
+├── docs/
+│   ├── manual.html              # エンドユーザー向けHTML操作マニュアル（実機スクリーンショット付き）
+│   └── images/                  # manual.html用のスクリーンショット
 ├── src/
 │   ├── main.cpp
 │   ├── I18n.h/.cpp             # 日本語/英語のUI文字列切り替え（QSettingsで永続化、次回起動時に反映）

@@ -176,10 +176,36 @@ struct RegionStep
     bool useDefaultActionParams = true;
     ActionParams customActionParams;
 
+    // If true, this "step" is actually a group: a container of other
+    // steps (groupMembers) that RandomActionEngine picks from at random
+    // (weighted by each member's own groupWeight below), performing
+    // exactly one action from the chosen member each time, until
+    // groupTotalCallCount actions have been performed in total across the
+    // whole group -- then it advances to the next top-level step/group the
+    // same way a normal step does once its own actionCount is reached
+    // (SPEC.md 6.2). A grouped step's own region/enable*/weight*/
+    // actionCount/useDefaultActionParams/customActionParams fields above
+    // are unused; only groupMembers and groupTotalCallCount matter. Groups
+    // cannot be nested: every entry in groupMembers must itself have
+    // isGroup == false. Mutually exclusive with isWaitStep (a group cannot
+    // also be a wait step, and wait steps cannot be added as group
+    // members -- waiting isn't a per-action thing groupWeight could pick
+    // among).
+    bool isGroup = false;
+    QList<RegionStep> groupMembers;
+    qint64 groupTotalCallCount = 50;
+
+    // This step's selection weight when it is itself a member inside
+    // some *other* step's groupMembers (SPEC.md 6.2). Meaningless
+    // otherwise (a top-level step/group ignores its own groupWeight).
+    // Weights <= 0 are treated as 1, same convention as the action-kind
+    // weights above.
+    int groupWeight = 1;
+
     bool hasAnyActionEnabled() const
     {
-        if (isWaitStep)
-            return true;  // waiting is this step's whole purpose, not a missing setting
+        if (isWaitStep || isGroup)
+            return true;  // waiting/grouping is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
                enableScrollDown || enableScrollHorizontal || enableShortcut || enableWindowOp;
     }

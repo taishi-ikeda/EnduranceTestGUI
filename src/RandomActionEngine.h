@@ -96,7 +96,33 @@ private:
         WindowOp
     };
 
+    // Result of runOneAction() below.
+    enum class ActionOutcome {
+        Performed,      // outDesc/outKind filled in; caller counts/logs/checks its threshold
+        SkippedNoCount, // nothing dispatched (e.g. no valid point/candidates this tick); caller just reschedules
+        StoppedEngine,  // doStop() was already called; caller must return immediately
+    };
+
     const ActionParams &effectiveParams(const RegionStep &step) const;
+    // Resolves `step`'s region, picks a weighted-random enabled action kind
+    // for it, runs the usual pre-dispatch safety checks, and dispatches
+    // exactly one action. Shared between a normal top-level step
+    // (performRandomAction) and a single pick from within a step group's
+    // members (performGroupAction) -- `stepLabel` (e.g. "ステップ3" or
+    // "ステップ3（グループ内メンバー2）") is used in any stop/log message
+    // this produces so it reads correctly either way.
+    ActionOutcome runOneAction(const RegionStep &step, const QString &stepLabel, QString &outDesc,
+                                ActionKind &outKind);
+    // Weighted-random pick of one index into group.groupMembers, by each
+    // member's own groupWeight (<= 0 treated as 1, same convention as
+    // pickWeightedActionKind). group.groupMembers must not be empty.
+    int pickWeightedGroupMemberIndex(const RegionStep &group);
+    // Handles a tick where the current top-level step is a group (SPEC.md
+    // 6.2): picks one member at random and performs exactly one action
+    // from it, advancing to the next top-level step once
+    // group.groupTotalCallCount actions have been performed in total
+    // across the whole group.
+    void performGroupAction(const RegionStep &group);
     // Resolves a step's region: either the live target-window bounds, or
     // the NamedRegion it references by name (see TestConfig::namedRegions).
     // Returns false if that can't be done right now (window gone, or the

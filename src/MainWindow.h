@@ -64,6 +64,8 @@ private slots:
     void onMoveStepUp();
     void onMoveStepDown();
     void onClearSteps();
+    void onGroupSelectedSteps();
+    void onUngroupSelectedStep();
     void onStepSelectionChanged();
     void onStepParamsModeChanged();
     void onEditDefaultParams();
@@ -110,10 +112,30 @@ private:
     QString generateDefaultRegionName() const;
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
+    // Recurses into group members (a step inside a group can reference a
+    // named region just like a top-level one).
     QStringList stepsReferencing(const QString &regionName) const;
+    // Renames `regionName` to `newName` in every step that references it,
+    // top-level or inside a group (SPEC.md 6.2/6.3) -- called when a named
+    // region is renamed so existing references keep pointing at it.
+    void renameRegionReferences(QList<RegionStep> &steps, const QString &oldName, const QString &newName) const;
+    // True if every enabled action kind on `step` (or, when it's a group,
+    // on every one of its members) has the configuration it needs to
+    // actually run (e.g. enableKey needs a non-empty character set) --
+    // used by buildConfigFromUi() to validate top-level steps and group
+    // members alike. On failure, fills in `errorMessage` (referencing
+    // `stepLabel`) and returns false.
+    bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
+                                   QString &errorMessage) const;
     void flushActionParamsEditor();
     void loadActionParamsEditorForSelection();
     void setControlsEnabled(bool enabled);
+    // Enables m_groupStepsButton/m_ungroupStepButton based on the current
+    // ②list selection (2+ plain steps -> グループ化; exactly one group ->
+    // グループ解除) and whether the steps panel is enabled at all (i.e.
+    // not mid-run) -- called both when the selection changes and whenever
+    // setControlsEnabled() toggles run state.
+    void updateGroupButtonsEnabled();
     TestConfig buildConfigFromUi(bool &ok, QString &errorMessage) const;
     void appendLog(const QString &message);
     QString describeStep(const RegionStep &step, int index) const;
@@ -141,6 +163,13 @@ private:
     QPushButton *m_moveStepUpButton = nullptr;
     QPushButton *m_moveStepDownButton = nullptr;
     QPushButton *m_clearStepsButton = nullptr;
+    // Combines the currently multi-selected steps into a single group step
+    // (SPEC.md 6.2): enabled only when 2+ plain steps (no wait steps, no
+    // groups -- groups cannot be nested) are selected. "グループ解除" is
+    // the reverse: enabled only when exactly one group is selected, and
+    // replaces it with its member steps as standalone top-level steps.
+    QPushButton *m_groupStepsButton = nullptr;
+    QPushButton *m_ungroupStepButton = nullptr;
     QList<RegionStep> m_steps;
     // Index into m_steps currently being executed by m_engine, or -1 while
     // not running; describeStep() marks this one so ②'s list shows

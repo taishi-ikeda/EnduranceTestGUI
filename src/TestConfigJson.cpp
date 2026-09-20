@@ -213,6 +213,13 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["actionCount"] = double(s.actionCount);
     o["useDefaultActionParams"] = s.useDefaultActionParams;
     o["customActionParams"] = actionParamsToJson(s.customActionParams);
+    o["isGroup"] = s.isGroup;
+    o["groupTotalCallCount"] = double(s.groupTotalCallCount);
+    o["groupWeight"] = s.groupWeight;
+    QJsonArray membersArr;
+    for (const RegionStep &member : s.groupMembers)
+        membersArr.append(regionStepToJson(member));
+    o["groupMembers"] = membersArr;
     return o;
 }
 
@@ -247,5 +254,12 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.useDefaultActionParams = o["useDefaultActionParams"].toBool(s.useDefaultActionParams);
     if (o.contains("customActionParams"))
         s.customActionParams = actionParamsFromJson(o["customActionParams"].toObject());
+    s.isGroup = o["isGroup"].toBool(s.isGroup);
+    s.groupTotalCallCount = qint64(o["groupTotalCallCount"].toDouble(double(s.groupTotalCallCount)));
+    s.groupWeight = o["groupWeight"].toInt(s.groupWeight);
+    if (o.contains("groupMembers")) {
+        for (const QJsonValue &v : o["groupMembers"].toArray())
+            s.groupMembers.append(regionStepFromJson(v.toObject()));
+    }
     return s;
 }

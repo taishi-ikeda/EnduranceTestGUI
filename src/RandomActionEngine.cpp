@@ -638,24 +638,108 @@ void RandomActionEngine::performRandomAction()
         return;
     }
 
+    if (step.isGroup) {
+        performGroupAction(step);
+        return;
+    }
+
+    QString desc;
+    ActionKind kind;
+    const ActionOutcome outcome =
+        runOneAction(step, QStringLiteral("ステップ %1").arg(m_currentStepIndex + 1), desc, kind);
+    if (outcome == ActionOutcome::StoppedEngine)
+        return;
+    if (outcome == ActionOutcome::SkippedNoCount) {
+        scheduleNext();
+        return;
+    }
+
+    ++m_iterationCount;
+    ++m_currentStepActionsDone;
+    ++m_actionKindCounts[kind];
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+    emit iterationCountChanged(m_iterationCount);
+
+    if (m_currentStepActionsDone >= step.actionCount)
+        advanceToNextStep();
+
+    scheduleNext();
+}
+
+void RandomActionEngine::performGroupAction(const RegionStep &group)
+{
+    if (group.groupMembers.isEmpty()) {
+        doStop(QStringLiteral("ステップ %1（グループ）にステップが登録されていません").arg(m_currentStepIndex + 1));
+        return;
+    }
+
+    const int memberIndex = pickWeightedGroupMemberIndex(group);
+    const RegionStep &member = group.groupMembers[memberIndex];
+    const QString label = QStringLiteral("ステップ %1（グループ内メンバー %2）")
+                               .arg(m_currentStepIndex + 1)
+                               .arg(memberIndex + 1);
+
+    QString desc;
+    ActionKind kind;
+    const ActionOutcome outcome = runOneAction(member, label, desc, kind);
+    if (outcome == ActionOutcome::StoppedEngine)
+        return;
+    if (outcome == ActionOutcome::SkippedNoCount) {
+        scheduleNext();
+        return;
+    }
+
+    ++m_iterationCount;
+    ++m_currentStepActionsDone;
+    ++m_actionKindCounts[kind];
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+    emit iterationCountChanged(m_iterationCount);
+
+    if (m_currentStepActionsDone >= group.groupTotalCallCount)
+        advanceToNextStep();
+
+    scheduleNext();
+}
+
+int RandomActionEngine::pickWeightedGroupMemberIndex(const RegionStep &group)
+{
+    int total = 0;
+    for (const RegionStep &m : group.groupMembers)
+        total += qMax(1, m.groupWeight);
+    int target = total > 0 ? int(m_rng.bounded(quint32(total))) : 0;
+    for (int i = 0; i < group.groupMembers.size(); ++i) {
+        const int w = qMax(1, group.groupMembers[i].groupWeight);
+        if (target < w)
+            return i;
+        target -= w;
+    }
+    return group.groupMembers.size() - 1;
+}
+
+RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionStep &step,
+                                                                    const QString &stepLabel,
+                                                                    QString &outDesc, ActionKind &outKind)
+{
     const ActionParams &params = effectiveParams(step);
 
     QList<QRect> includeRegions;
     QList<QRect> excludeRegions;
     if (!resolveStepRegion(step, includeRegions, excludeRegions) || includeRegions.isEmpty()) {
-        doStop(QStringLiteral("ステップ %1 の対象領域が見つからないため停止しました（対象ウィンドウが"
+        doStop(QStringLiteral("%1の対象領域が見つからないため停止しました（対象ウィンドウが"
                               "消失した、または参照している操作領域が削除された可能性があります）")
-                   .arg(m_currentStepIndex + 1),
+                   .arg(stepLabel),
                /*isAnomaly=*/true);
-        return;
+        return ActionOutcome::StoppedEngine;
     }
 
     if (m_config.keepTargetActive)
         PlatformAutomation::activateProcess(m_config.targetPid);
 
     if (!step.hasAnyActionEnabled()) {
-        doStop(QStringLiteral("ステップ %1 に有効な操作がありません").arg(m_currentStepIndex + 1));
-        return;
+        doStop(QStringLiteral("%1に有効な操作がありません").arg(stepLabel));
+        return ActionOutcome::StoppedEngine;
     }
     const ActionKind kind = pickWeightedActionKind(step);
 
@@ -667,8 +751,7 @@ void RandomActionEngine::performRandomAction()
     if (!ok && kindNeedsPoint) {
         emit logMessage(
             QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）"));
-        scheduleNext();
-        return;
+        return ActionOutcome::SkippedNoCount;
     }
 
     // Safety net: right before actually dispatching anything, confirm it
@@ -681,7 +764,7 @@ void RandomActionEngine::performRandomAction()
             doStop(QStringLiteral(
                        "対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました"),
                    /*isAnomaly=*/true);
-            return;
+            return ActionOutcome::StoppedEngine;
         }
     } else if (kind == ActionKind::Key || kind == ActionKind::Shortcut) {
         if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
@@ -689,7 +772,7 @@ void RandomActionEngine::performRandomAction()
                        "対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
                        "安全のためテストを停止しました"),
                    /*isAnomaly=*/true);
-            return;
+            return ActionOutcome::StoppedEngine;
         }
     } else {  // WindowOp: identity is checked directly by pid+windowId below
     }
@@ -714,7 +797,7 @@ void RandomActionEngine::performRandomAction()
 
         if (btn == Qt::RightButton) {
             if (handlePossibleContextMenu(params, desc))
-                return;
+                return ActionOutcome::StoppedEngine;
         }
         break;
     }
@@ -759,7 +842,7 @@ void RandomActionEngine::performRandomAction()
             doStop(QStringLiteral(
                        "ドラッグ先が対象アプリ以外のウィンドウになりそうなため、安全のためテストを停止しました"),
                    /*isAnomaly=*/true);
-            return;
+            return ActionOutcome::StoppedEngine;
         }
 
         const Qt::MouseButton btn =
@@ -773,7 +856,7 @@ void RandomActionEngine::performRandomAction()
             // Click does, otherwise it's left open for later actions to
             // land on (see the comment in handlePossibleContextMenu()).
             if (handlePossibleContextMenu(params, desc))
-                return;
+                return ActionOutcome::StoppedEngine;
         }
         break;
     }
@@ -797,8 +880,7 @@ void RandomActionEngine::performRandomAction()
         if (totalPool == 0) {
             emit logMessage(
                 QStringLiteral("キー入力の候補がありません（使用文字・名前付きキーのいずれも未設定）"));
-            scheduleNext();
-            return;
+            return ActionOutcome::SkippedNoCount;
         }
         const int index = int(m_rng.bounded(quint32(totalPool)));
         if (index < chars.size()) {
@@ -842,8 +924,7 @@ void RandomActionEngine::performRandomAction()
     case ActionKind::Shortcut: {
         if (params.shortcutSequences.isEmpty()) {
             emit logMessage(QStringLiteral("ショートカットが設定されていません"));
-            scheduleNext();
-            return;
+            return ActionOutcome::SkippedNoCount;
         }
         const QString seqText =
             params.shortcutSequences[int(m_rng.bounded(quint32(params.shortcutSequences.size())))];
@@ -851,8 +932,7 @@ void RandomActionEngine::performRandomAction()
         Qt::KeyboardModifiers mods;
         if (!parseShortcut(seqText, key, mods)) {
             emit logMessage(QStringLiteral("ショートカット '%1' を解釈できませんでした").arg(seqText));
-            scheduleNext();
-            return;
+            return ActionOutcome::SkippedNoCount;
         }
         if (m_config.keepTargetActive)
             PlatformAutomation::activateProcess(m_config.targetPid);
@@ -865,7 +945,7 @@ void RandomActionEngine::performRandomAction()
         if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid,
                                                      currentBounds)) {
             doStop(QStringLiteral("対象ウィンドウが見つからないため停止しました"), /*isAnomaly=*/true);
-            return;
+            return ActionOutcome::StoppedEngine;
         }
 
         QStringList opNames;
@@ -879,8 +959,7 @@ void RandomActionEngine::performRandomAction()
             opNames << QStringLiteral("maximize");
         if (opNames.isEmpty()) {
             emit logMessage(QStringLiteral("ウィンドウ操作の種類が選択されていません"));
-            scheduleNext();
-            return;
+            return ActionOutcome::SkippedNoCount;
         }
         const QString op = opNames[int(m_rng.bounded(quint32(opNames.size())))];
 
@@ -917,15 +996,7 @@ void RandomActionEngine::performRandomAction()
     }
     }
 
-    ++m_iterationCount;
-    ++m_currentStepActionsDone;
-    ++m_actionKindCounts[kind];
-    emit actionPerformed(desc);
-    emit logMessage(desc);
-    emit iterationCountChanged(m_iterationCount);
-
-    if (m_currentStepActionsDone >= step.actionCount)
-        advanceToNextStep();
-
-    scheduleNext();
+    outDesc = desc;
+    outKind = kind;
+    return ActionOutcome::Performed;
 }

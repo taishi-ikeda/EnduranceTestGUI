@@ -59,6 +59,7 @@ set(SOURCES
     src/NamedRegionEditorDialog.cpp
     src/DefaultActionParamsDialog.cpp
     src/ActionKindEditor.cpp
+    src/StepGroupEditorDialog.cpp
     src/TestConfigJson.cpp
 )
 
@@ -73,6 +74,7 @@ set(HEADERS
     src/NamedRegionEditorDialog.h
     src/DefaultActionParamsDialog.h
     src/ActionKindEditor.h
+    src/StepGroupEditorDialog.h
     src/TestConfig.h
     src/TestConfigJson.h
 )

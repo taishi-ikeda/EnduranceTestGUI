@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -40,6 +41,7 @@
 #include "NamedRegionEditorDialog.h"
 #include "RegionSelectorOverlay.h"
 #include "StepEditorDialog.h"
+#include "StepGroupEditorDialog.h"
 #include "StopPanel.h"
 #include "TestConfigJson.h"
 #include "platform/GlobalHotkey.h"
@@ -443,6 +445,9 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
         QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行"), wrapper);
     auto *stepsLayout = new QVBoxLayout(m_stepsGroup);
     m_stepListWidget = new QListWidget(m_stepsGroup);
+    // Multiple steps can be selected at once so they can be combined into a
+    // group (SPEC.md 6.2, m_groupStepsButton below).
+    m_stepListWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
     stepsLayout->addWidget(m_stepListWidget, 1);
 
     auto *stepButtonsRow = new QHBoxLayout;
@@ -465,8 +470,21 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     stepOrderRow->addWidget(m_clearStepsButton);
     stepsLayout->addLayout(stepOrderRow);
 
+    // SPEC.md 6.2: select 2+ plain steps and combine them into a group that
+    // repeatedly performs one random action from a randomly (weight-)
+    // chosen member until a configured total call count is reached, then
+    // advances like any other step. "グループ解除" reverses this.
+    auto *groupButtonsRow = new QHBoxLayout;
+    m_groupStepsButton = new QPushButton(QStringLiteral("グループ化"), m_stepsGroup);
+    m_ungroupStepButton = new QPushButton(QStringLiteral("グループ解除"), m_stepsGroup);
+    groupButtonsRow->addWidget(m_groupStepsButton);
+    groupButtonsRow->addWidget(m_ungroupStepButton);
+    stepsLayout->addLayout(groupButtonsRow);
+
     connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
             &MainWindow::onStepSelectionChanged);
+    connect(m_stepListWidget, &QListWidget::itemSelectionChanged, this,
+            &MainWindow::updateGroupButtonsEnabled);
     connect(m_addStepButton, &QPushButton::clicked, this, &MainWindow::onAddStep);
     connect(m_addWaitStepButton, &QPushButton::clicked, this, &MainWindow::onAddWaitStep);
     connect(m_editStepButton, &QPushButton::clicked, this, &MainWindow::onEditSelectedStep);
@@ -474,6 +492,8 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_moveStepUpButton, &QPushButton::clicked, this, &MainWindow::onMoveStepUp);
     connect(m_moveStepDownButton, &QPushButton::clicked, this, &MainWindow::onMoveStepDown);
     connect(m_clearStepsButton, &QPushButton::clicked, this, &MainWindow::onClearSteps);
+    connect(m_groupStepsButton, &QPushButton::clicked, this, &MainWindow::onGroupSelectedSteps);
+    connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
     return wrapper;
@@ -585,6 +605,16 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
             .arg(step.waitDurationMs);
     }
 
+    if (step.isGroup) {
+        const QString runningPrefix =
+            index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
+        return QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）")
+            .arg(runningPrefix)
+            .arg(index + 1)
+            .arg(step.groupMembers.size())
+            .arg(step.groupTotalCallCount);
+    }
+
     QStringList actions;
     if (step.enableClick)
         actions << QStringLiteral("クリック");
@@ -629,6 +659,7 @@ void MainWindow::refreshStepList()
     m_stepListWidget->clear();
     for (int i = 0; i < m_steps.size(); ++i)
         m_stepListWidget->addItem(describeStep(m_steps[i], i));
+    updateGroupButtonsEnabled();
 }
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
@@ -651,10 +682,29 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
 {
     QStringList result;
     for (int i = 0; i < m_steps.size(); ++i) {
-        if (!m_steps[i].useWholeWindow && m_steps[i].regionName == regionName)
+        const RegionStep &step = m_steps[i];
+        if (step.isGroup) {
+            for (int j = 0; j < step.groupMembers.size(); ++j) {
+                const RegionStep &member = step.groupMembers[j];
+                if (!member.useWholeWindow && member.regionName == regionName)
+                    result << QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1);
+            }
+        } else if (!step.useWholeWindow && step.regionName == regionName) {
             result << QStringLiteral("ステップ%1").arg(i + 1);
+        }
     }
     return result;
+}
+
+void MainWindow::renameRegionReferences(QList<RegionStep> &steps, const QString &oldName,
+                                          const QString &newName) const
+{
+    for (RegionStep &step : steps) {
+        if (step.isGroup)
+            renameRegionReferences(step.groupMembers, oldName, newName);
+        else if (!step.useWholeWindow && step.regionName == oldName)
+            step.regionName = newName;
+    }
 }
 
 QString MainWindow::generateDefaultRegionName() const
@@ -740,12 +790,10 @@ void MainWindow::onEditSelectedNamedRegion()
 
     m_namedRegions[row] = region;
     if (oldName != region.name) {
-        // Keep steps that referenced the old name pointing at the same
-        // region rather than silently breaking them.
-        for (RegionStep &step : m_steps) {
-            if (!step.useWholeWindow && step.regionName == oldName)
-                step.regionName = region.name;
-        }
+        // Keep steps (top-level or inside a group) that referenced the old
+        // name pointing at the same region rather than silently breaking
+        // them.
+        renameRegionReferences(m_steps, oldName, region.name);
         // refreshStepList() clears and re-adds all items, which drops the
         // list's current selection -- restore it so column ③'s kind/
         // ActionParams editors (keyed on that selection) aren't reset.
@@ -827,6 +875,23 @@ void MainWindow::loadActionParamsEditorForSelection()
         // groups entirely rather than showing controls that don't apply.
         m_actionParamsContextLabel->setText(
             QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）").arg(row + 1));
+        m_stepUseDefaultParamsRadio->blockSignals(true);
+        m_stepUseDefaultParamsRadio->setChecked(true);
+        m_stepUseDefaultParamsRadio->blockSignals(false);
+        m_stepUseDefaultParamsRadio->setEnabled(false);
+        m_stepUseCustomParamsRadio->setEnabled(false);
+        m_actionParamsEditor->setParams(m_defaultActionParams);
+        m_stepKindGroup->setEnabled(false);
+        m_lastEditedStepRow = -1;
+        return;
+    }
+
+    if (m_steps[row].isGroup) {
+        // A group's members each have their own region/action-kind/
+        // ActionParams settings, edited in StepGroupEditorDialog (via ②'s
+        // "編集..." button) rather than here -- see RegionStep::isGroup.
+        m_actionParamsContextLabel->setText(
+            QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください").arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -972,6 +1037,17 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    if (m_steps[row].isGroup) {
+        StepGroupEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams,
+                                      m_defaultActionKinds, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        m_steps[row] = dialog.result();
+        refreshStepList();
+        m_stepListWidget->setCurrentRow(row);
+        return;
+    }
+
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -1035,6 +1111,116 @@ void MainWindow::onClearSteps()
     loadActionParamsEditorForSelection();
 }
 
+void MainWindow::onGroupSelectedSteps()
+{
+    QList<int> rows;
+    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
+        rows.append(m_stepListWidget->row(item));
+    std::sort(rows.begin(), rows.end());
+    if (rows.size() < 2)
+        return;
+    for (int row : rows) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup) {
+            QMessageBox::warning(
+                this, QStringLiteral("グループ化できません"),
+                QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
+                                "（グループの入れ子は未対応です）。"));
+            return;
+        }
+    }
+
+    flushActionParamsEditor();
+
+    RegionStep group;
+    group.isGroup = true;
+    group.groupTotalCallCount = 50;
+    for (int row : rows) {
+        RegionStep member = m_steps[row];
+        // Reset fields that only make sense at the top level or that this
+        // step doesn't already carry a meaningful value for -- a step
+        // being grouped for the first time defaults to equal weight among
+        // its new siblings.
+        member.isGroup = false;
+        member.groupMembers.clear();
+        member.groupWeight = 1;
+        group.groupMembers.append(member);
+    }
+
+    const int insertAt = rows.first();
+    for (int i = rows.size() - 1; i >= 0; --i)  // remove highest index first so earlier ones stay valid
+        m_steps.removeAt(rows[i]);
+    m_steps.insert(insertAt, group);
+
+    refreshStepList();
+    m_stepListWidget->setCurrentRow(insertAt);
+}
+
+void MainWindow::onUngroupSelectedStep()
+{
+    const int row = m_stepListWidget->currentRow();
+    if (row < 0 || row >= m_steps.size() || !m_steps[row].isGroup)
+        return;
+
+    flushActionParamsEditor();
+    const QList<RegionStep> members = m_steps[row].groupMembers;
+    m_steps.removeAt(row);
+    for (int i = 0; i < members.size(); ++i)
+        m_steps.insert(row + i, members[i]);
+
+    refreshStepList();
+    if (!members.isEmpty())
+        m_stepListWidget->setCurrentRow(row);
+    else
+        loadActionParamsEditorForSelection();
+}
+
+bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
+                                            QString &errorMessage) const
+{
+    if (step.isWaitStep || step.isGroup)
+        return true;  // nothing here to validate (a group's members are validated individually)
+    if (!step.hasAnyActionEnabled()) {
+        errorMessage = QStringLiteral(
+            "%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
+            "パネルで操作種別を1つ以上有効にしてください。")
+                           .arg(stepLabel);
+        return false;
+    }
+    const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
+    if (step.enableKey && params.allowedKeyChars.isEmpty()) {
+        errorMessage = QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
+                                        "（デフォルトまたはそのステップの専用設定）。")
+                           .arg(stepLabel);
+        return false;
+    }
+    if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
+        errorMessage = QStringLiteral(
+            "ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
+            "（デフォルトまたはそのステップの専用設定）。")
+                           .arg(stepLabel);
+        return false;
+    }
+    if (step.enableClick && step.enableRightClick && params.enableContextMenuSelection) {
+        if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName &&
+            params.contextMenuItemNames.isEmpty()) {
+            errorMessage = QStringLiteral(
+                "メニュー項目選択（項目名指定）を有効にした%1があります。候補項目名を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。")
+                               .arg(stepLabel);
+            return false;
+        }
+        if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByIndex &&
+            params.contextMenuIndices.isEmpty()) {
+            errorMessage = QStringLiteral(
+                "メニュー項目選択（番号指定）を有効にした%1があります。候補の番号を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。")
+                               .arg(stepLabel);
+            return false;
+        }
+    }
+    return true;
+}
+
 TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 {
     ok = false;
@@ -1062,41 +1248,23 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
         const RegionStep &step = m_steps[i];
         if (step.isWaitStep)
             continue;  // no region/action-kind/ActionParams fields to validate
-        if (!step.hasAnyActionEnabled()) {
-            errorMessage = QStringLiteral(
-                "ステップ%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
-                "パネルで操作種別を1つ以上有効にしてください。")
-                               .arg(i + 1);
-            return config;
-        }
-        const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
-        if (step.enableKey && params.allowedKeyChars.isEmpty()) {
-            errorMessage = QStringLiteral("キー入力を有効にしたステップがあります。使用文字を指定してください"
-                                            "（デフォルトまたはそのステップの専用設定）。");
-            return config;
-        }
-        if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
-            errorMessage = QStringLiteral(
-                "ショートカットキーを有効にしたステップがあります。ショートカットを最低1つ追加してください"
-                "（デフォルトまたはそのステップの専用設定）。");
-            return config;
-        }
-        if (step.enableClick && step.enableRightClick && params.enableContextMenuSelection) {
-            if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName &&
-                params.contextMenuItemNames.isEmpty()) {
-                errorMessage = QStringLiteral(
-                    "メニュー項目選択（項目名指定）を有効にしたステップがあります。候補項目名を最低1つ追加してください"
-                    "（デフォルトまたはそのステップの専用設定）。");
+        if (step.isGroup) {
+            if (step.groupMembers.isEmpty()) {
+                errorMessage =
+                    QStringLiteral("ステップ%1（グループ）にステップが登録されていません。").arg(i + 1);
                 return config;
             }
-            if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByIndex &&
-                params.contextMenuIndices.isEmpty()) {
-                errorMessage = QStringLiteral(
-                    "メニュー項目選択（番号指定）を有効にしたステップがあります。候補の番号を最低1つ追加してください"
-                    "（デフォルトまたはそのステップの専用設定）。");
-                return config;
+            for (int j = 0; j < step.groupMembers.size(); ++j) {
+                if (!validateStepActionConfig(
+                        step.groupMembers[j],
+                        QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1),
+                        errorMessage))
+                    return config;
             }
+            continue;
         }
+        if (!validateStepActionConfig(step, QStringLiteral("ステップ%1").arg(i + 1), errorMessage))
+            return config;
     }
 
     if (m_intervalModeRateRadio->isChecked()) {
@@ -1126,8 +1294,9 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_stepsGroup->setEnabled(enabled);
     m_actionParamsGroup->setEnabled(enabled);
     const int selectedStepRow = m_stepListWidget->currentRow();
-    const bool kindGroupApplicable =
-        selectedStepRow >= 0 && selectedStepRow < m_steps.size() && !m_steps[selectedStepRow].isWaitStep;
+    const bool kindGroupApplicable = selectedStepRow >= 0 && selectedStepRow < m_steps.size() &&
+                                      !m_steps[selectedStepRow].isWaitStep &&
+                                      !m_steps[selectedStepRow].isGroup;
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
@@ -1140,6 +1309,23 @@ void MainWindow::setControlsEnabled(bool enabled)
         m_pauseResumeButton->setText(QStringLiteral("‖ 一時停止"));
         m_resourceUsageLabel->clear();
     }
+    updateGroupButtonsEnabled();
+}
+
+void MainWindow::updateGroupButtonsEnabled()
+{
+    const QList<QListWidgetItem *> selected = m_stepListWidget->selectedItems();
+    int plainCount = 0;
+    for (QListWidgetItem *item : selected) {
+        const int row = m_stepListWidget->row(item);
+        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup)
+            ++plainCount;
+    }
+    m_groupStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
+                                    plainCount == selected.size());
+    const int row = m_stepListWidget->currentRow();
+    m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
+                                     row < m_steps.size() && m_steps[row].isGroup);
 }
 
 void MainWindow::onStart()

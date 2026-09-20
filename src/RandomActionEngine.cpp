@@ -61,6 +61,11 @@ QString RandomActionEngine::formatSummaryText(const RunSummary &summary)
              ++it)
             lines << QStringLiteral("  %1: %2").arg(it.key()).arg(it.value());
     }
+    if (!summary.recentActions.isEmpty()) {
+        lines << I18n::t(QStringLiteral("直近の操作（古い順、確率的な不具合の解析用）:"));
+        for (const QString &action : summary.recentActions)
+            lines << QStringLiteral("  %1").arg(action);
+    }
     return lines.join(QStringLiteral("\n"));
 }
 
@@ -75,10 +80,17 @@ QJsonObject RandomActionEngine::summaryToJson(const RunSummary &summary)
     obj["rngSeedUsed"] = double(summary.rngSeedUsed);
     if (!summary.anomalyArtifactTimestamp.isEmpty())
         obj["anomalyArtifactTimestamp"] = summary.anomalyArtifactTimestamp;
+    obj["targetCrashed"] = summary.targetCrashed;
+    if (summary.crashStepIndex >= 0)
+        obj["crashStepIndex"] = summary.crashStepIndex;
     QJsonObject counts;
     for (auto it = summary.actionKindCounts.constBegin(); it != summary.actionKindCounts.constEnd(); ++it)
         counts[it.key()] = double(it.value());
     obj["actionKindCounts"] = counts;
+    QJsonArray recentActions;
+    for (const QString &action : summary.recentActions)
+        recentActions.append(action);
+    obj["recentActions"] = recentActions;
     return obj;
 }
 
@@ -96,7 +108,18 @@ namespace
 // has been going.
 constexpr int kRecordingFrameIntervalMs = 500;
 constexpr int kMaxRecordingFrames = 20;
+// How many of the most recent action descriptions RunSummary::recentActions
+// keeps (SPEC.md 6.7/10) -- enough to see the short pattern of operations
+// leading up to a crash without ballooning every summary.
+constexpr int kRecentActionHistorySize = 15;
 }  // namespace
+
+void RandomActionEngine::recordRecentAction(const QString &desc)
+{
+    m_recentActionDescriptions.append(desc);
+    while (m_recentActionDescriptions.size() > kRecentActionHistorySize)
+        m_recentActionDescriptions.removeFirst();
+}
 
 RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng(0)
 {
@@ -144,6 +167,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_lastScreenshotStepIndex = -1;
     m_lastScreenshotIterationCount = -1;
     m_recordingFrames.clear();
+    m_recentActionDescriptions.clear();
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -236,6 +260,8 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targ
     summary.stopReason = reason;
     summary.anomaly = isAnomaly;
     summary.targetCrashed = targetCrashed;
+    summary.crashStepIndex = targetCrashed ? m_currentStepIndex : -1;
+    summary.recentActions = m_recentActionDescriptions;
     if (isAnomaly)
         summary.anomalyArtifactTimestamp = captureAnomalyArtifacts(reason);
     m_recordingFrames.clear();  // recording is per-run regardless of whether it just got saved above
@@ -894,6 +920,7 @@ void RandomActionEngine::performRandomAction()
     ++m_iterationCount;
     ++m_currentStepActionsDone;
     ++m_actionKindCounts[kind];
+    recordRecentAction(desc);
     emit actionPerformed(desc);
     emit logMessage(desc);
     emit iterationCountChanged(m_iterationCount);
@@ -930,6 +957,7 @@ void RandomActionEngine::performGroupAction(const RegionStep &group)
     ++m_iterationCount;
     ++m_currentStepActionsDone;
     ++m_actionKindCounts[kind];
+    recordRecentAction(desc);
     emit actionPerformed(desc);
     emit logMessage(desc);
     emit iterationCountChanged(m_iterationCount);

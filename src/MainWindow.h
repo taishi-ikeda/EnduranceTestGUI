@@ -4,10 +4,12 @@
 #include <QFile>
 #include <QJsonObject>
 #include <QMainWindow>
+#include <QMap>
 #include <QPointer>
 
 #include "RandomActionEngine.h"
 #include "TestConfig.h"
+#include "TestStatistics.h"
 #include "platform/PlatformAutomation.h"
 
 class QComboBox;
@@ -93,6 +95,8 @@ private slots:
     void onAboutQt();
     void onSavePreset();
     void onLoadPreset();
+    void onShowStatistics();
+    void onBatchWaitTick();
     void onGlobalEmergencyStop();
     void onSelectLanguageJapanese();
     void onSelectLanguageEnglish();
@@ -152,6 +156,15 @@ private:
     // same way a manually-saved preset is.
     QJsonObject buildPresetJson() const;
 
+    // Recomputes m_currentConfigFingerprint from the current ①②③ setup and
+    // refreshes m_statisticsSummaryLabel and every ②list row's crash badge
+    // from TestStatistics' history for that fingerprint (SPEC.md 10 ③④).
+    // Called after loading a preset, right before a run starts, and after
+    // every run finishes -- so the figures shown are never more than one
+    // run stale regardless of whether runs are started by hand (including
+    // after a fully manual target-app relaunch) or by the batch loop.
+    void updateStatisticsDisplay();
+
     // Tries to select, in the just-(re)populated m_targetCombo/m_windows, a
     // window whose appName matches m_lastTargetAppName -- so that after a
     // crash (or any other reason the target list gets rebuilt), the app
@@ -161,6 +174,32 @@ private:
     // with (they aren't tied to a pid), so this closes the one piece that
     // did. Returns true if a match was found and selected.
     bool tryReselectLastTarget();
+
+    // The actual "start the engine" logic (SPEC.md 10 ①), shared by the
+    // ▶開始 button (onStart(), interactive == true: config/permission/
+    // safety-check failures pop up a QMessageBox) and the batch loop's
+    // automatic continuations (interactive == false: the same failures are
+    // just logged and the batch is cancelled, since nobody may be watching
+    // to dismiss a dialog). Returns true if the run was actually started.
+    bool beginRun(bool interactive);
+    // Called from onEngineFinished(): if a batch (SPEC.md 10 ①) is still in
+    // progress, advances the counter and either starts the next run
+    // immediately (target still alive) or hands off to
+    // waitForTargetThenContinueBatch(); does nothing otherwise.
+    void continueBatchIfNeeded();
+    // Refreshes ①'s target list; if the target is already back, starts the
+    // next batch run right away. Otherwise launches it automatically (if
+    // ①'s "自動起動コマンド" is set -- SPEC.md 10 ②) and/or starts
+    // m_batchWaitTimer polling for its manual relaunch (SPEC.md 10 ①), so
+    // batch mode works the same way whether or not auto-restart is
+    // configured.
+    void waitForTargetThenContinueBatch();
+    // Runs ①'s configured "自動起動コマンド" (SPEC.md 10 ②) via
+    // QProcess::startDetached, splitting it into program + arguments with
+    // QProcess::splitCommand() (portable across Qt5/Qt6, unlike the
+    // single-QString startDetached() overload Qt6 removed). No-op if the
+    // field is empty.
+    void launchTargetAppFromConfiguredCommand();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -172,6 +211,18 @@ private:
     // onRefreshTargets() call, and set directly from a loaded preset's
     // targetAppNameHint) -- see tryReselectLastTarget().
     QString m_lastTargetAppName;
+
+    // SPEC.md 10 ②: an optional shell command line (program + arguments,
+    // split with QProcess::splitCommand()) that (re)launches the target
+    // app. Used by waitForTargetThenContinueBatch() when a batch run (①)
+    // finds the target gone, and directly by m_launchTargetNowButton for a
+    // manual one-off relaunch outside of batch mode too. Persisted in
+    // preset JSON (buildPresetJson()/onLoadPreset()) as "targetLaunchCommand".
+    // Left empty, batch mode still works -- it just waits for the user to
+    // relaunch the target by hand instead (SPEC.md 10 ①).
+    QLineEdit *m_targetLaunchCommandEdit = nullptr;
+    QPushButton *m_browseLaunchCommandButton = nullptr;
+    QPushButton *m_launchTargetNowButton = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;
@@ -296,6 +347,23 @@ private:
     QLabel *m_iterationLabel = nullptr;
     QLabel *m_resourceUsageLabel = nullptr;
 
+    // SPEC.md 10 ①: consecutive automatic runs, for reproducing a crash
+    // that only happens some fraction of the time. 1 (the default) means no
+    // batching -- ▶開始 behaves exactly as before. > 1 makes onStart() set
+    // m_batchModeActive and, from then on, onEngineFinished() ->
+    // continueBatchIfNeeded() keeps starting the next run automatically
+    // until m_batchRunsRequested is reached or the user presses ■停止.
+    QSpinBox *m_batchRunCountSpin = nullptr;
+    QLabel *m_batchProgressLabel = nullptr;
+    int m_batchRunsRequested = 1;
+    int m_batchRunsCompleted = 0;
+    bool m_batchModeActive = false;
+    // Polls (via onBatchWaitTick()) for the target app to reappear between
+    // batch runs when it isn't already back the instant one finishes --
+    // whether the user relaunches it by hand or m_targetLaunchCommandEdit's
+    // command was used to relaunch it automatically (SPEC.md 10 ①②).
+    QTimer *m_batchWaitTimer = nullptr;
+
     // Log
     QPlainTextEdit *m_logView = nullptr;
     QPushButton *m_saveSummaryButton = nullptr;
@@ -328,6 +396,23 @@ private:
     QAction *m_loadPresetAction = nullptr;
     QAction *m_languageJapaneseAction = nullptr;
     QAction *m_languageEnglishAction = nullptr;
+
+    // Cross-run crash statistics (SPEC.md 10 ③④, "確率的なクラッシュの解析").
+    // Persists to disk (TestStatistics::historyFilePath()) so it survives
+    // the app being closed/reopened -- every finished run is recorded here
+    // regardless of whether it was started by hand or by the batch loop.
+    TestStatistics m_stats;
+    // Identifies "this exact ①②③ setup" (see TestStatistics::computeFingerprint);
+    // kept up to date by updateStatisticsDisplay().
+    QString m_currentConfigFingerprint;
+    // stepIndex -> crash count for m_currentConfigFingerprint, and the total
+    // run count they're a fraction of -- cached here (rather than re-queried
+    // per paint) so describeStep() can append a "⚠ クラッシュ N/M回" badge
+    // (SPEC.md 10 ④) cheaply for every row.
+    QMap<int, int> m_stepCrashCounts;
+    int m_statsTotalRuns = 0;
+    QLabel *m_statisticsSummaryLabel = nullptr;
+    QPushButton *m_showStatisticsButton = nullptr;
 
     // System-wide emergency-stop hotkey (Ctrl+Alt+Shift+Esc), a backstop
     // for the floating StopPanel button -- see GlobalHotkey.h and SPEC.md

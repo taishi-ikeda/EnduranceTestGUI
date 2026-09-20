@@ -7,6 +7,7 @@
 #include <QPixmap>
 #include <QRandomGenerator>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 
 #include "TestConfig.h"
@@ -55,6 +56,20 @@ public:
         // its usual anomaly-artifact auto-save which applies to every kind
         // of anomaly.
         bool targetCrashed = false;
+        // 0-based index into TestConfig::steps that was executing at the
+        // moment of a crash (targetCrashed == true); -1 otherwise (not
+        // meaningful for any other stop reason). Kept as a plain index
+        // rather than parsed back out of stopReason's (possibly translated,
+        // see I18n.h) text, so TestStatistics can tally crashes per step
+        // without any string matching (SPEC.md 6.7/10 "確率的なクラッシュの解析").
+        int crashStepIndex = -1;
+        // The most recent (up to kRecentActionHistorySize, see
+        // RandomActionEngine.cpp) action descriptions performed this run,
+        // oldest first -- included in every summary (not just crashes) so a
+        // developer investigating a probabilistic crash can see exactly
+        // which operations immediately preceded it, alongside the RNG seed
+        // (which alone may not reproduce a non-deterministic bug).
+        QStringList recentActions;
     };
 
     // Where captureAnomalyArtifacts() saves anomaly screenshots/recording
@@ -290,6 +305,13 @@ private:
     QMap<ActionKind, qint64> m_actionKindCounts;
     quint32 m_rngSeedUsed = 0;
     QString describeActionKind(ActionKind kind) const;
+
+    // Ring buffer of the last kRecentActionHistorySize performed-action
+    // descriptions (oldest first), for RunSummary::recentActions above --
+    // fed from both performRandomAction() and performGroupAction() every
+    // time an action actually dispatches. Cleared at the top of start().
+    QStringList m_recentActionDescriptions;
+    void recordRecentAction(const QString &desc);
 
     QRandomGenerator m_rng;
 

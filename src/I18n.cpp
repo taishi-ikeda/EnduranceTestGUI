@@ -26,10 +26,10 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral(" 秒"), QStringLiteral(" sec")},
         {QStringLiteral("%1/操作領域_%2_%3_%4.png"), QStringLiteral("%1/region_%2_%3_%4.png")},
         {QStringLiteral("%1に有効な操作がありません"), QStringLiteral("%1 has no enabled actions")},
-        {QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6"), QStringLiteral("%1Step %2: %3 | Action: %4 | Count: %5%6")},
-        {QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）"),
-         QStringLiteral("%1Step %2: Group (%3 steps, %4 total calls)")},
-        {QStringLiteral("%1ステップ%2: 待機（%3 ms）"), QStringLiteral("%1Step %2: Wait (%3 ms)")},
+        {QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7"), QStringLiteral("%1Step %2: %3 | Action: %4 | Count: %5%6%7")},
+        {QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）%5"),
+         QStringLiteral("%1Step %2: Group (%3 steps, %4 total calls)%5")},
+        {QStringLiteral("%1ステップ%2: 待機（%3 ms）%4"), QStringLiteral("%1Step %2: Wait (%3 ms)%4")},
         {QStringLiteral("%1（矩形%2個・除外%3個）%4"), QStringLiteral("%1 (%2 rects, %3 excludes)%4")},
         {QStringLiteral("(なし)"), QStringLiteral("(None)")},
         {QStringLiteral("(ウィンドウが見つかりません)"), QStringLiteral("(Window not found)")},
@@ -410,6 +410,88 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("②で新しくステップを追加したときの初期値です。既存のステップには"
                         "影響しません。"), QStringLiteral("These are the initial values used when a new step is added in ②. They do not affect existing steps.")},
         {QStringLiteral("%1  ―  ドラッグで矩形を追加（複数可） / Enter または右クリックで確定 / Esc でキャンセル"), QStringLiteral("%1  ―  Drag to add a rectangle (multiple allowed) / Enter or right-click to confirm / Esc to cancel")},
+
+        // SPEC.md 10 ③④⑤: crash-rate statistics (TestStatistics/StatisticsDialog).
+        {QStringLiteral("直近の操作（古い順、確率的な不具合の解析用）:"), QStringLiteral("Recent actions (oldest first, for diagnosing probabilistic bugs):")},
+        {QStringLiteral(" | ⚠ クラッシュ %1/%2回"), QStringLiteral(" | ⚠ Crashed %1/%2 runs")},
+        {QStringLiteral("統計..."), QStringLiteral("Statistics...")},
+        {QStringLiteral("このテスト設定: %1回中%2回クラッシュ（%3%）"), QStringLiteral("This test setup: %2/%1 runs crashed (%3%)")},
+        {QStringLiteral("このテスト設定での実行記録はまだありません。"), QStringLiteral("No runs have been recorded yet for this test setup.")},
+        {QStringLiteral("統計（クラッシュ率）"), QStringLiteral("Statistics (Crash Rate)")},
+        {QStringLiteral("現在読み込まれているテスト設定（①②③の内容）について、これまでに"
+                        "記録された全実行結果の集計です。手動で対象アプリを再起動して同じ"
+                        "テストを繰り返した場合も、自動連続実行を使った場合も、同じ集計に"
+                        "含まれます。"),
+         QStringLiteral("Aggregated results for the currently loaded test setup (①②③), across every "
+                        "recorded run. Runs where you manually relaunched the target app and repeated "
+                        "the same test are counted the same as runs started by the automatic batch loop.")},
+        {QStringLiteral("ステップ"), QStringLiteral("Step")},
+        {QStringLiteral("クラッシュ回数"), QStringLiteral("Crash Count")},
+        {QStringLiteral("全試行回数に対する割合"), QStringLiteral("Share of Total Attempts")},
+        {QStringLiteral("CSVエクスポート..."), QStringLiteral("Export CSV...")},
+        {QStringLiteral("この統計をリセット..."), QStringLiteral("Reset This Statistics...")},
+        {QStringLiteral("このテスト設定での実行記録はまだありません。「開始」でテストを実行すると"
+                        "ここに集計されます。"),
+         QStringLiteral("No runs have been recorded yet for this test setup. Running a test with "
+                        "\"Start\" will add to these statistics.")},
+        {QStringLiteral("試行回数: %1回\nクラッシュ回数: %2回（クラッシュ率 %3%）\n"
+                        "クラッシュまでの平均実行回数: %4回\nクラッシュまでの平均経過時間: %5秒"),
+         QStringLiteral("Attempts: %1\nCrashed runs: %2 (crash rate %3%)\n"
+                        "Mean actions before crash: %4\nMean elapsed time before crash: %5 sec")},
+        {QStringLiteral("ステップ %1（現在の構成には存在しません）"), QStringLiteral("Step %1 (not present in the current setup)")},
+        {QStringLiteral("%1/%2回 (%3%)"), QStringLiteral("%1/%2 (%3%)")},
+        {QStringLiteral("統計をCSVでエクスポート"), QStringLiteral("Export Statistics as CSV")},
+        {QStringLiteral("CSV (*.csv)"), QStringLiteral("CSV (*.csv)")},
+        {QStringLiteral("エクスポート完了"), QStringLiteral("Export Complete")},
+        {QStringLiteral("記録されている全テスト設定分の実行履歴をCSVに書き出しました: %1"),
+         QStringLiteral("Exported the run history for every recorded test setup to CSV: %1")},
+        {QStringLiteral("エクスポートエラー"), QStringLiteral("Export Error")},
+        {QStringLiteral("このテスト設定についてこれまでに記録された統計（試行回数・クラッシュ回数・"
+                        "ステップ別内訳）をすべて削除します。よろしいですか？"
+                        "（他のテスト設定の統計には影響しません）"),
+         QStringLiteral("This will delete all recorded statistics for this test setup (attempts, crash "
+                        "count, per-step breakdown). Are you sure? (Other test setups' statistics are not affected.)")},
+
+        // SPEC.md 10 ①②: batch mode (consecutive automatic runs) and the
+        // optional target-app auto-launch command.
+        {QStringLiteral("連続実行回数:"), QStringLiteral("Batch run count:")},
+        {QStringLiteral("対象アプリの自動起動コマンド（任意、①の連続実行で使用）:"),
+         QStringLiteral("Target app auto-launch command (optional, used by batch mode):")},
+        {QStringLiteral("例: /path/to/TestTarget --option"), QStringLiteral("e.g. /path/to/TestTarget --option")},
+        {QStringLiteral("参照..."), QStringLiteral("Browse...")},
+        {QStringLiteral("今すぐ起動"), QStringLiteral("Launch Now")},
+        {QStringLiteral("対象アプリの実行ファイルを選択"), QStringLiteral("Select the Target App's Executable")},
+        {QStringLiteral("1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
+                        "自動的に次を開始し、指定回数繰り返します。"),
+         QStringLiteral("Setting this above 1 automatically starts the next run (waiting for the target "
+                        "app to relaunch) each time one finishes, repeating this many times.")},
+        {QStringLiteral("連続実行: 権限が確認できなかったため中断しました"),
+         QStringLiteral("Batch run: cancelled because the permission could not be confirmed")},
+        {QStringLiteral("連続実行: 設定エラーのため中断しました: %1"),
+         QStringLiteral("Batch run: cancelled due to a configuration error: %1")},
+        {QStringLiteral("連続実行: 安全確認に失敗したため中断しました"),
+         QStringLiteral("Batch run: cancelled because the safety check failed")},
+        {QStringLiteral("連続実行: %1/%2回目を開始します"), QStringLiteral("Batch run: starting run %1/%2")},
+        {QStringLiteral("連続実行: %1/%2回目"), QStringLiteral("Batch run: %1/%2")},
+        {QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）"),
+         QStringLiteral("Batch run cancelled (was waiting for the target app to relaunch)")},
+        {QStringLiteral("連続実行を中断します（現在の実行が終わり次第停止します）"),
+         QStringLiteral("Cancelling the batch run (will stop once the current run finishes)")},
+        {QStringLiteral("連続実行が完了しました（%1/%2回）"), QStringLiteral("Batch run complete (%1/%2)")},
+        {QStringLiteral("連続実行: %1/%2回が終了しました。次の実行の準備をします..."),
+         QStringLiteral("Batch run: %1/%2 finished. Preparing the next run...")},
+        {QStringLiteral("連続実行: %1回目の準備中..."), QStringLiteral("Batch run: preparing run %1...")},
+        {QStringLiteral("連続実行: 対象アプリが見つからないため、登録された起動コマンドで"
+                        "自動的に起動します"),
+         QStringLiteral("Batch run: the target app was not found, launching it automatically with the "
+                        "configured command")},
+        {QStringLiteral("連続実行: 対象アプリが見つかりません。手動で再起動してください"
+                        "（再起動を検知したら自動的に次の実行を開始します）"),
+         QStringLiteral("Batch run: the target app was not found. Please relaunch it manually (the next "
+                        "run will start automatically once it's detected)")},
+        {QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します"),
+         QStringLiteral("Batch run: detected the target app launching. Starting the next run")},
+        {QStringLiteral("対象アプリの自動起動に失敗しました: %1"), QStringLiteral("Failed to auto-launch the target app: %1")},
     };
     return table;
 }

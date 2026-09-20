@@ -62,6 +62,8 @@ set(SOURCES
     src/ActionKindEditor.cpp
     src/StepGroupEditorDialog.cpp
     src/TestConfigJson.cpp
+    src/TestStatistics.cpp
+    src/StatisticsDialog.cpp
 )
 
 set(HEADERS
@@ -78,6 +80,8 @@ set(HEADERS
     src/StepGroupEditorDialog.h
     src/TestConfig.h
     src/TestConfigJson.h
+    src/TestStatistics.h
+    src/StatisticsDialog.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h)

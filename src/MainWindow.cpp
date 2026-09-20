@@ -28,6 +28,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
@@ -43,6 +44,7 @@
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
 #include "RegionSelectorOverlay.h"
+#include "StatisticsDialog.h"
 #include "StepEditorDialog.h"
 #include "StepGroupEditorDialog.h"
 #include "StopPanel.h"
@@ -88,6 +90,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_uiTimer->setInterval(500);
     connect(m_uiTimer, &QTimer::timeout, this, &MainWindow::updateElapsedLabel);
 
+    // SPEC.md 10 ①: polls for the target app to reappear between batch
+    // runs (waitForTargetThenContinueBatch()/onBatchWaitTick()). 1-second
+    // cadence is frequent enough to feel responsive without meaningfully
+    // taxing a CPU that's otherwise idle while nothing runs.
+    m_batchWaitTimer = new QTimer(this);
+    m_batchWaitTimer->setInterval(1000);
+    connect(m_batchWaitTimer, &QTimer::timeout, this, &MainWindow::onBatchWaitTick);
+
     // The Accessibility permission is typically granted/toggled in System
     // Settings while this app is running, then the user alt-tabs back.
     // Re-check it (and refresh the target list, in case new windows
@@ -98,6 +108,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                 if (state == Qt::ApplicationActive)
                     onRefreshTargets();
             });
+
+    m_stats.reload();
 
     buildUi();
     onRefreshTargets();
@@ -166,6 +178,20 @@ void MainWindow::buildUi()
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_statusLabel);
     controlsRow->addStretch();
+
+    // SPEC.md 10 ①: repeat the whole test automatically to help reproduce a
+    // crash that only happens some fraction of the time -- 1 (default)
+    // means "no batching", same as before this feature existed.
+    controlsRow->addWidget(new QLabel(I18n::t(QStringLiteral("連続実行回数:")), central));
+    m_batchRunCountSpin = new QSpinBox(central);
+    m_batchRunCountSpin->setRange(1, 100000);
+    m_batchRunCountSpin->setValue(1);
+    m_batchRunCountSpin->setToolTip(
+        I18n::t(QStringLiteral("1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
+                                "自動的に次を開始し、指定回数繰り返します。")));
+    controlsRow->addWidget(m_batchRunCountSpin);
+    m_batchProgressLabel = new QLabel(central);
+    controlsRow->addWidget(m_batchProgressLabel);
     bottomLayout->addLayout(controlsRow);
 
     auto *progressRow = new QHBoxLayout;
@@ -177,6 +203,18 @@ void MainWindow::buildUi()
     progressRow->addWidget(m_elapsedLabel);
     progressRow->addWidget(m_iterationLabel);
     bottomLayout->addLayout(progressRow);
+
+    // このテスト設定について、これまでに記録された全実行結果からの
+    // クラッシュ率の要約（SPEC.md 10 ③）。updateStatisticsDisplay()が
+    // 読み込み時・開始直前・実行終了後に更新する。
+    auto *statsRow = new QHBoxLayout;
+    m_statisticsSummaryLabel = new QLabel(central);
+    m_statisticsSummaryLabel->setWordWrap(true);
+    m_showStatisticsButton = new QPushButton(I18n::t(QStringLiteral("統計...")), central);
+    statsRow->addWidget(m_statisticsSummaryLabel, 1);
+    statsRow->addWidget(m_showStatisticsButton);
+    bottomLayout->addLayout(statsRow);
+    connect(m_showStatisticsButton, &QPushButton::clicked, this, &MainWindow::onShowStatistics);
 
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
@@ -226,6 +264,7 @@ void MainWindow::buildUi()
     refreshNamedRegionList();
     refreshStepList();
     m_actionParamsEditor->setParams(m_defaultActionParams);
+    updateStatisticsDisplay();
 
     resize(1200, 900);
 }
@@ -344,9 +383,37 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_openSettingsButton = new QPushButton(I18n::t(QStringLiteral("権限設定を開く")), m_targetGroup);
     targetLayout->addWidget(m_openSettingsButton);
 
+    // SPEC.md 10 ②: an optional command to (re)launch the target app, used
+    // by ①の連続自動実行 (batch mode) when it finds the target gone between
+    // runs, and by "今すぐ起動" below for a manual one-off relaunch anytime.
+    // Entirely optional -- batch mode works without it too, just waiting
+    // for a manual relaunch instead (SPEC.md 10 ①).
+    auto *launchCommandLabel =
+        new QLabel(I18n::t(QStringLiteral("対象アプリの自動起動コマンド（任意、①の連続実行で使用）:")), m_targetGroup);
+    launchCommandLabel->setWordWrap(true);
+    targetLayout->addWidget(launchCommandLabel);
+    auto *launchCommandRow = new QHBoxLayout;
+    m_targetLaunchCommandEdit = new QLineEdit(m_targetGroup);
+    m_targetLaunchCommandEdit->setPlaceholderText(
+        I18n::t(QStringLiteral("例: /path/to/TestTarget --option")));
+    m_browseLaunchCommandButton = new QPushButton(I18n::t(QStringLiteral("参照...")), m_targetGroup);
+    launchCommandRow->addWidget(m_targetLaunchCommandEdit, 1);
+    launchCommandRow->addWidget(m_browseLaunchCommandButton);
+    targetLayout->addLayout(launchCommandRow);
+    m_launchTargetNowButton = new QPushButton(I18n::t(QStringLiteral("今すぐ起動")), m_targetGroup);
+    targetLayout->addWidget(m_launchTargetNowButton);
+
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
+    connect(m_browseLaunchCommandButton, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, I18n::t(QStringLiteral("対象アプリの実行ファイルを選択")));
+        if (!path.isEmpty())
+            m_targetLaunchCommandEdit->setText(path);
+    });
+    connect(m_launchTargetNowButton, &QPushButton::clicked, this,
+            &MainWindow::launchTargetAppFromConfiguredCommand);
 
     layout->addWidget(m_targetGroup);
 
@@ -714,23 +781,37 @@ void MainWindow::refreshPermissionLabel()
 
 QString MainWindow::describeStep(const RegionStep &step, int index) const
 {
+    // SPEC.md 10 ④: how many of this fingerprint's recorded runs crashed
+    // while this step was executing, out of the total recorded for it --
+    // empty unless there's at least one crash on this exact step, so a
+    // step with a clean history doesn't get cluttered with a "0/N" badge.
+    QString crashBadge;
+    if (m_statsTotalRuns > 0) {
+        const int crashCount = m_stepCrashCounts.value(index, 0);
+        if (crashCount > 0)
+            crashBadge =
+                I18n::t(QStringLiteral(" | ⚠ クラッシュ %1/%2回")).arg(crashCount).arg(m_statsTotalRuns);
+    }
+
     if (step.isWaitStep) {
         const QString runningPrefix =
             index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
-        return I18n::t(QStringLiteral("%1ステップ%2: 待機（%3 ms）"))
+        return I18n::t(QStringLiteral("%1ステップ%2: 待機（%3 ms）%4"))
             .arg(runningPrefix)
             .arg(index + 1)
-            .arg(step.waitDurationMs);
+            .arg(step.waitDurationMs)
+            .arg(crashBadge);
     }
 
     if (step.isGroup) {
         const QString runningPrefix =
             index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
-        return I18n::t(QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）"))
+        return I18n::t(QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）%5"))
             .arg(runningPrefix)
             .arg(index + 1)
             .arg(step.groupMembers.size())
-            .arg(step.groupTotalCallCount);
+            .arg(step.groupTotalCallCount)
+            .arg(crashBadge);
     }
 
     QStringList actions;
@@ -763,13 +844,14 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
     const QString runningPrefix =
         index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
 
-    return I18n::t(QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6"))
+    return I18n::t(QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7"))
         .arg(runningPrefix)
         .arg(index + 1)
         .arg(regionDesc)
         .arg(actions.isEmpty() ? I18n::t(QStringLiteral("(なし)")) : actions.join(QStringLiteral(", ")))
         .arg(step.actionCount)
-        .arg(paramsBadge);
+        .arg(paramsBadge)
+        .arg(crashBadge);
 }
 
 void MainWindow::refreshStepList()
@@ -1443,6 +1525,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_timingGroup->setEnabled(enabled);
     m_savePresetAction->setEnabled(enabled);
     m_loadPresetAction->setEnabled(enabled);
+    m_batchRunCountSpin->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
@@ -1469,14 +1552,19 @@ void MainWindow::updateGroupButtonsEnabled()
                                      row < m_steps.size() && m_steps[row].isGroup);
 }
 
-void MainWindow::onStart()
+bool MainWindow::beginRun(bool interactive)
 {
     if (!PlatformAutomation::isAccessibilityTrusted(true)) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("権限が必要です")),
-                              I18n::t(QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
-                                              "設定を許可してから、もう一度「開始」を押してください。")));
-        onRefreshTargets();
-        return;
+        if (interactive) {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("権限が必要です")),
+                                  I18n::t(QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
+                                                  "設定を許可してから、もう一度「開始」を押してください。")));
+            onRefreshTargets();
+        } else {
+            appendLog(I18n::t(QStringLiteral("連続実行: 権限が確認できなかったため中断しました")));
+            m_batchModeActive = false;
+        }
+        return false;
     }
 
     flushActionParamsEditor();
@@ -1485,8 +1573,13 @@ void MainWindow::onStart()
     QString errorMessage;
     const TestConfig config = buildConfigFromUi(ok, errorMessage);
     if (!ok) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("設定エラー")), errorMessage);
-        return;
+        if (interactive)
+            QMessageBox::warning(this, I18n::t(QStringLiteral("設定エラー")), errorMessage);
+        else {
+            appendLog(I18n::t(QStringLiteral("連続実行: 設定エラーのため中断しました: %1")).arg(errorMessage));
+            m_batchModeActive = false;
+        }
+        return false;
     }
 
     // Preflight safety self-test: RandomActionEngine refuses to operate
@@ -1501,15 +1594,25 @@ void MainWindow::onStart()
     if (PlatformAutomation::queryWindowBounds(config.targetWindowId, config.targetPid, targetBounds)) {
         PlatformAutomation::activateProcess(config.targetPid);
         if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
-            QMessageBox::warning(
-                this, I18n::t(QStringLiteral("安全確認に失敗しました")),
-                I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
-                    "対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認して"
-                    "ください。それでも解決しない場合、この環境（特にLinuxの一部のウィンドウマネージャ）"
-                    "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。")));
-            return;
+            if (interactive) {
+                QMessageBox::warning(
+                    this, I18n::t(QStringLiteral("安全確認に失敗しました")),
+                    I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
+                        "対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認して"
+                        "ください。それでも解決しない場合、この環境（特にLinuxの一部のウィンドウマネージャ）"
+                        "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。")));
+            } else {
+                appendLog(I18n::t(QStringLiteral("連続実行: 安全確認に失敗したため中断しました")));
+                m_batchModeActive = false;
+            }
+            return false;
         }
     }
+
+    // Refresh the fingerprint/badges/summary against exactly the config
+    // that's about to run (SPEC.md 10 ③④), in case steps were edited since
+    // the last load/finish.
+    updateStatisticsDisplay();
 
     setControlsEnabled(false);
     m_statusLabel->setText(I18n::t(QStringLiteral("実行中")));
@@ -1521,6 +1624,13 @@ void MainWindow::onStart()
     m_stopPanel->show();
 
     m_logView->clear();
+    if (m_batchModeActive) {
+        appendLog(I18n::t(QStringLiteral("連続実行: %1/%2回目を開始します"))
+                       .arg(m_batchRunsCompleted + 1)
+                       .arg(m_batchRunsRequested));
+        m_batchProgressLabel->setText(
+            I18n::t(QStringLiteral("連続実行: %1/%2回目")).arg(m_batchRunsCompleted + 1).arg(m_batchRunsRequested));
+    }
 
     // Full, uncapped write-through log for this run (SPEC.md 6.8/10) -- see
     // the m_fullLogFile field comment for why this exists separately from
@@ -1542,10 +1652,43 @@ void MainWindow::onStart()
         appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
 
     m_engine->start(config);
+    return true;
+}
+
+void MainWindow::onStart()
+{
+    // SPEC.md 10 ①: N > 1 starts batch mode -- see beginRun()/
+    // continueBatchIfNeeded()/waitForTargetThenContinueBatch() for how each
+    // subsequent run is started automatically once this one finishes.
+    m_batchRunsRequested = qMax(1, m_batchRunCountSpin->value());
+    m_batchRunsCompleted = 0;
+    m_batchModeActive = m_batchRunsRequested > 1;
+    m_batchProgressLabel->setText(QString());
+    beginRun(/*interactive=*/true);
 }
 
 void MainWindow::onStop()
 {
+    // A manual stop always cancels the whole batch, not just whatever run
+    // is currently in progress (or being waited for -- see below) --
+    // otherwise onEngineFinished()'s continueBatchIfNeeded() would just
+    // start the next one right back up.
+    const bool wasBatching = m_batchModeActive;
+    m_batchModeActive = false;
+
+    if (m_batchWaitTimer->isActive()) {
+        // Between batch runs: the target app crashed/exited and we're
+        // polling for it to come back (SPEC.md 10 ①). Nothing is actually
+        // running for m_engine to stop, so undo the waiting state directly.
+        m_batchWaitTimer->stop();
+        appendLog(I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
+        m_batchProgressLabel->setText(QString());
+        setControlsEnabled(true);
+        return;
+    }
+
+    if (wasBatching)
+        appendLog(I18n::t(QStringLiteral("連続実行を中断します（現在の実行が終わり次第停止します）")));
     m_engine->stop();
 }
 
@@ -1592,14 +1735,90 @@ void MainWindow::onEngineFinished(const QString &reason)
     // the same setup with the least friction.
     onRefreshTargets();
 
-    if (m_currentRunningStepIndex >= 0 && m_currentRunningStepIndex < m_steps.size()) {
-        if (auto *item = m_stepListWidget->item(m_currentRunningStepIndex))
-            item->setText(describeStep(m_steps[m_currentRunningStepIndex], m_currentRunningStepIndex));
-    }
+    // Clear the "▶ 実行中" marker from whichever row still has it *before*
+    // regenerating that row's text -- describeStep() decides the marker by
+    // comparing its `index` argument against m_currentRunningStepIndex, so
+    // resetting the member first (rather than after, as this used to do) is
+    // what actually makes the comparison come out false once the run has
+    // stopped, instead of it trivially matching itself and leaving the
+    // marker shown forever until something else happens to touch this row.
+    const int finishedStepIndex = m_currentRunningStepIndex;
     m_currentRunningStepIndex = -1;
+    if (finishedStepIndex >= 0 && finishedStepIndex < m_steps.size()) {
+        if (auto *item = m_stepListWidget->item(finishedStepIndex))
+            item->setText(describeStep(m_steps[finishedStepIndex], finishedStepIndex));
+    }
 
     if (m_fullLogFile.isOpen())
         m_fullLogFile.close();
+
+    continueBatchIfNeeded();
+}
+
+void MainWindow::continueBatchIfNeeded()
+{
+    if (!m_batchModeActive)
+        return;
+    ++m_batchRunsCompleted;
+    if (m_batchRunsCompleted >= m_batchRunsRequested) {
+        appendLog(I18n::t(QStringLiteral("連続実行が完了しました（%1/%2回）")).arg(m_batchRunsCompleted).arg(m_batchRunsRequested));
+        m_batchModeActive = false;
+        m_batchProgressLabel->setText(QString());
+        return;
+    }
+    appendLog(I18n::t(QStringLiteral("連続実行: %1/%2回が終了しました。次の実行の準備をします..."))
+                   .arg(m_batchRunsCompleted)
+                   .arg(m_batchRunsRequested));
+    m_batchProgressLabel->setText(
+        I18n::t(QStringLiteral("連続実行: %1回目の準備中...")).arg(m_batchRunsCompleted + 1));
+    // Keep ①②③ locked and the stop button available while the batch
+    // continues, even though onEngineFinished() (our caller) just
+    // re-enabled everything for the "no batch" case.
+    setControlsEnabled(false);
+    m_stopButton->setEnabled(true);
+    waitForTargetThenContinueBatch();
+}
+
+void MainWindow::waitForTargetThenContinueBatch()
+{
+    onRefreshTargets();
+    if (tryReselectLastTarget()) {
+        beginRun(/*interactive=*/false);
+        return;
+    }
+    if (!m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリが見つからないため、登録された起動コマンドで"
+                                          "自動的に起動します")));
+        launchTargetAppFromConfiguredCommand();
+    } else {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリが見つかりません。手動で再起動してください"
+                                          "（再起動を検知したら自動的に次の実行を開始します）")));
+    }
+    m_batchWaitTimer->start();
+}
+
+void MainWindow::onBatchWaitTick()
+{
+    onRefreshTargets();
+    if (!tryReselectLastTarget())
+        return;
+    m_batchWaitTimer->stop();
+    appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
+    beginRun(/*interactive=*/false);
+}
+
+void MainWindow::launchTargetAppFromConfiguredCommand()
+{
+    const QString commandLine = m_targetLaunchCommandEdit->text().trimmed();
+    if (commandLine.isEmpty())
+        return;
+    const QStringList parts = QProcess::splitCommand(commandLine);
+    if (parts.isEmpty())
+        return;
+    const QString program = parts.first();
+    const QStringList arguments = parts.mid(1);
+    if (!QProcess::startDetached(program, arguments))
+        appendLog(I18n::t(QStringLiteral("対象アプリの自動起動に失敗しました: %1")).arg(commandLine));
 }
 
 void MainWindow::onActionLog(const QString &message)
@@ -1688,6 +1907,33 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
     for (const QString &line : RandomActionEngine::formatSummaryText(summary).split(QLatin1Char('\n')))
         appendLog(line);
 
+    // Record this run for the crash-rate statistics (SPEC.md 10 ③④),
+    // regardless of how it was started -- a manual "開始" click after the
+    // user relaunched a crashed target app by hand counts exactly the same
+    // as one the batch loop started automatically. m_targetCombo/m_windows
+    // still reflect the target as it was during this just-finished run;
+    // onEngineFinished() (which fires right after this) is what refreshes
+    // them for the next one.
+    {
+        const int targetIdx = m_targetCombo->currentIndex();
+        const QString appName = (targetIdx >= 0 && targetIdx < m_windows.size())
+                                     ? m_windows[targetIdx].appName
+                                     : m_lastTargetAppName;
+        TestStatistics::RunRecord record;
+        record.finishedAt = QDateTime::currentDateTime();
+        record.configFingerprint = m_currentConfigFingerprint;
+        record.targetAppName = appName;
+        record.crashed = summary.targetCrashed;
+        record.anomaly = summary.anomaly;
+        record.crashStepIndex = summary.crashStepIndex;
+        record.totalIterations = summary.totalIterations;
+        record.elapsedMs = summary.elapsedMs;
+        record.rngSeedUsed = summary.rngSeedUsed;
+        record.stopReason = summary.stopReason;
+        m_stats.addRun(record);
+    }
+    updateStatisticsDisplay();
+
     // Auto-save the exact test setup used (as a JSON preset) and the
     // operation-region screenshot alongside RandomActionEngine's own
     // anomaly screenshots/recording/crash-report search, all under the
@@ -1732,15 +1978,26 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
     // which step was running (RandomActionEngine::performRandomAction
     // builds it right before calling doStop()), so this dialog answers both
     // "did it crash?" and "at what step?" without digging through the log.
+    //
+    // Shown non-modally (show(), not the blocking exec() that
+    // QMessageBox::critical() would run) and WA_DeleteOnClose'd instead of
+    // kept around: a modal dialog here would freeze the whole app --
+    // including SPEC.md 10 ①'s batch loop -- until a human clicks OK, which
+    // defeats the point of an unattended overnight run reproducing a
+    // probabilistic crash many times over. The crash is already fully
+    // recorded (log, statistics, saved artifacts) by this point regardless
+    // of whether anyone is watching to dismiss the dialog.
     if (summary.targetCrashed) {
-        QMessageBox::critical(
-            this, I18n::t(QStringLiteral("対象アプリのクラッシュを検知しました")),
+        auto *dialog = new QMessageBox(QMessageBox::Critical, I18n::t(QStringLiteral("対象アプリのクラッシュを検知しました")),
             I18n::t(QStringLiteral("%1\n\n実行回数: %2\n乱数シード: %3\n\n"
                                     "異常停止時の記録（設定・操作領域画像・ログ等）は自動保存されています。"
                                     "詳細はログ欄を確認してください。"))
                 .arg(summary.stopReason)
                 .arg(summary.totalIterations)
-                .arg(summary.rngSeedUsed));
+                .arg(summary.rngSeedUsed),
+            QMessageBox::Ok, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
     }
 }
 
@@ -1820,6 +2077,9 @@ QJsonObject MainWindow::buildPresetJson() const
     const int targetIdx = m_targetCombo->currentIndex();
     root["targetAppNameHint"] =
         (targetIdx >= 0 && targetIdx < m_windows.size()) ? m_windows[targetIdx].appName : QString();
+    // SPEC.md 10 ②: saved/loaded alongside the rest of the setup so a
+    // preset built for unattended batch runs (①) stays fully self-contained.
+    root["targetLaunchCommand"] = m_targetLaunchCommandEdit->text();
 
     QJsonArray regionsArr;
     for (const NamedRegion &r : m_namedRegions)
@@ -1945,6 +2205,7 @@ void MainWindow::onLoadPreset()
     refreshNamedRegionList();
     refreshStepList();
     loadActionParamsEditorForSelection();
+    m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());
 
     const QString hint = root["targetAppNameHint"].toString();
     if (!hint.isEmpty()) {
@@ -1968,4 +2229,38 @@ void MainWindow::onLoadPreset()
                         : I18n::t(QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
                                     "①で対象ウィンドウを選び直してください）"))
                               .arg(path, hint));
+
+    updateStatisticsDisplay();
+}
+
+void MainWindow::updateStatisticsDisplay()
+{
+    m_currentConfigFingerprint = TestStatistics::computeFingerprint(buildPresetJson());
+    const TestStatistics::Aggregate agg = m_stats.aggregate(m_currentConfigFingerprint);
+    m_statsTotalRuns = agg.totalRuns;
+    m_stepCrashCounts.clear();
+    for (const TestStatistics::StepCrashCount &sc : agg.crashesByStep)
+        m_stepCrashCounts.insert(sc.stepIndex, sc.crashCount);
+
+    m_statisticsSummaryLabel->setText(
+        agg.totalRuns > 0
+            ? I18n::t(QStringLiteral("このテスト設定: %1回中%2回クラッシュ（%3%）"))
+                  .arg(agg.totalRuns)
+                  .arg(agg.crashRuns)
+                  .arg(agg.crashRate() * 100.0, 0, 'f', 1)
+            : I18n::t(QStringLiteral("このテスト設定での実行記録はまだありません。")));
+
+    // Update each row in place (not a full refreshStepList(), which would
+    // clear/restore ②'s current selection needlessly -- see
+    // m_suppressStepSelectionHandling's own comment for why that matters).
+    for (int i = 0; i < m_stepListWidget->count() && i < m_steps.size(); ++i)
+        m_stepListWidget->item(i)->setText(describeStep(m_steps[i], i));
+}
+
+void MainWindow::onShowStatistics()
+{
+    auto *dialog = new StatisticsDialog(&m_stats, m_currentConfigFingerprint, m_steps.size(), this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &StatisticsDialog::statisticsReset, this, &MainWindow::updateStatisticsDisplay);
+    dialog->exec();
 }

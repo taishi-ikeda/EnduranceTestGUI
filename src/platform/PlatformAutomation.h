@@ -55,6 +55,15 @@ QList<WindowInfo> listWindows();
 // Returns false if the window can no longer be found.
 bool queryWindowBounds(quint32 windowId, qint64 pid, QRect &outBounds);
 
+// IDs of all currently on-screen top-level windows owned by this pid (the
+// same enumeration listWindows() draws from, just pre-filtered to one
+// process instead of returning full WindowInfo for every process). Used to
+// notice a *second* window belonging to the target appearing next to the
+// one the user originally selected -- e.g. an unexpected confirmation
+// dialog -- which RandomActionEngine treats as something to dismiss rather
+// than something to click on (SPEC.md 6.7/10).
+QList<quint32> listWindowIdsForPid(qint64 pid);
+
 bool activateProcess(qint64 pid);
 
 // True if the process still exists (used to detect the target app having
@@ -66,6 +75,32 @@ bool isProcessRunning(qint64 pid);
 // twice and divide the CPU-time delta by the wall-clock delta to get a CPU
 // percentage (see RandomActionEngine's resource-usage sampler).
 ProcessStats queryProcessStats(qint64 pid);
+
+enum class ResponsivenessCheck {
+    // No prior probe to evaluate yet (the very first call for this
+    // windowId) -- not evidence of anything either way. Callers must not
+    // treat this the same as Responding: doing so would let one call's
+    // "no data yet" get mistaken for a confirmed reply, undermining any
+    // logic that (correctly) wants to see at least one *real* Responding
+    // result before ever trusting a later NotResponding as a genuine hang.
+    Pending,
+    Responding,
+    NotResponding,
+    Unsupported,
+};
+
+// Best-effort "is the target's event loop still processing input" check
+// (distinct from isProcessRunning() above, which only tells you the
+// process hasn't exited -- a hung/deadlocked process is still "running" by
+// that measure). Stateful and meant to be polled periodically (see
+// RandomActionEngine's hang-check timer): each call both evaluates the
+// probe sent by the *previous* call (if any, for this same windowId) and
+// sends a new one for next time, trading a tick of latency for never
+// blocking the caller waiting on a reply. Returns Unsupported if this
+// platform/window doesn't support the underlying protocol at all --
+// callers should stop polling in that case rather than treat it as a
+// negative result (SPEC.md 8/10).
+ResponsivenessCheck checkWindowResponsive(quint32 windowId, qint64 pid);
 
 // --- Safety checks -----------------------------------------------------
 // Used immediately before dispatching each action to confirm it will

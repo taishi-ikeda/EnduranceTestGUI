@@ -21,9 +21,11 @@ class QPlainTextEdit;
 class QPushButton;
 class QGroupBox;
 class QTimer;
+class QAction;
 class StopPanel;
 class ActionParamsEditor;
 class ActionKindEditor;
+class GlobalHotkey;
 
 // Main window, laid out (per SPEC.md 6.9) as three columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
@@ -77,10 +79,15 @@ private slots:
     void onResourceUsageUpdated(double residentMemoryMB, double cpuPercent);
     void onClearLog();
     void onSaveLog();
+    void onRunSummaryReady(const RandomActionEngine::RunSummary &summary);
+    void onSaveSummary();
     void onOpenAccessibilitySettings();
     void updateElapsedLabel();
     void onAboutApp();
     void onAboutQt();
+    void onSavePreset();
+    void onLoadPreset();
+    void onGlobalEmergencyStop();
 
 private:
     void buildUi();
@@ -91,6 +98,11 @@ private:
 
     void refreshStepList();
     void refreshNamedRegionList();
+    // Live bounds top-left of whatever target is currently selected in
+    // m_targetCombo, if any -- used as the anchor point for a named
+    // region's "follow target window" option (SPEC.md 6.3/10). Returns
+    // false (outTopLeft left unset) if no target is currently selectable.
+    bool currentTargetTopLeft(QPoint &outTopLeft) const;
     QString describeNamedRegion(const NamedRegion &region) const;
     // "領域1", "領域2", ... -- the first of these not already used by an
     // existing named region, so a new region always starts with a usable
@@ -199,9 +211,26 @@ private:
 
     // Log
     QPlainTextEdit *m_logView = nullptr;
+    QPushButton *m_saveSummaryButton = nullptr;
+    RandomActionEngine::RunSummary m_lastSummary;
+    bool m_hasLastSummary = false;
 
     RandomActionEngine *m_engine = nullptr;
     QPointer<StopPanel> m_stopPanel;
     QTimer *m_uiTimer = nullptr;
     QElapsedTimer m_runElapsed;
+
+    // "ファイル" menu: save/load the whole editable test setup (named
+    // regions, steps, default action params/kinds, timing & limits) as a
+    // JSON preset file (SPEC.md 10) -- disabled while a run is in progress,
+    // alongside the rest of the ①②③ panels (setControlsEnabled()).
+    QAction *m_savePresetAction = nullptr;
+    QAction *m_loadPresetAction = nullptr;
+
+    // System-wide emergency-stop hotkey (Ctrl+Alt+Shift+Esc), a backstop
+    // for the floating StopPanel button -- see GlobalHotkey.h and SPEC.md
+    // 6.7/10. May be null-effective (registered but never fires) if the
+    // combo couldn't be grabbed on this system; that's a soft failure, not
+    // a fatal one.
+    GlobalHotkey *m_globalHotkey = nullptr;
 };

@@ -15,6 +15,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -38,6 +41,8 @@
 #include "RegionSelectorOverlay.h"
 #include "StepEditorDialog.h"
 #include "StopPanel.h"
+#include "TestConfigJson.h"
+#include "platform/GlobalHotkey.h"
 
 namespace
 {
@@ -69,6 +74,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             &MainWindow::onResourceUsageUpdated);
     connect(m_engine, &RandomActionEngine::currentStepChanged, this,
             &MainWindow::onCurrentStepChanged);
+    connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -87,6 +93,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     buildUi();
     onRefreshTargets();
+
+    // SPEC.md 6.7/10: a global hotkey backstop for the floating StopPanel
+    // button, in case the target has captured input in a way that makes
+    // even that panel hard to reach. Best-effort -- if the combo can't be
+    // grabbed (e.g. already used by the desktop environment), the app
+    // simply continues without it; the panel/main-window buttons remain
+    // the primary way to stop a run either way.
+    m_globalHotkey = new GlobalHotkey(this);
+    connect(m_globalHotkey, &GlobalHotkey::triggered, this, &MainWindow::onGlobalEmergencyStop);
+    appendLog(m_globalHotkey->start()
+                  ? QStringLiteral("グローバル緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を登録しました。")
+                  : QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
+                                    "（他のアプリが同じ組み合わせを使用している可能性があります）。"
+                                    "「■ 停止」ボタンは通常どおり使用できます。"));
 }
 
 void MainWindow::buildUi()
@@ -164,12 +184,17 @@ void MainWindow::buildUi()
     auto *logButtonsRow = new QHBoxLayout;
     auto *clearLogButton = new QPushButton(QStringLiteral("ログをクリア"), logGroup);
     auto *saveLogButton = new QPushButton(QStringLiteral("ログを保存..."), logGroup);
+    m_saveSummaryButton = new QPushButton(QStringLiteral("実行結果サマリーを保存..."), logGroup);
+    m_saveSummaryButton->setEnabled(false);
+    m_saveSummaryButton->setToolTip(QStringLiteral("テストを一度実行すると保存できるようになります。"));
     logButtonsRow->addWidget(clearLogButton);
     logButtonsRow->addWidget(saveLogButton);
+    logButtonsRow->addWidget(m_saveSummaryButton);
     logButtonsRow->addStretch();
     logLayout->addLayout(logButtonsRow);
     connect(clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLog);
     connect(saveLogButton, &QPushButton::clicked, this, &MainWindow::onSaveLog);
+    connect(m_saveSummaryButton, &QPushButton::clicked, this, &MainWindow::onSaveSummary);
 
     bottomLayout->addWidget(logGroup, 1);
     outerSplitter->addWidget(bottomWidget);
@@ -192,6 +217,16 @@ void MainWindow::buildUi()
 
 void MainWindow::buildMenuBar()
 {
+    // SPEC.md 10: save/load the whole editable test setup as a reusable
+    // preset file, so the same ①②③ configuration doesn't have to be
+    // rebuilt by hand for every run (e.g. against a new build of the same
+    // target app, or on another machine).
+    auto *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
+    m_savePresetAction = fileMenu->addAction(QStringLiteral("テスト設定を保存..."));
+    connect(m_savePresetAction, &QAction::triggered, this, &MainWindow::onSavePreset);
+    m_loadPresetAction = fileMenu->addAction(QStringLiteral("テスト設定を読み込む..."));
+    connect(m_loadPresetAction, &QAction::triggered, this, &MainWindow::onLoadPreset);
+
     auto *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
 
     auto *aboutAppAction = helpMenu->addAction(QStringLiteral("EnduranceTestGUIについて..."));
@@ -598,10 +633,11 @@ void MainWindow::refreshStepList()
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
 {
-    return QStringLiteral("%1（矩形%2個・除外%3個）")
+    return QStringLiteral("%1（矩形%2個・除外%3個）%4")
         .arg(region.name)
         .arg(region.regions.size())
-        .arg(region.excludeRegions.size());
+        .arg(region.excludeRegions.size())
+        .arg(region.followsTargetWindow ? QStringLiteral(" [ウィンドウ追従]") : QString());
 }
 
 void MainWindow::refreshNamedRegionList()
@@ -642,14 +678,29 @@ QString MainWindow::generateDefaultRegionName() const
     }
 }
 
+bool MainWindow::currentTargetTopLeft(QPoint &outTopLeft) const
+{
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size())
+        return false;
+    QRect bounds;
+    const WindowInfo &target = m_windows[idx];
+    if (!PlatformAutomation::queryWindowBounds(target.windowId, target.pid, bounds))
+        return false;
+    outTopLeft = bounds.topLeft();
+    return true;
+}
+
 void MainWindow::onAddNamedRegion()
 {
     NamedRegion initial;
     initial.name = generateDefaultRegionName();
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
     // NamedRegionEditorDialog visualizes the region being built on screen
     // itself for the duration it's open (SPEC.md 6.3) -- MainWindow no
     // longer shows any on-screen highlight from the list selection.
-    NamedRegionEditorDialog dialog(initial, this);
+    NamedRegionEditorDialog dialog(initial, targetTopLeft, hasTarget, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -672,7 +723,9 @@ void MainWindow::onEditSelectedNamedRegion()
         return;
     const QString oldName = m_namedRegions[row].name;
 
-    NamedRegionEditorDialog dialog(m_namedRegions[row], this);
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
+    NamedRegionEditorDialog dialog(m_namedRegions[row], targetTopLeft, hasTarget, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -1078,6 +1131,8 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
+    m_savePresetAction->setEnabled(enabled);
+    m_loadPresetAction->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
@@ -1251,7 +1306,172 @@ void MainWindow::onSaveLog()
     }
 }
 
+void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary)
+{
+    m_lastSummary = summary;
+    m_hasLastSummary = true;
+    m_saveSummaryButton->setEnabled(true);
+    m_saveSummaryButton->setToolTip(QString());
+    // Also written straight into the log (SPEC.md 10) so it's visible right
+    // away without a separate save step, and is included in "ログを保存...".
+    for (const QString &line : RandomActionEngine::formatSummaryText(summary).split(QLatin1Char('\n')))
+        appendLog(line);
+}
+
+void MainWindow::onSaveSummary()
+{
+    if (!m_hasLastSummary)
+        return;
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("実行結果サマリーを保存"), QStringLiteral("summary.json"),
+        QStringLiteral("JSON (*.json);;テキスト (*.txt)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        return;
+    }
+    if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+        const QJsonDocument doc(RandomActionEngine::summaryToJson(m_lastSummary));
+        file.write(doc.toJson(QJsonDocument::Indented));
+    } else {
+        file.write(RandomActionEngine::formatSummaryText(m_lastSummary).toUtf8());
+    }
+}
+
+void MainWindow::onGlobalEmergencyStop()
+{
+    if (!m_engine->isRunning())
+        return;
+    appendLog(QStringLiteral("グローバル緊急停止ホットキーが押されました。"));
+    m_engine->stop();
+}
+
 void MainWindow::onOpenAccessibilitySettings()
 {
     PlatformAutomation::openAccessibilitySettings();
+}
+
+void MainWindow::onSavePreset()
+{
+    flushActionParamsEditor();
+
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("テスト設定を保存"),
+                                                        QStringLiteral("preset.json"),
+                                                        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    QJsonObject root;
+    root["formatVersion"] = 1;
+    // Reference only -- pids aren't stable across runs, so the target still
+    // has to be picked from ①'s live-enumerated list after loading; this
+    // just helps the user recognize which entry to pick.
+    const int targetIdx = m_targetCombo->currentIndex();
+    root["targetAppNameHint"] =
+        (targetIdx >= 0 && targetIdx < m_windows.size()) ? m_windows[targetIdx].appName : QString();
+
+    QJsonArray regionsArr;
+    for (const NamedRegion &r : m_namedRegions)
+        regionsArr.append(namedRegionToJson(r));
+    root["namedRegions"] = regionsArr;
+
+    QJsonArray stepsArr;
+    for (const RegionStep &s : m_steps)
+        stepsArr.append(regionStepToJson(s));
+    root["steps"] = stepsArr;
+
+    root["defaultActionParams"] = actionParamsToJson(m_defaultActionParams);
+    root["defaultActionKinds"] = regionStepToJson(m_defaultActionKinds);
+
+    QJsonObject timing;
+    timing["intervalMode"] = m_intervalModeRateRadio->isChecked() ? QStringLiteral("rate") : QStringLiteral("ms");
+    timing["minIntervalMs"] = m_minIntervalSpin->value();
+    timing["maxIntervalMs"] = m_maxIntervalSpin->value();
+    timing["minRate"] = m_minRateSpin->value();
+    timing["maxRate"] = m_maxRateSpin->value();
+    timing["maxIterations"] = m_maxIterationsSpin->value();
+    timing["maxDurationSec"] = m_maxDurationSecSpin->value();
+    timing["maxSequenceLoops"] = m_maxSequenceLoopsSpin->value();
+    timing["keepTargetActive"] = m_keepActiveCheck->isChecked();
+    timing["rngSeed"] = m_rngSeedSpin->value();
+    root["timing"] = timing;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        return;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    appendLog(QStringLiteral("テスト設定を保存しました: %1").arg(path));
+}
+
+void MainWindow::onLoadPreset()
+{
+    if (!m_steps.isEmpty() || !m_namedRegions.isEmpty()) {
+        const auto reply = QMessageBox::question(
+            this, QStringLiteral("確認"),
+            QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？"));
+        if (reply != QMessageBox::Yes)
+            return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("テスト設定を読み込む"), QString(),
+                                                        QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, QStringLiteral("読み込みエラー"), QStringLiteral("ファイルを開けませんでした。"));
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        QMessageBox::warning(this, QStringLiteral("読み込みエラー"),
+                              QStringLiteral("JSONとして解釈できませんでした: %1").arg(parseError.errorString()));
+        return;
+    }
+    const QJsonObject root = doc.object();
+
+    m_namedRegions.clear();
+    for (const QJsonValue &v : root["namedRegions"].toArray())
+        m_namedRegions.append(namedRegionFromJson(v.toObject()));
+
+    m_steps.clear();
+    for (const QJsonValue &v : root["steps"].toArray())
+        m_steps.append(regionStepFromJson(v.toObject()));
+
+    m_defaultActionParams = actionParamsFromJson(root["defaultActionParams"].toObject());
+    m_defaultActionKinds = regionStepFromJson(root["defaultActionKinds"].toObject());
+
+    const QJsonObject timing = root["timing"].toObject();
+    if (timing["intervalMode"].toString() == QStringLiteral("rate"))
+        m_intervalModeRateRadio->setChecked(true);
+    else
+        m_intervalModeMsRadio->setChecked(true);
+    m_minIntervalSpin->setValue(timing["minIntervalMs"].toInt(m_minIntervalSpin->value()));
+    m_maxIntervalSpin->setValue(timing["maxIntervalMs"].toInt(m_maxIntervalSpin->value()));
+    m_minRateSpin->setValue(timing["minRate"].toDouble(m_minRateSpin->value()));
+    m_maxRateSpin->setValue(timing["maxRate"].toDouble(m_maxRateSpin->value()));
+    m_maxIterationsSpin->setValue(timing["maxIterations"].toInt(m_maxIterationsSpin->value()));
+    m_maxDurationSecSpin->setValue(timing["maxDurationSec"].toInt(m_maxDurationSecSpin->value()));
+    m_maxSequenceLoopsSpin->setValue(timing["maxSequenceLoops"].toInt(m_maxSequenceLoopsSpin->value()));
+    m_keepActiveCheck->setChecked(timing["keepTargetActive"].toBool(m_keepActiveCheck->isChecked()));
+    m_rngSeedSpin->setValue(timing["rngSeed"].toInt(m_rngSeedSpin->value()));
+
+    m_lastEditedStepRow = -1;
+    refreshNamedRegionList();
+    refreshStepList();
+    loadActionParamsEditorForSelection();
+
+    const QString hint = root["targetAppNameHint"].toString();
+    appendLog(hint.isEmpty()
+                  ? QStringLiteral("テスト設定を読み込みました: %1").arg(path)
+                  : QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
+                                    "①で対象ウィンドウを選び直してください）")
+                        .arg(path, hint));
 }

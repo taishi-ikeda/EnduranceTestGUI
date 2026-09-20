@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QPoint>
 #include <QRect>
 #include <QString>
 #include <QStringList>
@@ -91,8 +92,21 @@ struct ActionParams
 struct NamedRegion
 {
     QString name;
-    QList<QRect> regions;         // screen coordinates
-    QList<QRect> excludeRegions;  // mask rectangles within `regions`, screen coordinates
+    QList<QRect> regions;         // screen coordinates, as drawn
+    QList<QRect> excludeRegions;  // mask rectangles within `regions`, screen coordinates, as drawn
+
+    // If true, `regions`/`excludeRegions` above are treated as having been
+    // drawn while the target window's top-left corner was at
+    // `anchorTopLeft`; RandomActionEngine::resolveStepRegion() translates
+    // them by (current target top-left - anchorTopLeft) before use, so the
+    // region follows the target window if it moves -- unlike the default
+    // (false), which keeps using the same fixed screen coordinates forever
+    // (SPEC.md 6.3/8's "既知の制約", addressed in 10). Only meaningful for
+    // a region actually used against a single, currently-moving window; a
+    // region reused across differently-positioned windows should leave
+    // this off.
+    bool followsTargetWindow = false;
+    QPoint anchorTopLeft;
 
     bool isEmpty() const { return regions.isEmpty(); }
 };

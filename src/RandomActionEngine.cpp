@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QGuiApplication>
+#include <QJsonArray>
 #include <QKeySequence>
 #include <QPixmap>
 #include <QScreen>
@@ -33,6 +34,43 @@ bool parseShortcut(const QString &text, Qt::Key &outKey, Qt::KeyboardModifiers &
 }
 }  // namespace
 
+QString RandomActionEngine::formatSummaryText(const RunSummary &summary)
+{
+    QStringList lines;
+    lines << QStringLiteral("==== 実行結果サマリー ====");
+    lines << QStringLiteral("停止理由: %1%2")
+                 .arg(summary.stopReason, summary.anomaly ? QStringLiteral("（異常停止）") : QString());
+    lines << QStringLiteral("実行回数（全ステップ合計）: %1").arg(summary.totalIterations);
+    lines << QStringLiteral("完走したシーケンス回数: %1").arg(summary.sequenceLoopsCompleted);
+    lines << QStringLiteral("経過時間: %1 秒").arg(summary.elapsedMs / 1000.0, 0, 'f', 1);
+    lines << QStringLiteral("使用した乱数シード: %1").arg(summary.rngSeedUsed);
+    if (summary.actionKindCounts.isEmpty()) {
+        lines << QStringLiteral("操作種別ごとの回数: (なし)");
+    } else {
+        lines << QStringLiteral("操作種別ごとの回数:");
+        for (auto it = summary.actionKindCounts.constBegin(); it != summary.actionKindCounts.constEnd();
+             ++it)
+            lines << QStringLiteral("  %1: %2").arg(it.key()).arg(it.value());
+    }
+    return lines.join(QStringLiteral("\n"));
+}
+
+QJsonObject RandomActionEngine::summaryToJson(const RunSummary &summary)
+{
+    QJsonObject obj;
+    obj["stopReason"] = summary.stopReason;
+    obj["anomaly"] = summary.anomaly;
+    obj["totalIterations"] = double(summary.totalIterations);
+    obj["sequenceLoopsCompleted"] = double(summary.sequenceLoopsCompleted);
+    obj["elapsedMs"] = double(summary.elapsedMs);
+    obj["rngSeedUsed"] = double(summary.rngSeedUsed);
+    QJsonObject counts;
+    for (auto it = summary.actionKindCounts.constBegin(); it != summary.actionKindCounts.constEnd(); ++it)
+        counts[it.key()] = double(it.value());
+    obj["actionKindCounts"] = counts;
+    return obj;
+}
+
 RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng(0)
 {
     m_timer.setSingleShot(true);
@@ -40,6 +78,17 @@ RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng
 
     m_resourceTimer.setInterval(5000);
     connect(&m_resourceTimer, &QTimer::timeout, this, &RandomActionEngine::sampleResourceUsage);
+
+    // 8-second cadence: PlatformAutomation::checkWindowResponsive()'s
+    // "trailing evaluation" design means this interval doubles as the
+    // grace period before a missed reply counts as one strike (see its
+    // header comment) -- long enough that a brief, harmless stall (e.g. a
+    // big layout pass) isn't mistaken for a hang, short enough that two
+    // consecutive misses (the threshold below) still triggers well before
+    // most of a short run's time/iteration budget is wasted spinning
+    // against a truly frozen target.
+    m_hangCheckTimer.setInterval(8000);
+    connect(&m_hangCheckTimer, &QTimer::timeout, this, &RandomActionEngine::checkTargetResponsiveness);
 }
 
 void RandomActionEngine::start(const TestConfig &config)
@@ -57,6 +106,10 @@ void RandomActionEngine::start(const TestConfig &config)
     m_running = true;
     m_paused = false;
     m_hasCpuSample = false;
+    m_unexpectedWindowStrikes = 0;
+    m_consecutiveUnresponsive = 0;
+    m_everRespondedToPing = false;
+    m_neverRespondedStrikes = 0;
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -65,6 +118,8 @@ void RandomActionEngine::start(const TestConfig &config)
     if (seed == 0)
         seed = QRandomGenerator::global()->generate() | 1u;
     m_rng.seed(seed);
+    m_rngSeedUsed = seed;
+    m_actionKindCounts.clear();
     emit logMessage(QStringLiteral("乱数シード: %1（クラッシュ等の再現に使う場合はこの値を記録してください）")
                          .arg(seed));
 
@@ -77,6 +132,7 @@ void RandomActionEngine::start(const TestConfig &config)
         emit currentStepChanged(m_currentStepIndex);
     scheduleNext();
     m_resourceTimer.start();
+    m_hangCheckTimer.start();
 }
 
 void RandomActionEngine::stop()
@@ -94,6 +150,7 @@ void RandomActionEngine::pause()
     m_pausedElapsedMs += m_elapsed.elapsed();
     m_timer.stop();
     m_resourceTimer.stop();
+    m_hangCheckTimer.stop();
     emit pausedChanged(true);
     emit logMessage(QStringLiteral("一時停止しました"));
 }
@@ -108,6 +165,23 @@ void RandomActionEngine::resume()
     emit logMessage(QStringLiteral("再開しました"));
     scheduleNext();
     m_resourceTimer.start();
+    m_hangCheckTimer.start();
+}
+
+QString RandomActionEngine::describeActionKind(ActionKind kind) const
+{
+    switch (kind) {
+    case ActionKind::Click: return QStringLiteral("クリック");
+    case ActionKind::DoubleClick: return QStringLiteral("ダブルクリック");
+    case ActionKind::Drag: return QStringLiteral("ドラッグ");
+    case ActionKind::Key: return QStringLiteral("キー入力");
+    case ActionKind::ScrollUp: return QStringLiteral("スクロール(上)");
+    case ActionKind::ScrollDown: return QStringLiteral("スクロール(下)");
+    case ActionKind::ScrollHorizontal: return QStringLiteral("スクロール(横)");
+    case ActionKind::Shortcut: return QStringLiteral("ショートカット");
+    case ActionKind::WindowOp: return QStringLiteral("ウィンドウ操作");
+    }
+    return QString();
 }
 
 void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
@@ -116,9 +190,27 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly)
     m_paused = false;
     m_timer.stop();
     m_resourceTimer.stop();
+    m_hangCheckTimer.stop();
     if (isAnomaly)
         captureAnomalyScreenshots(reason);
+
+    RunSummary summary;
+    summary.stopReason = reason;
+    summary.anomaly = isAnomaly;
+    summary.rngSeedUsed = m_rngSeedUsed;
+    summary.totalIterations = m_iterationCount;
+    summary.sequenceLoopsCompleted = m_sequenceLoopCount;
+    // Matches the running duration-limit check's own formula (only exact
+    // while not currently paused, which doStop() itself just forced above --
+    // a run stopped while genuinely mid-pause may over-count the paused
+    // interval slightly, a pre-existing quirk of how pause()/resume() track
+    // time, not something this reporting-only field needs to fix).
+    summary.elapsedMs = m_pausedElapsedMs + m_elapsed.elapsed();
+    for (auto it = m_actionKindCounts.constBegin(); it != m_actionKindCounts.constEnd(); ++it)
+        summary.actionKindCounts.insert(describeActionKind(it.key()), it.value());
+
     emit logMessage(reason);
+    emit summaryReady(summary);
     emit finished(reason);
 }
 
@@ -151,6 +243,57 @@ void RandomActionEngine::captureAnomalyScreenshots(const QString &reason)
     } else {
         emit logMessage(QStringLiteral(
             "スクリーンショットの保存に失敗しました（macOSでは画面収録の権限が必要な場合があります）"));
+    }
+}
+
+void RandomActionEngine::checkTargetResponsiveness()
+{
+    if (!m_running || m_paused)
+        return;
+
+    const PlatformAutomation::ResponsivenessCheck result =
+        PlatformAutomation::checkWindowResponsive(m_config.targetWindowId, m_config.targetPid);
+    if (result == PlatformAutomation::ResponsivenessCheck::Unsupported) {
+        // Not supported for this window/platform at all (see SPEC.md 8/10)
+        // -- stop polling rather than keep calling a check that can never
+        // return anything else.
+        m_hangCheckTimer.stop();
+        return;
+    }
+    if (result == PlatformAutomation::ResponsivenessCheck::Pending)
+        return;  // first-ever probe just sent; nothing to evaluate until next call
+
+    if (result == PlatformAutomation::ResponsivenessCheck::NotResponding) {
+        if (!m_everRespondedToPing) {
+            // Never seen this target answer a single ping -- most likely
+            // it declares _NET_WM_PING support without actually
+            // implementing the reply (see the m_everRespondedToPing
+            // comment in the header), not that it's hung from the very
+            // first check. Give up on hang-checking for this run instead
+            // of treating "never worked" the same as "stopped working".
+            ++m_neverRespondedStrikes;
+            if (m_neverRespondedStrikes >= 3) {
+                emit logMessage(QStringLiteral(
+                    "対象アプリが応答確認（WM_PING）に一度も応答しないため、ハング検知を無効にします"
+                    "（対応していないツールキット/実装の可能性があります）"));
+                m_hangCheckTimer.stop();
+            }
+            return;
+        }
+        ++m_consecutiveUnresponsive;
+        emit logMessage(
+            QStringLiteral("対象アプリの応答確認に失敗しました（%1回連続）").arg(m_consecutiveUnresponsive));
+        // Require two consecutive misses (~2 check intervals) before
+        // treating this as a real hang rather than one slow/busy moment --
+        // see the interval comment in the constructor.
+        if (m_consecutiveUnresponsive >= 2) {
+            doStop(QStringLiteral("対象アプリが応答していない（ハング）ことを検知したため停止しました"),
+                   /*isAnomaly=*/true);
+        }
+    } else {
+        m_everRespondedToPing = true;
+        m_neverRespondedStrikes = 0;
+        m_consecutiveUnresponsive = 0;
     }
 }
 
@@ -201,6 +344,30 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
                 return false;
             outIncludeRegions = region.regions;
             outExcludeRegions = region.excludeRegions;
+
+            // SPEC.md 6.3/10: a region created with "対象ウィンドウの移動に
+            // 追従させる" stores its rectangles relative to where the
+            // target window's top-left was when it was drawn/saved
+            // (region.anchorTopLeft) -- translate by how far the window
+            // has moved since, so the region keeps tracking the same
+            // relative position instead of staying at fixed screen
+            // coordinates forever. If the window can't currently be
+            // located, fall back to the as-drawn coordinates unshifted
+            // (same behavior as a non-following region) rather than
+            // failing the whole step.
+            if (region.followsTargetWindow) {
+                QRect currentBounds;
+                if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid,
+                                                            currentBounds)) {
+                    const QPoint delta = currentBounds.topLeft() - region.anchorTopLeft;
+                    if (!delta.isNull()) {
+                        for (QRect &r : outIncludeRegions)
+                            r.translate(delta);
+                        for (QRect &r : outExcludeRegions)
+                            r.translate(delta);
+                    }
+                }
+            }
             return true;
         }
     }
@@ -380,6 +547,53 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
     return false;
 }
 
+namespace
+{
+// After this many consecutive ticks with an unexpected window still open
+// despite Escape attempts to dismiss it, give up and stop the run rather
+// than keep burning the iteration/time budget on a window that will never
+// go away on its own (see SPEC.md 10 -- this is exactly the "~490 wasted
+// clicks" scenario found during v0.40's manual testing).
+constexpr int kMaxUnexpectedWindowStrikes = 5;
+}  // namespace
+
+bool RandomActionEngine::handleUnexpectedWindows()
+{
+    if (m_config.targetWindowId == 0)
+        return false;
+
+    const QList<quint32> windowIds = PlatformAutomation::listWindowIdsForPid(m_config.targetPid);
+    bool hasExtra = false;
+    for (quint32 id : windowIds) {
+        if (id != m_config.targetWindowId) {
+            hasExtra = true;
+            break;
+        }
+    }
+
+    if (!hasExtra) {
+        m_unexpectedWindowStrikes = 0;
+        return false;
+    }
+
+    ++m_unexpectedWindowStrikes;
+    if (m_unexpectedWindowStrikes >= kMaxUnexpectedWindowStrikes) {
+        doStop(QStringLiteral("対象アプリに予期しないウィンドウ（ダイアログ等）が開いたまま閉じられない"
+                              "ため、安全のためテストを停止しました"),
+               /*isAnomaly=*/true);
+        return true;
+    }
+
+    emit logMessage(QStringLiteral(
+        "対象アプリに予期しないウィンドウ（ダイアログ等）を検出しました。Escapeで閉じてみます"
+        "（%1/%2回目）")
+                         .arg(m_unexpectedWindowStrikes)
+                         .arg(kMaxUnexpectedWindowStrikes));
+    PlatformAutomation::dismissContextMenu();  // generic "send Escape", not menu-specific
+    scheduleNext();
+    return true;
+}
+
 void RandomActionEngine::performRandomAction()
 {
     if (!m_running || m_paused)
@@ -403,6 +617,8 @@ void RandomActionEngine::performRandomAction()
                /*isAnomaly=*/true);
         return;
     }
+    if (handleUnexpectedWindows())
+        return;
     if (m_config.steps.isEmpty()) {
         doStop(QStringLiteral("ステップが設定されていません"));
         return;
@@ -703,6 +919,7 @@ void RandomActionEngine::performRandomAction()
 
     ++m_iterationCount;
     ++m_currentStepActionsDone;
+    ++m_actionKindCounts[kind];
     emit actionPerformed(desc);
     emit logMessage(desc);
     emit iterationCountChanged(m_iterationCount);

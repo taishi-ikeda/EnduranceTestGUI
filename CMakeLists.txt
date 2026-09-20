@@ -49,6 +49,7 @@ message(STATUS "Using Qt${QT_VERSION_MAJOR} (${QT_VERSION})")
 
 set(SOURCES
     src/main.cpp
+    src/I18n.cpp
     src/MainWindow.cpp
     src/RandomActionEngine.cpp
     src/RegionSelectorOverlay.cpp

@@ -12,6 +12,7 @@
 
 #include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
+#include "I18n.h"
 
 namespace
 {
@@ -37,26 +38,26 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
       m_existingAnchorTopLeft(initial.anchorTopLeft),
       m_hadExistingAnchor(initial.followsTargetWindow)
 {
-    setWindowTitle(QStringLiteral("操作領域の設定"));
+    setWindowTitle(I18n::t(QStringLiteral("操作領域の設定")));
 
     auto *layout = new QVBoxLayout(this);
 
     auto *nameRow = new QHBoxLayout;
-    nameRow->addWidget(new QLabel(QStringLiteral("名前:"), this));
+    nameRow->addWidget(new QLabel(I18n::t(QStringLiteral("名前:")), this));
     m_nameEdit = new QLineEdit(initial.name, this);
-    m_nameEdit->setPlaceholderText(QStringLiteral("例: メインメニュー"));
+    m_nameEdit->setPlaceholderText(I18n::t(QStringLiteral("例: メインメニュー")));
     nameRow->addWidget(m_nameEdit, 1);
     layout->addLayout(nameRow);
 
-    auto *regionLabel = new QLabel(QStringLiteral("矩形を画面上で描画してください（複数可）:"), this);
+    auto *regionLabel = new QLabel(I18n::t(QStringLiteral("矩形を画面上で描画してください（複数可）:")), this);
     regionLabel->setWordWrap(true);
     layout->addWidget(regionLabel);
     m_regionListWidget = new QListWidget(this);
     m_regionListWidget->setMaximumHeight(100);
     layout->addWidget(m_regionListWidget);
     auto *regionButtonsRow = new QHBoxLayout;
-    m_drawButton = new QPushButton(QStringLiteral("矩形を描画..."), this);
-    m_removeRegionButton = new QPushButton(QStringLiteral("選択を削除"), this);
+    m_drawButton = new QPushButton(I18n::t(QStringLiteral("矩形を描画...")), this);
+    m_removeRegionButton = new QPushButton(I18n::t(QStringLiteral("選択を削除")), this);
     regionButtonsRow->addWidget(m_drawButton);
     regionButtonsRow->addWidget(m_removeRegionButton);
     layout->addLayout(regionButtonsRow);
@@ -65,7 +66,7 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
             &NamedRegionEditorDialog::onRemoveSelectedRegion);
 
     auto *excludeLabel = new QLabel(
-        QStringLiteral("この操作領域内でクリックしたくない除外(マスク)矩形があれば指定してください（任意、複数可）:"),
+        I18n::t(QStringLiteral("この操作領域内でクリックしたくない除外(マスク)矩形があれば指定してください（任意、複数可）:")),
         this);
     excludeLabel->setWordWrap(true);
     layout->addWidget(excludeLabel);
@@ -73,8 +74,8 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     m_excludeListWidget->setMaximumHeight(100);
     layout->addWidget(m_excludeListWidget);
     auto *excludeButtonsRow = new QHBoxLayout;
-    m_drawExcludeButton = new QPushButton(QStringLiteral("除外矩形を描画..."), this);
-    m_removeExcludeButton = new QPushButton(QStringLiteral("選択を削除"), this);
+    m_drawExcludeButton = new QPushButton(I18n::t(QStringLiteral("除外矩形を描画...")), this);
+    m_removeExcludeButton = new QPushButton(I18n::t(QStringLiteral("選択を削除")), this);
     excludeButtonsRow->addWidget(m_drawExcludeButton);
     excludeButtonsRow->addWidget(m_removeExcludeButton);
     layout->addLayout(excludeButtonsRow);
@@ -91,13 +92,13 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     // QCheckBox has no setWordWrap(); break the long label manually instead
     // (same technique used elsewhere in this app -- SPEC.md 6.9).
     m_followTargetCheck = new QCheckBox(
-        QStringLiteral("対象ウィンドウの移動に追従させる\n（保存時の対象ウィンドウ位置を基準に記録）"), this);
+        I18n::t(QStringLiteral("対象ウィンドウの移動に追従させる\n（保存時の対象ウィンドウ位置を基準に記録）")), this);
     m_followTargetCheck->setChecked(m_hadExistingAnchor);
     m_followTargetCheck->setEnabled(m_hasTarget);
     m_followTargetCheck->setToolTip(
-        m_hasTarget ? QStringLiteral("OKを押した時点の対象ウィンドウの位置を基準点として記録します。")
-                    : QStringLiteral("対象ウィンドウが選択されていないため、今は変更できません"
-                                     "（既存の設定はそのまま保持されます）。"));
+        m_hasTarget ? I18n::t(QStringLiteral("OKを押した時点の対象ウィンドウの位置を基準点として記録します。"))
+                    : I18n::t(QStringLiteral("対象ウィンドウが選択されていないため、今は変更できません"
+                                     "（既存の設定はそのまま保持されます）。")));
     layout->addWidget(m_followTargetCheck);
 
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -190,25 +191,25 @@ void NamedRegionEditorDialog::refreshRegionList()
     // individual rectangles drawn inside it read as if it were the same
     // name and was confusing (SPEC.md 6.3).
     for (int i = 0; i < m_regions.size(); ++i)
-        m_regionListWidget->addItem(labeledRect(QStringLiteral("矩形"), i, m_regions[i]));
+        m_regionListWidget->addItem(labeledRect(I18n::t(QStringLiteral("矩形")), i, m_regions[i]));
 }
 
 void NamedRegionEditorDialog::refreshExcludeList()
 {
     m_excludeListWidget->clear();
     for (int i = 0; i < m_excludeRegions.size(); ++i)
-        m_excludeListWidget->addItem(labeledRect(QStringLiteral("除外"), i, m_excludeRegions[i]));
+        m_excludeListWidget->addItem(labeledRect(I18n::t(QStringLiteral("除外")), i, m_excludeRegions[i]));
 }
 
 void NamedRegionEditorDialog::onAccept()
 {
     if (m_nameEdit->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("入力エラー"), QStringLiteral("名前を入力してください。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")), I18n::t(QStringLiteral("名前を入力してください。")));
         return;
     }
     if (m_regions.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("入力エラー"),
-                              QStringLiteral("領域を最低1つ描画してください。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                              I18n::t(QStringLiteral("領域を最低1つ描画してください。")));
         return;
     }
     accept();

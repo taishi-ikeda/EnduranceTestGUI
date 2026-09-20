@@ -1,4 +1,5 @@
 #include "StepEditorDialog.h"
+#include "I18n.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -11,19 +12,19 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
                                     QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("ステップの操作領域を選択"));
+    setWindowTitle(I18n::t(QStringLiteral("ステップの操作領域を選択")));
 
     auto *layout = new QVBoxLayout(this);
 
     auto *introLabel =
-        new QLabel(QStringLiteral("このステップで操作する領域を選択してください。\n"
+        new QLabel(I18n::t(QStringLiteral("このステップで操作する領域を選択してください。\n"
                                     "操作の種類・重み・回数や詳細パラメータは、追加後に③操作パラメータ"
-                                    "パネルでこのステップを選択して設定します。"),
+                                    "パネルでこのステップを選択して設定します。")),
                     this);
     introLabel->setWordWrap(true);
     layout->addWidget(introLabel);
-    m_wholeWindowRadio = new QRadioButton(QStringLiteral("対象GUIの全領域（自動追従）"), this);
-    m_namedRegionRadio = new QRadioButton(QStringLiteral("登録済みの操作領域から選択:"), this);
+    m_wholeWindowRadio = new QRadioButton(I18n::t(QStringLiteral("対象GUIの全領域（自動追従）")), this);
+    m_namedRegionRadio = new QRadioButton(I18n::t(QStringLiteral("登録済みの操作領域から選択:")), this);
     layout->addWidget(m_wholeWindowRadio);
     auto *namedRegionRow = new QHBoxLayout;
     namedRegionRow->addWidget(m_namedRegionRadio);
@@ -37,7 +38,7 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
     if (availableRegions.isEmpty()) {
         m_namedRegionRadio->setEnabled(false);
         m_namedRegionCombo->setEnabled(false);
-        m_namedRegionCombo->addItem(QStringLiteral("（①対象選択パネルで操作領域を追加してください）"));
+        m_namedRegionCombo->addItem(I18n::t(QStringLiteral("（①対象選択パネルで操作領域を追加してください）")));
     }
 
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);

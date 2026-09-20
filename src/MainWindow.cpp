@@ -4,6 +4,7 @@
 
 #include <QAbstractItemView>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -47,6 +48,7 @@
 #include "StopPanel.h"
 #include "TestConfigJson.h"
 #include "platform/GlobalHotkey.h"
+#include "I18n.h"
 
 namespace
 {
@@ -109,15 +111,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_globalHotkey = new GlobalHotkey(this);
     connect(m_globalHotkey, &GlobalHotkey::triggered, this, &MainWindow::onGlobalEmergencyStop);
     appendLog(m_globalHotkey->start()
-                  ? QStringLiteral("グローバル緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を登録しました。")
-                  : QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
+                  ? I18n::t(QStringLiteral("グローバル緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を登録しました。"))
+                  : I18n::t(QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
                                     "（他のアプリが同じ組み合わせを使用している可能性があります）。"
-                                    "「■ 停止」ボタンは通常どおり使用できます。"));
+                                    "「■ 停止」ボタンは通常どおり使用できます。")));
 }
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(QStringLiteral("EnduranceTestGUI - GUI耐久テストツール"));
+    setWindowTitle(I18n::t(QStringLiteral("EnduranceTestGUI - GUI耐久テストツール")));
 
     buildMenuBar();
 
@@ -153,12 +155,12 @@ void MainWindow::buildUi()
     // rather than one long row, so both stay usable when the window is
     // narrow (SPEC.md 6.9).
     auto *controlsRow = new QHBoxLayout;
-    m_startButton = new QPushButton(QStringLiteral("▶ 開始"), central);
-    m_stopButton = new QPushButton(QStringLiteral("■ 停止"), central);
+    m_startButton = new QPushButton(I18n::t(QStringLiteral("▶ 開始")), central);
+    m_stopButton = new QPushButton(I18n::t(QStringLiteral("■ 停止")), central);
     m_stopButton->setEnabled(false);
-    m_pauseResumeButton = new QPushButton(QStringLiteral("‖ 一時停止"), central);
+    m_pauseResumeButton = new QPushButton(I18n::t(QStringLiteral("‖ 一時停止")), central);
     m_pauseResumeButton->setEnabled(false);
-    m_statusLabel = new QLabel(QStringLiteral("待機中"), central);
+    m_statusLabel = new QLabel(I18n::t(QStringLiteral("待機中")), central);
     controlsRow->addWidget(m_startButton);
     controlsRow->addWidget(m_stopButton);
     controlsRow->addWidget(m_pauseResumeButton);
@@ -168,8 +170,8 @@ void MainWindow::buildUi()
 
     auto *progressRow = new QHBoxLayout;
     m_resourceUsageLabel = new QLabel(QString(), central);
-    m_elapsedLabel = new QLabel(QStringLiteral("経過: 0秒"), central);
-    m_iterationLabel = new QLabel(QStringLiteral("実行回数: 0"), central);
+    m_elapsedLabel = new QLabel(I18n::t(QStringLiteral("経過: 0秒")), central);
+    m_iterationLabel = new QLabel(I18n::t(QStringLiteral("実行回数: 0")), central);
     progressRow->addWidget(m_resourceUsageLabel);
     progressRow->addStretch();
     progressRow->addWidget(m_elapsedLabel);
@@ -181,22 +183,22 @@ void MainWindow::buildUi()
     connect(m_pauseResumeButton, &QPushButton::clicked, this, &MainWindow::onPauseResume);
 
     // --- Log ---
-    auto *logGroup = new QGroupBox(QStringLiteral("ログ"), central);
+    auto *logGroup = new QGroupBox(I18n::t(QStringLiteral("ログ")), central);
     auto *logLayout = new QVBoxLayout(logGroup);
     m_logView = new QPlainTextEdit(logGroup);
     m_logView->setReadOnly(true);
     m_logView->setMaximumBlockCount(5000);
     logLayout->addWidget(m_logView);
     auto *logButtonsRow = new QHBoxLayout;
-    auto *clearLogButton = new QPushButton(QStringLiteral("ログをクリア"), logGroup);
-    auto *saveLogButton = new QPushButton(QStringLiteral("ログを保存..."), logGroup);
-    m_saveSummaryButton = new QPushButton(QStringLiteral("実行結果サマリーを保存..."), logGroup);
+    auto *clearLogButton = new QPushButton(I18n::t(QStringLiteral("ログをクリア")), logGroup);
+    auto *saveLogButton = new QPushButton(I18n::t(QStringLiteral("ログを保存...")), logGroup);
+    m_saveSummaryButton = new QPushButton(I18n::t(QStringLiteral("実行結果サマリーを保存...")), logGroup);
     m_saveSummaryButton->setEnabled(false);
-    m_saveSummaryButton->setToolTip(QStringLiteral("テストを一度実行すると保存できるようになります。"));
-    m_saveRegionScreenshotButton = new QPushButton(QStringLiteral("操作領域画像を保存..."), logGroup);
+    m_saveSummaryButton->setToolTip(I18n::t(QStringLiteral("テストを一度実行すると保存できるようになります。")));
+    m_saveRegionScreenshotButton = new QPushButton(I18n::t(QStringLiteral("操作領域画像を保存...")), logGroup);
     m_saveRegionScreenshotButton->setEnabled(false);
     m_saveRegionScreenshotButton->setToolTip(
-        QStringLiteral("テスト実行中に操作領域のスクリーンショットが撮影されると保存できるようになります。"));
+        I18n::t(QStringLiteral("テスト実行中に操作領域のスクリーンショットが撮影されると保存できるようになります。")));
     logButtonsRow->addWidget(clearLogButton);
     logButtonsRow->addWidget(saveLogButton);
     logButtonsRow->addWidget(m_saveSummaryButton);
@@ -234,15 +236,34 @@ void MainWindow::buildMenuBar()
     // preset file, so the same ①②③ configuration doesn't have to be
     // rebuilt by hand for every run (e.g. against a new build of the same
     // target app, or on another machine).
-    auto *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
-    m_savePresetAction = fileMenu->addAction(QStringLiteral("テスト設定を保存..."));
+    auto *fileMenu = menuBar()->addMenu(I18n::t(QStringLiteral("ファイル")));
+    m_savePresetAction = fileMenu->addAction(I18n::t(QStringLiteral("テスト設定を保存...")));
     connect(m_savePresetAction, &QAction::triggered, this, &MainWindow::onSavePreset);
-    m_loadPresetAction = fileMenu->addAction(QStringLiteral("テスト設定を読み込む..."));
+    m_loadPresetAction = fileMenu->addAction(I18n::t(QStringLiteral("テスト設定を読み込む...")));
     connect(m_loadPresetAction, &QAction::triggered, this, &MainWindow::onLoadPreset);
 
-    auto *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
+    // SPEC.md "多言語対応": language takes effect on next launch (I18n.h
+    // explains why a live retranslate isn't done), so the handlers below
+    // just persist the choice and tell the user to restart.
+    auto *languageMenu = menuBar()->addMenu(I18n::t(QStringLiteral("言語 / Language")));
+    auto *languageGroup = new QActionGroup(this);
+    languageGroup->setExclusive(true);
+    m_languageJapaneseAction = languageMenu->addAction(QStringLiteral("日本語"));
+    m_languageJapaneseAction->setCheckable(true);
+    languageGroup->addAction(m_languageJapaneseAction);
+    connect(m_languageJapaneseAction, &QAction::triggered, this, &MainWindow::onSelectLanguageJapanese);
+    m_languageEnglishAction = languageMenu->addAction(QStringLiteral("English"));
+    m_languageEnglishAction->setCheckable(true);
+    languageGroup->addAction(m_languageEnglishAction);
+    connect(m_languageEnglishAction, &QAction::triggered, this, &MainWindow::onSelectLanguageEnglish);
+    if (I18n::currentLanguage() == I18n::Language::English)
+        m_languageEnglishAction->setChecked(true);
+    else
+        m_languageJapaneseAction->setChecked(true);
 
-    auto *aboutAppAction = helpMenu->addAction(QStringLiteral("EnduranceTestGUIについて..."));
+    auto *helpMenu = menuBar()->addMenu(I18n::t(QStringLiteral("ヘルプ")));
+
+    auto *aboutAppAction = helpMenu->addAction(I18n::t(QStringLiteral("EnduranceTestGUIについて...")));
     connect(aboutAppAction, &QAction::triggered, this, &MainWindow::onAboutApp);
 
     // Required by the Qt LGPLv3/GPL license terms this app is built
@@ -251,21 +272,20 @@ void MainWindow::buildMenuBar()
     // is Qt's own standard dialog for this -- it names the exact license
     // and has a "Show License" button with the complete text, so no
     // license text needs to be bundled/reproduced separately here.
-    auto *aboutQtAction = helpMenu->addAction(QStringLiteral("Qtについて..."));
+    auto *aboutQtAction = helpMenu->addAction(I18n::t(QStringLiteral("Qtについて...")));
     connect(aboutQtAction, &QAction::triggered, this, &MainWindow::onAboutQt);
 }
 
 void MainWindow::onAboutApp()
 {
     QMessageBox::about(
-        this, QStringLiteral("EnduranceTestGUIについて"),
-        QStringLiteral(
-            "EnduranceTestGUI\n\n"
+        this, I18n::t(QStringLiteral("EnduranceTestGUIについて")),
+        I18n::t(QStringLiteral("EnduranceTestGUI\n\n"
             "GUIアプリケーションの耐久テスト（ランダムクリック・ランダム操作）を行うための"
             "デスクトップツールです。\n\n"
             "Qt %1 を使用して構築されています。Qtはフリーソフトウェア版の場合"
             "GNU LGPL バージョン3（一部モジュールはGPL）の下で配布されています。Qt自体の"
-            "ライセンス条文は、このメニューの「Qtについて...」から確認できます。")
+            "ライセンス条文は、このメニューの「Qtについて...」から確認できます。"))
             .arg(QStringLiteral(QT_VERSION_STR)));
 }
 
@@ -274,12 +294,28 @@ void MainWindow::onAboutQt()
     QMessageBox::aboutQt(this);
 }
 
+void MainWindow::onSelectLanguageJapanese()
+{
+    I18n::setLanguage(I18n::Language::Japanese);
+    QMessageBox::information(this, QStringLiteral("言語 / Language"),
+                              QStringLiteral("言語設定を保存しました。変更を反映するにはアプリを再起動してください。\n\n"
+                                              "Language preference saved. Please restart the app for the change to take effect."));
+}
+
+void MainWindow::onSelectLanguageEnglish()
+{
+    I18n::setLanguage(I18n::Language::English);
+    QMessageBox::information(this, QStringLiteral("言語 / Language"),
+                              QStringLiteral("言語設定を保存しました。変更を反映するにはアプリを再起動してください。\n\n"
+                                              "Language preference saved. Please restart the app for the change to take effect."));
+}
+
 QWidget *MainWindow::buildTargetColumn(QWidget *parent)
 {
     auto *wrapper = new QWidget(parent);
     auto *wrapperLayout = new QVBoxLayout(wrapper);
     wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->addWidget(columnHeader(QStringLiteral("① 対象選択"), wrapper));
+    wrapperLayout->addWidget(columnHeader(I18n::t(QStringLiteral("① 対象選択")), wrapper));
 
     auto *scroll = new QScrollArea(wrapper);
     scroll->setWidgetResizable(true);
@@ -291,11 +327,11 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     auto *layout = new QVBoxLayout(container);
 
     // --- Target group ---
-    m_targetGroup = new QGroupBox(QStringLiteral("対象 (Target)"), container);
+    m_targetGroup = new QGroupBox(I18n::t(QStringLiteral("対象 (Target)")), container);
     auto *targetLayout = new QVBoxLayout(m_targetGroup);
     auto *targetRow = new QHBoxLayout;
     m_targetCombo = new QComboBox(m_targetGroup);
-    m_refreshButton = new QPushButton(QStringLiteral("更新"), m_targetGroup);
+    m_refreshButton = new QPushButton(I18n::t(QStringLiteral("更新")), m_targetGroup);
     targetRow->addWidget(m_targetCombo, 1);
     targetRow->addWidget(m_refreshButton);
     targetLayout->addLayout(targetRow);
@@ -305,7 +341,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_permissionLabel = new QLabel(m_targetGroup);
     m_permissionLabel->setWordWrap(true);
     targetLayout->addWidget(m_permissionLabel);
-    m_openSettingsButton = new QPushButton(QStringLiteral("権限設定を開く"), m_targetGroup);
+    m_openSettingsButton = new QPushButton(I18n::t(QStringLiteral("権限設定を開く")), m_targetGroup);
     targetLayout->addWidget(m_openSettingsButton);
 
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
@@ -316,15 +352,15 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
 
     // --- Named operation regions ---
     m_namedRegionGroup = new QGroupBox(
-        QStringLiteral("操作領域（名前付き。②でステップ作成時に選択して使う）"), container);
+        I18n::t(QStringLiteral("操作領域（名前付き。②でステップ作成時に選択して使う）")), container);
     auto *namedRegionLayout = new QVBoxLayout(m_namedRegionGroup);
     m_namedRegionListWidget = new QListWidget(m_namedRegionGroup);
     m_namedRegionListWidget->setMaximumHeight(110);
     namedRegionLayout->addWidget(m_namedRegionListWidget);
     auto *namedRegionButtonsRow = new QHBoxLayout;
-    m_addNamedRegionButton = new QPushButton(QStringLiteral("追加..."), m_namedRegionGroup);
-    m_editNamedRegionButton = new QPushButton(QStringLiteral("編集..."), m_namedRegionGroup);
-    m_removeNamedRegionButton = new QPushButton(QStringLiteral("削除"), m_namedRegionGroup);
+    m_addNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("追加...")), m_namedRegionGroup);
+    m_editNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("編集...")), m_namedRegionGroup);
+    m_removeNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("削除")), m_namedRegionGroup);
     namedRegionButtonsRow->addWidget(m_addNamedRegionButton);
     namedRegionButtonsRow->addWidget(m_editNamedRegionButton);
     namedRegionButtonsRow->addWidget(m_removeNamedRegionButton);
@@ -337,7 +373,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onRemoveSelectedNamedRegion);
 
     // --- Timing group ---
-    m_timingGroup = new QGroupBox(QStringLiteral("タイミング・制限"), container);
+    m_timingGroup = new QGroupBox(I18n::t(QStringLiteral("タイミング・制限")), container);
     auto *timingForm = new QFormLayout(m_timingGroup);
     // Some of these row labels are long (e.g. "ステップ全体（シーケンス）の繰り返し回数
     // （必須）:"); let Qt move the field below the label instead of shrinking it when this
@@ -354,8 +390,8 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     intervalContainerLayout->setContentsMargins(0, 0, 0, 0);
 
     auto *intervalModeRow = new QHBoxLayout;
-    m_intervalModeMsRadio = new QRadioButton(QStringLiteral("ms指定"), intervalContainer);
-    m_intervalModeRateRadio = new QRadioButton(QStringLiteral("回数/秒指定"), intervalContainer);
+    m_intervalModeMsRadio = new QRadioButton(I18n::t(QStringLiteral("ms指定")), intervalContainer);
+    m_intervalModeRateRadio = new QRadioButton(I18n::t(QStringLiteral("回数/秒指定")), intervalContainer);
     m_intervalModeMsRadio->setChecked(true);
     intervalModeRow->addWidget(m_intervalModeMsRadio);
     intervalModeRow->addWidget(m_intervalModeRateRadio);
@@ -374,7 +410,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_maxIntervalSpin->setRange(10, 600000);
     m_maxIntervalSpin->setValue(100);
     msPageLayout->addWidget(m_minIntervalSpin);
-    msPageLayout->addWidget(new QLabel(QStringLiteral("〜"), msPage));
+    msPageLayout->addWidget(new QLabel(I18n::t(QStringLiteral("〜")), msPage));
     msPageLayout->addWidget(m_maxIntervalSpin);
     msPageLayout->addWidget(new QLabel(QStringLiteral("ms"), msPage));
     msPageLayout->addStretch();
@@ -395,9 +431,9 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_maxRateSpin->setDecimals(2);
     m_maxRateSpin->setValue(50.0);
     ratePageLayout->addWidget(m_minRateSpin);
-    ratePageLayout->addWidget(new QLabel(QStringLiteral("〜"), ratePage));
+    ratePageLayout->addWidget(new QLabel(I18n::t(QStringLiteral("〜")), ratePage));
     ratePageLayout->addWidget(m_maxRateSpin);
-    ratePageLayout->addWidget(new QLabel(QStringLiteral("回/秒"), ratePage));
+    ratePageLayout->addWidget(new QLabel(I18n::t(QStringLiteral("回/秒")), ratePage));
     ratePageLayout->addStretch();
     m_intervalStack->addWidget(ratePage);
 
@@ -406,33 +442,33 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
         m_intervalStack->setCurrentIndex(checked ? 1 : 0);
     });
 
-    timingForm->addRow(QStringLiteral("操作間隔:"), intervalContainer);
+    timingForm->addRow(I18n::t(QStringLiteral("操作間隔:")), intervalContainer);
 
     m_maxIterationsSpin = new QSpinBox(m_timingGroup);
     m_maxIterationsSpin->setRange(1, 100000000);
     m_maxIterationsSpin->setValue(1000);
-    timingForm->addRow(QStringLiteral("最大実行回数（全ステップ合計、必須）:"), m_maxIterationsSpin);
+    timingForm->addRow(I18n::t(QStringLiteral("最大実行回数（全ステップ合計、必須）:")), m_maxIterationsSpin);
 
     m_maxDurationSecSpin = new QSpinBox(m_timingGroup);
     m_maxDurationSecSpin->setRange(1, 6000000);
     m_maxDurationSecSpin->setValue(120);
-    m_maxDurationSecSpin->setSuffix(QStringLiteral(" 秒"));
-    timingForm->addRow(QStringLiteral("最大実行時間（必須）:"), m_maxDurationSecSpin);
+    m_maxDurationSecSpin->setSuffix(I18n::t(QStringLiteral(" 秒")));
+    timingForm->addRow(I18n::t(QStringLiteral("最大実行時間（必須）:")), m_maxDurationSecSpin);
 
     m_maxSequenceLoopsSpin = new QSpinBox(m_timingGroup);
     m_maxSequenceLoopsSpin->setRange(1, 100000000);
     m_maxSequenceLoopsSpin->setValue(10);
-    timingForm->addRow(QStringLiteral("ステップ全体（シーケンス）の繰り返し回数（必須）:"), m_maxSequenceLoopsSpin);
+    timingForm->addRow(I18n::t(QStringLiteral("ステップ全体（シーケンス）の繰り返し回数（必須）:")), m_maxSequenceLoopsSpin);
 
-    m_keepActiveCheck = new QCheckBox(QStringLiteral("対象アプリを常に最前面に保つ"), m_timingGroup);
+    m_keepActiveCheck = new QCheckBox(I18n::t(QStringLiteral("対象アプリを常に最前面に保つ")), m_timingGroup);
     m_keepActiveCheck->setChecked(true);
     timingForm->addRow(QString(), m_keepActiveCheck);
 
     m_rngSeedSpin = new QSpinBox(m_timingGroup);
     m_rngSeedSpin->setRange(0, 2000000000);
     m_rngSeedSpin->setValue(0);
-    m_rngSeedSpin->setSpecialValueText(QStringLiteral("ランダム"));
-    timingForm->addRow(QStringLiteral("乱数シード（クラッシュ再現用。開始時にログに記録される）:"), m_rngSeedSpin);
+    m_rngSeedSpin->setSpecialValueText(I18n::t(QStringLiteral("ランダム")));
+    timingForm->addRow(I18n::t(QStringLiteral("乱数シード（クラッシュ再現用。開始時にログに記録される）:")), m_rngSeedSpin);
 
     // Operation-region screenshot capture timing (SPEC.md 6.2/10): which of
     // the three radios is checked selects TestConfig::screenshotCaptureMode
@@ -443,41 +479,41 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     auto *screenshotContainer = new QWidget(m_timingGroup);
     auto *screenshotLayout = new QVBoxLayout(screenshotContainer);
     screenshotLayout->setContentsMargins(0, 0, 0, 0);
-    m_screenshotModeOnceRadio = new QRadioButton(QStringLiteral("実行前に一度だけ"), screenshotContainer);
+    m_screenshotModeOnceRadio = new QRadioButton(I18n::t(QStringLiteral("実行前に一度だけ")), screenshotContainer);
     m_screenshotModePerStepRadio =
-        new QRadioButton(QStringLiteral("ステップが変わるたび"), screenshotContainer);
+        new QRadioButton(I18n::t(QStringLiteral("ステップが変わるたび")), screenshotContainer);
     m_screenshotModePerStepRadio->setChecked(true);
     auto *screenshotIntervalRow = new QHBoxLayout;
-    m_screenshotModeIntervalRadio = new QRadioButton(QStringLiteral("一定間隔ごと:"), screenshotContainer);
+    m_screenshotModeIntervalRadio = new QRadioButton(I18n::t(QStringLiteral("一定間隔ごと:")), screenshotContainer);
     m_screenshotIntervalSpin = new QSpinBox(screenshotContainer);
     m_screenshotIntervalSpin->setRange(1, 1000000);
     m_screenshotIntervalSpin->setValue(50);
-    m_screenshotIntervalSpin->setSuffix(QStringLiteral(" 操作ごと"));
+    m_screenshotIntervalSpin->setSuffix(I18n::t(QStringLiteral(" 操作ごと")));
     screenshotIntervalRow->addWidget(m_screenshotModeIntervalRadio);
     screenshotIntervalRow->addWidget(m_screenshotIntervalSpin);
     screenshotIntervalRow->addStretch();
     screenshotLayout->addWidget(m_screenshotModeOnceRadio);
     screenshotLayout->addWidget(m_screenshotModePerStepRadio);
     screenshotLayout->addLayout(screenshotIntervalRow);
-    timingForm->addRow(QStringLiteral("操作領域スクリーンショットの撮影タイミング:"), screenshotContainer);
+    timingForm->addRow(I18n::t(QStringLiteral("操作領域スクリーンショットの撮影タイミング:")), screenshotContainer);
 
     // Opt-in anomaly diagnostics (SPEC.md 6.7/10) -- see TestConfig::
     // enableScreenRecording/enableCrashDumpCollection.
     m_recordingCheck =
-        new QCheckBox(QStringLiteral("異常停止時に直近の画面を録画として保存する（追加負荷あり）"), m_timingGroup);
+        new QCheckBox(I18n::t(QStringLiteral("異常停止時に直近の画面を録画として保存する（追加負荷あり）")), m_timingGroup);
     m_recordingCheck->setChecked(false);
     m_recordingCheck->setToolTip(
-        QStringLiteral("実行中、画面を一定間隔で撮影してリングバッファに保持し続けます。"
-                        "異常停止時に、そこまでの数秒間の画面推移を連番PNGとして保存します。"));
+        I18n::t(QStringLiteral("実行中、画面を一定間隔で撮影してリングバッファに保持し続けます。"
+                        "異常停止時に、そこまでの数秒間の画面推移を連番PNGとして保存します。")));
     timingForm->addRow(QString(), m_recordingCheck);
 
     m_crashDumpCollectionCheck =
-        new QCheckBox(QStringLiteral("異常停止時にOSのクラッシュダンプ・診断ログを収集する"), m_timingGroup);
+        new QCheckBox(I18n::t(QStringLiteral("異常停止時にOSのクラッシュダンプ・診断ログを収集する")), m_timingGroup);
     m_crashDumpCollectionCheck->setChecked(true);
     m_crashDumpCollectionCheck->setToolTip(
-        QStringLiteral("対象アプリのものと思われるクラッシュレポート/コアダンプがシステム上に"
+        I18n::t(QStringLiteral("対象アプリのものと思われるクラッシュレポート/コアダンプがシステム上に"
                         "見つかった場合、そのパスを異常停止時のログと記録一式に含めます。"
-                        "見つからなくても実行には影響しません。"));
+                        "見つからなくても実行には影響しません。")));
     timingForm->addRow(QString(), m_crashDumpCollectionCheck);
 
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
@@ -496,10 +532,10 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     auto *wrapper = new QWidget(parent);
     auto *wrapperLayout = new QVBoxLayout(wrapper);
     wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->addWidget(columnHeader(QStringLiteral("② ステップ構成"), wrapper));
+    wrapperLayout->addWidget(columnHeader(I18n::t(QStringLiteral("② ステップ構成")), wrapper));
 
     m_stepsGroup = new QGroupBox(
-        QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行"), wrapper);
+        I18n::t(QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行")), wrapper);
     auto *stepsLayout = new QVBoxLayout(m_stepsGroup);
     m_stepListWidget = new QListWidget(m_stepsGroup);
     // Multiple steps can be selected at once so they can be combined into a
@@ -508,10 +544,10 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     stepsLayout->addWidget(m_stepListWidget, 1);
 
     auto *stepButtonsRow = new QHBoxLayout;
-    m_addStepButton = new QPushButton(QStringLiteral("追加..."), m_stepsGroup);
-    m_addWaitStepButton = new QPushButton(QStringLiteral("待機を追加..."), m_stepsGroup);
-    m_editStepButton = new QPushButton(QStringLiteral("編集..."), m_stepsGroup);
-    m_removeStepButton = new QPushButton(QStringLiteral("削除"), m_stepsGroup);
+    m_addStepButton = new QPushButton(I18n::t(QStringLiteral("追加...")), m_stepsGroup);
+    m_addWaitStepButton = new QPushButton(I18n::t(QStringLiteral("待機を追加...")), m_stepsGroup);
+    m_editStepButton = new QPushButton(I18n::t(QStringLiteral("編集...")), m_stepsGroup);
+    m_removeStepButton = new QPushButton(I18n::t(QStringLiteral("削除")), m_stepsGroup);
     stepButtonsRow->addWidget(m_addStepButton);
     stepButtonsRow->addWidget(m_addWaitStepButton);
     stepButtonsRow->addWidget(m_editStepButton);
@@ -519,9 +555,9 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     stepsLayout->addLayout(stepButtonsRow);
 
     auto *stepOrderRow = new QHBoxLayout;
-    m_moveStepUpButton = new QPushButton(QStringLiteral("↑ 上へ"), m_stepsGroup);
-    m_moveStepDownButton = new QPushButton(QStringLiteral("↓ 下へ"), m_stepsGroup);
-    m_clearStepsButton = new QPushButton(QStringLiteral("すべて削除"), m_stepsGroup);
+    m_moveStepUpButton = new QPushButton(I18n::t(QStringLiteral("↑ 上へ")), m_stepsGroup);
+    m_moveStepDownButton = new QPushButton(I18n::t(QStringLiteral("↓ 下へ")), m_stepsGroup);
+    m_clearStepsButton = new QPushButton(I18n::t(QStringLiteral("すべて削除")), m_stepsGroup);
     stepOrderRow->addWidget(m_moveStepUpButton);
     stepOrderRow->addWidget(m_moveStepDownButton);
     stepOrderRow->addWidget(m_clearStepsButton);
@@ -532,8 +568,8 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     // chosen member until a configured total call count is reached, then
     // advances like any other step. "グループ解除" reverses this.
     auto *groupButtonsRow = new QHBoxLayout;
-    m_groupStepsButton = new QPushButton(QStringLiteral("グループ化"), m_stepsGroup);
-    m_ungroupStepButton = new QPushButton(QStringLiteral("グループ解除"), m_stepsGroup);
+    m_groupStepsButton = new QPushButton(I18n::t(QStringLiteral("グループ化")), m_stepsGroup);
+    m_ungroupStepButton = new QPushButton(I18n::t(QStringLiteral("グループ解除")), m_stepsGroup);
     groupButtonsRow->addWidget(m_groupStepsButton);
     groupButtonsRow->addWidget(m_ungroupStepButton);
     stepsLayout->addLayout(groupButtonsRow);
@@ -561,14 +597,14 @@ QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
     auto *wrapper = new QWidget(parent);
     auto *wrapperLayout = new QVBoxLayout(wrapper);
     wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->addWidget(columnHeader(QStringLiteral("③ 操作パラメータ"), wrapper));
+    wrapperLayout->addWidget(columnHeader(I18n::t(QStringLiteral("③ 操作パラメータ")), wrapper));
 
     auto *contextRow = new QHBoxLayout;
-    m_actionParamsContextLabel = new QLabel(QStringLiteral("デフォルト値を編集中（ステップ未選択）"), wrapper);
+    m_actionParamsContextLabel = new QLabel(I18n::t(QStringLiteral("デフォルト値を編集中（ステップ未選択）")), wrapper);
     contextRow->addWidget(m_actionParamsContextLabel, 1);
-    m_editDefaultParamsButton = new QPushButton(QStringLiteral("デフォルト"), wrapper);
+    m_editDefaultParamsButton = new QPushButton(I18n::t(QStringLiteral("デフォルト")), wrapper);
     m_editDefaultParamsButton->setToolTip(
-        QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します（②の選択は変わりません）"));
+        I18n::t(QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します（②の選択は変わりません）")));
     contextRow->addWidget(m_editDefaultParamsButton);
     wrapperLayout->addLayout(contextRow);
     connect(m_editDefaultParamsButton, &QPushButton::clicked, this, &MainWindow::onEditDefaultParams);
@@ -583,7 +619,7 @@ QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
     // --- Step-level: which action kinds this step performs, their
     // relative weight, and how many actions to run (SPEC.md 6.2/6.3).
     m_stepKindGroup = new QGroupBox(
-        QStringLiteral("このステップの操作種別・重み・回数（②でステップを選択すると編集できます）"),
+        I18n::t(QStringLiteral("このステップの操作種別・重み・回数（②でステップを選択すると編集できます）")),
         scrollContent);
     auto *kindLayout = new QVBoxLayout(m_stepKindGroup);
     m_stepKindEditor = new ActionKindEditor(m_stepKindGroup);
@@ -599,13 +635,13 @@ QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
     // --- ActionParams: shared defaults, or a per-step override toggled as
     // a whole (unchanged from before -- SPEC.md 6.4/6.9).
     m_actionParamsGroup = new QGroupBox(
-        QStringLiteral("操作の詳細設定（ドラッグ距離・キー文字種・スクロール量など）"), scrollContent);
+        I18n::t(QStringLiteral("操作の詳細設定（ドラッグ距離・キー文字種・スクロール量など）")), scrollContent);
     auto *layout = new QVBoxLayout(m_actionParamsGroup);
 
     auto *modeRow = new QHBoxLayout;
-    m_stepUseDefaultParamsRadio = new QRadioButton(QStringLiteral("デフォルトを使う"), m_actionParamsGroup);
+    m_stepUseDefaultParamsRadio = new QRadioButton(I18n::t(QStringLiteral("デフォルトを使う")), m_actionParamsGroup);
     m_stepUseCustomParamsRadio =
-        new QRadioButton(QStringLiteral("このステップ専用の設定を使う"), m_actionParamsGroup);
+        new QRadioButton(I18n::t(QStringLiteral("このステップ専用の設定を使う")), m_actionParamsGroup);
     m_stepUseDefaultParamsRadio->setChecked(true);
     m_stepUseDefaultParamsRadio->setEnabled(false);
     m_stepUseCustomParamsRadio->setEnabled(false);
@@ -631,13 +667,13 @@ void MainWindow::onRefreshTargets()
     m_windows = PlatformAutomation::listWindows();
     for (const WindowInfo &w : m_windows) {
         const QString label = QStringLiteral("%1 (pid %2)%3")
-                                   .arg(w.appName.isEmpty() ? QStringLiteral("不明なアプリ") : w.appName)
+                                   .arg(w.appName.isEmpty() ? I18n::t(QStringLiteral("不明なアプリ")) : w.appName)
                                    .arg(w.pid)
                                    .arg(w.title.isEmpty() ? QString() : QStringLiteral(" - ") + w.title);
         m_targetCombo->addItem(label);
     }
     if (m_targetCombo->count() == 0)
-        m_targetCombo->addItem(QStringLiteral("(ウィンドウが見つかりません)"));
+        m_targetCombo->addItem(I18n::t(QStringLiteral("(ウィンドウが見つかりません)")));
 
     refreshPermissionLabel();
 }
@@ -646,8 +682,8 @@ void MainWindow::refreshPermissionLabel()
 {
     const bool trusted = PlatformAutomation::isAccessibilityTrusted(false);
     m_permissionLabel->setText(trusted
-                                    ? QStringLiteral("✓ 入力送信の権限は許可されています")
-                                    : QStringLiteral("✗ 権限が必要です（下のボタンから設定を開いてください）"));
+                                    ? I18n::t(QStringLiteral("✓ 入力送信の権限は許可されています"))
+                                    : I18n::t(QStringLiteral("✗ 権限が必要です（下のボタンから設定を開いてください）")));
     m_permissionLabel->setStyleSheet(trusted ? "color: green;" : "color: red;");
 }
 
@@ -655,8 +691,8 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
 {
     if (step.isWaitStep) {
         const QString runningPrefix =
-            index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
-        return QStringLiteral("%1ステップ%2: 待機（%3 ms）")
+            index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
+        return I18n::t(QStringLiteral("%1ステップ%2: 待機（%3 ms）"))
             .arg(runningPrefix)
             .arg(index + 1)
             .arg(step.waitDurationMs);
@@ -664,8 +700,8 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
 
     if (step.isGroup) {
         const QString runningPrefix =
-            index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
-        return QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）")
+            index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
+        return I18n::t(QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）"))
             .arg(runningPrefix)
             .arg(index + 1)
             .arg(step.groupMembers.size())
@@ -674,39 +710,39 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
 
     QStringList actions;
     if (step.enableClick)
-        actions << QStringLiteral("クリック");
+        actions << I18n::t(QStringLiteral("クリック"));
     if (step.enableDoubleClick)
-        actions << QStringLiteral("ダブルクリック");
+        actions << I18n::t(QStringLiteral("ダブルクリック"));
     if (step.enableDrag)
-        actions << QStringLiteral("ドラッグ");
+        actions << I18n::t(QStringLiteral("ドラッグ"));
     if (step.enableKey)
-        actions << QStringLiteral("キー入力");
+        actions << I18n::t(QStringLiteral("キー入力"));
     if (step.enableScrollUp)
-        actions << QStringLiteral("スクロール(上)");
+        actions << I18n::t(QStringLiteral("スクロール(上)"));
     if (step.enableScrollDown)
-        actions << QStringLiteral("スクロール(下)");
+        actions << I18n::t(QStringLiteral("スクロール(下)"));
     if (step.enableScrollHorizontal)
-        actions << QStringLiteral("スクロール(横)");
+        actions << I18n::t(QStringLiteral("スクロール(横)"));
     if (step.enableShortcut)
-        actions << QStringLiteral("ショートカット");
+        actions << I18n::t(QStringLiteral("ショートカット"));
     if (step.enableWindowOp)
-        actions << QStringLiteral("ウィンドウ操作");
+        actions << I18n::t(QStringLiteral("ウィンドウ操作"));
 
     const QString regionDesc = step.useWholeWindow
-                                    ? QStringLiteral("対象GUIの全領域")
+                                    ? I18n::t(QStringLiteral("対象GUIの全領域"))
                                     : (step.regionName.isEmpty()
-                                           ? QStringLiteral("(未選択)")
-                                           : QStringLiteral("操作領域「%1」").arg(step.regionName));
+                                           ? I18n::t(QStringLiteral("(未選択)"))
+                                           : I18n::t(QStringLiteral("操作領域「%1」")).arg(step.regionName));
     const QString paramsBadge =
-        step.useDefaultActionParams ? QString() : QStringLiteral(" | [カスタム設定]");
+        step.useDefaultActionParams ? QString() : I18n::t(QStringLiteral(" | [カスタム設定]"));
     const QString runningPrefix =
-        index == m_currentRunningStepIndex ? QStringLiteral("▶ 実行中 ") : QString();
+        index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
 
-    return QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6")
+    return I18n::t(QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6"))
         .arg(runningPrefix)
         .arg(index + 1)
         .arg(regionDesc)
-        .arg(actions.isEmpty() ? QStringLiteral("(なし)") : actions.join(QStringLiteral(", ")))
+        .arg(actions.isEmpty() ? I18n::t(QStringLiteral("(なし)")) : actions.join(QStringLiteral(", ")))
         .arg(step.actionCount)
         .arg(paramsBadge);
 }
@@ -721,11 +757,11 @@ void MainWindow::refreshStepList()
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
 {
-    return QStringLiteral("%1（矩形%2個・除外%3個）%4")
+    return I18n::t(QStringLiteral("%1（矩形%2個・除外%3個）%4"))
         .arg(region.name)
         .arg(region.regions.size())
         .arg(region.excludeRegions.size())
-        .arg(region.followsTargetWindow ? QStringLiteral(" [ウィンドウ追従]") : QString());
+        .arg(region.followsTargetWindow ? I18n::t(QStringLiteral(" [ウィンドウ追従]")) : QString());
 }
 
 void MainWindow::refreshNamedRegionList()
@@ -744,10 +780,10 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
             for (int j = 0; j < step.groupMembers.size(); ++j) {
                 const RegionStep &member = step.groupMembers[j];
                 if (!member.useWholeWindow && member.regionName == regionName)
-                    result << QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1);
+                    result << I18n::t(QStringLiteral("ステップ%1（グループ内メンバー%2）")).arg(i + 1).arg(j + 1);
             }
         } else if (!step.useWholeWindow && step.regionName == regionName) {
-            result << QStringLiteral("ステップ%1").arg(i + 1);
+            result << I18n::t(QStringLiteral("ステップ%1")).arg(i + 1);
         }
     }
     return result;
@@ -772,7 +808,7 @@ QString MainWindow::generateDefaultRegionName() const
         // individual rectangles drawn inside one operation region -- those
         // are a different, unrelated numbering scope and having both say
         // "領域1" was confusing (SPEC.md 6.3).
-        const QString candidate = QStringLiteral("操作領域%1").arg(n);
+        const QString candidate = I18n::t(QStringLiteral("操作領域%1")).arg(n);
         bool used = false;
         for (const NamedRegion &existing : m_namedRegions) {
             if (existing.name == candidate) {
@@ -813,8 +849,8 @@ void MainWindow::onAddNamedRegion()
     const NamedRegion region = dialog.result();
     for (const NamedRegion &existing : m_namedRegions) {
         if (existing.name == region.name) {
-            QMessageBox::warning(this, QStringLiteral("入力エラー"),
-                                  QStringLiteral("同じ名前の操作領域が既に存在します。"));
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
             return;
         }
     }
@@ -839,8 +875,8 @@ void MainWindow::onEditSelectedNamedRegion()
 
     for (int i = 0; i < m_namedRegions.size(); ++i) {
         if (i != row && m_namedRegions[i].name == region.name) {
-            QMessageBox::warning(this, QStringLiteral("入力エラー"),
-                                  QStringLiteral("同じ名前の操作領域が既に存在します。"));
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
             return;
         }
     }
@@ -874,9 +910,9 @@ void MainWindow::onRemoveSelectedNamedRegion()
     const QStringList referencingSteps = stepsReferencing(m_namedRegions[row].name);
     if (!referencingSteps.isEmpty()) {
         QMessageBox::warning(
-            this, QStringLiteral("削除できません"),
-            QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
-                            "先にそれらのステップの領域を変更するか、ステップを削除してください。")
+            this, I18n::t(QStringLiteral("削除できません")),
+            I18n::t(QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
+                            "先にそれらのステップの領域を変更するか、ステップを削除してください。"))
                 .arg(referencingSteps.join(QStringLiteral(", "))));
         return;
     }
@@ -914,7 +950,7 @@ void MainWindow::loadActionParamsEditorForSelection()
 {
     const int row = m_stepListWidget->currentRow();
     if (row < 0 || row >= m_steps.size()) {
-        m_actionParamsContextLabel->setText(QStringLiteral("デフォルト値を編集中（ステップ未選択）"));
+        m_actionParamsContextLabel->setText(I18n::t(QStringLiteral("デフォルト値を編集中（ステップ未選択）")));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -931,7 +967,7 @@ void MainWindow::loadActionParamsEditorForSelection()
         // edit here at all (see RegionStep::isWaitStep) -- disable both
         // groups entirely rather than showing controls that don't apply.
         m_actionParamsContextLabel->setText(
-            QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）").arg(row + 1));
+            I18n::t(QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）")).arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -948,7 +984,7 @@ void MainWindow::loadActionParamsEditorForSelection()
         // ActionParams settings, edited in StepGroupEditorDialog (via ②'s
         // "編集..." button) rather than here -- see RegionStep::isGroup.
         m_actionParamsContextLabel->setText(
-            QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください").arg(row + 1));
+            I18n::t(QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください")).arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -970,7 +1006,7 @@ void MainWindow::loadActionParamsEditorForSelection()
     // just-corrupted data for the remaining fields. A value copy is immune
     // to that.
     const RegionStep step = m_steps[row];
-    m_actionParamsContextLabel->setText(QStringLiteral("ステップ %1 の操作種別・詳細設定を編集中").arg(row + 1));
+    m_actionParamsContextLabel->setText(I18n::t(QStringLiteral("ステップ %1 の操作種別・詳細設定を編集中")).arg(row + 1));
     m_stepUseDefaultParamsRadio->setEnabled(true);
     m_stepUseCustomParamsRadio->setEnabled(true);
     m_stepUseDefaultParamsRadio->blockSignals(true);
@@ -1044,8 +1080,8 @@ void MainWindow::onAddStep()
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("ステップの設定エラー"),
-                              QStringLiteral("操作領域が選択されていません。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
 
@@ -1063,8 +1099,8 @@ void MainWindow::onAddStep()
 void MainWindow::onAddWaitStep()
 {
     bool ok = false;
-    const int ms = QInputDialog::getInt(this, QStringLiteral("待機ステップを追加"),
-                                         QStringLiteral("待機時間 (ms):"), 1000, 1, 600000, 100, &ok);
+    const int ms = QInputDialog::getInt(this, I18n::t(QStringLiteral("待機ステップを追加")),
+                                         I18n::t(QStringLiteral("待機時間 (ms):")), 1000, 1, 600000, 100, &ok);
     if (!ok)
         return;
 
@@ -1085,8 +1121,8 @@ void MainWindow::onEditSelectedStep()
 
     if (m_steps[row].isWaitStep) {
         bool ok = false;
-        const int ms = QInputDialog::getInt(this, QStringLiteral("待機ステップを編集"),
-                                             QStringLiteral("待機時間 (ms):"),
+        const int ms = QInputDialog::getInt(this, I18n::t(QStringLiteral("待機ステップを編集")),
+                                             I18n::t(QStringLiteral("待機時間 (ms):")),
                                              m_steps[row].waitDurationMs, 1, 600000, 100, &ok);
         if (!ok)
             return;
@@ -1111,8 +1147,8 @@ void MainWindow::onEditSelectedStep()
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("ステップの設定エラー"),
-                              QStringLiteral("操作領域が選択されていません。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
 
@@ -1191,9 +1227,9 @@ void MainWindow::onGroupSelectedSteps()
     for (int row : rows) {
         if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup) {
             QMessageBox::warning(
-                this, QStringLiteral("グループ化できません"),
-                QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
-                                "（グループの入れ子は未対応です）。"));
+                this, I18n::t(QStringLiteral("グループ化できません")),
+                I18n::t(QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
+                                "（グループの入れ子は未対応です）。")));
             return;
         }
     }
@@ -1255,40 +1291,36 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
     if (step.isWaitStep || step.isGroup)
         return true;  // nothing here to validate (a group's members are validated individually)
     if (!step.hasAnyActionEnabled()) {
-        errorMessage = QStringLiteral(
-            "%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
-            "パネルで操作種別を1つ以上有効にしてください。")
+        errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
+            "パネルで操作種別を1つ以上有効にしてください。"))
                            .arg(stepLabel);
         return false;
     }
     const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
     if (step.enableKey && params.allowedKeyChars.isEmpty()) {
-        errorMessage = QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
-                                        "（デフォルトまたはそのステップの専用設定）。")
+        errorMessage = I18n::t(QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
+                                        "（デフォルトまたはそのステップの専用設定）。"))
                            .arg(stepLabel);
         return false;
     }
     if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
-        errorMessage = QStringLiteral(
-            "ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
-            "（デフォルトまたはそのステップの専用設定）。")
+        errorMessage = I18n::t(QStringLiteral("ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
+            "（デフォルトまたはそのステップの専用設定）。"))
                            .arg(stepLabel);
         return false;
     }
     if (step.enableClick && step.enableRightClick && params.enableContextMenuSelection) {
         if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName &&
             params.contextMenuItemNames.isEmpty()) {
-            errorMessage = QStringLiteral(
-                "メニュー項目選択（項目名指定）を有効にした%1があります。候補項目名を最低1つ"
-                "追加してください（デフォルトまたはそのステップの専用設定）。")
+            errorMessage = I18n::t(QStringLiteral("メニュー項目選択（項目名指定）を有効にした%1があります。候補項目名を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。"))
                                .arg(stepLabel);
             return false;
         }
         if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByIndex &&
             params.contextMenuIndices.isEmpty()) {
-            errorMessage = QStringLiteral(
-                "メニュー項目選択（番号指定）を有効にした%1があります。候補の番号を最低1つ"
-                "追加してください（デフォルトまたはそのステップの専用設定）。")
+            errorMessage = I18n::t(QStringLiteral("メニュー項目選択（番号指定）を有効にした%1があります。候補の番号を最低1つ"
+                "追加してください（デフォルトまたはそのステップの専用設定）。"))
                                .arg(stepLabel);
             return false;
         }
@@ -1303,7 +1335,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 
     const int idx = m_targetCombo->currentIndex();
     if (idx < 0 || idx >= m_windows.size()) {
-        errorMessage = QStringLiteral("対象ウィンドウを選択してください。");
+        errorMessage = I18n::t(QStringLiteral("対象ウィンドウを選択してください。"));
         return config;
     }
     const WindowInfo &target = m_windows[idx];
@@ -1312,7 +1344,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.targetAppName = target.appName;
 
     if (m_steps.isEmpty()) {
-        errorMessage = QStringLiteral("ステップを最低1つ追加してください。");
+        errorMessage = I18n::t(QStringLiteral("ステップを最低1つ追加してください。"));
         return config;
     }
     config.steps = m_steps;
@@ -1326,19 +1358,19 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
         if (step.isGroup) {
             if (step.groupMembers.isEmpty()) {
                 errorMessage =
-                    QStringLiteral("ステップ%1（グループ）にステップが登録されていません。").arg(i + 1);
+                    I18n::t(QStringLiteral("ステップ%1（グループ）にステップが登録されていません。")).arg(i + 1);
                 return config;
             }
             for (int j = 0; j < step.groupMembers.size(); ++j) {
                 if (!validateStepActionConfig(
                         step.groupMembers[j],
-                        QStringLiteral("ステップ%1（グループ内メンバー%2）").arg(i + 1).arg(j + 1),
+                        I18n::t(QStringLiteral("ステップ%1（グループ内メンバー%2）")).arg(i + 1).arg(j + 1),
                         errorMessage))
                     return config;
             }
             continue;
         }
-        if (!validateStepActionConfig(step, QStringLiteral("ステップ%1").arg(i + 1), errorMessage))
+        if (!validateStepActionConfig(step, I18n::t(QStringLiteral("ステップ%1")).arg(i + 1), errorMessage))
             return config;
     }
 
@@ -1390,7 +1422,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
     if (enabled) {
-        m_pauseResumeButton->setText(QStringLiteral("‖ 一時停止"));
+        m_pauseResumeButton->setText(I18n::t(QStringLiteral("‖ 一時停止")));
         m_resourceUsageLabel->clear();
     }
     updateGroupButtonsEnabled();
@@ -1415,9 +1447,9 @@ void MainWindow::updateGroupButtonsEnabled()
 void MainWindow::onStart()
 {
     if (!PlatformAutomation::isAccessibilityTrusted(true)) {
-        QMessageBox::warning(this, QStringLiteral("権限が必要です"),
-                              QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
-                                              "設定を許可してから、もう一度「開始」を押してください。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("権限が必要です")),
+                              I18n::t(QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
+                                              "設定を許可してから、もう一度「開始」を押してください。")));
         onRefreshTargets();
         return;
     }
@@ -1428,7 +1460,7 @@ void MainWindow::onStart()
     QString errorMessage;
     const TestConfig config = buildConfigFromUi(ok, errorMessage);
     if (!ok) {
-        QMessageBox::warning(this, QStringLiteral("設定エラー"), errorMessage);
+        QMessageBox::warning(this, I18n::t(QStringLiteral("設定エラー")), errorMessage);
         return;
     }
 
@@ -1445,18 +1477,17 @@ void MainWindow::onStart()
         PlatformAutomation::activateProcess(config.targetPid);
         if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
             QMessageBox::warning(
-                this, QStringLiteral("安全確認に失敗しました"),
-                QStringLiteral(
-                    "対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
+                this, I18n::t(QStringLiteral("安全確認に失敗しました")),
+                I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
                     "対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認して"
                     "ください。それでも解決しない場合、この環境（特にLinuxの一部のウィンドウマネージャ）"
-                    "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。"));
+                    "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。")));
             return;
         }
     }
 
     setControlsEnabled(false);
-    m_statusLabel->setText(QStringLiteral("実行中"));
+    m_statusLabel->setText(I18n::t(QStringLiteral("実行中")));
     m_runElapsed.restart();
     m_uiTimer->start();
 
@@ -1479,11 +1510,11 @@ void MainWindow::onStart()
         logDir, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
     m_fullLogFile.setFileName(logPath);
     if (m_fullLogFile.open(QIODevice::WriteOnly | QIODevice::Text))
-        appendLog(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
-                                  "切れることなく全操作を記録): %1")
+        appendLog(I18n::t(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
+                                  "切れることなく全操作を記録): %1"))
                        .arg(logPath));
     else
-        appendLog(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1").arg(logPath));
+        appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
 
     m_engine->start(config);
 }
@@ -1503,14 +1534,14 @@ void MainWindow::onPauseResume()
 
 void MainWindow::onEnginePausedChanged(bool paused)
 {
-    m_pauseResumeButton->setText(paused ? QStringLiteral("▶ 再開") : QStringLiteral("‖ 一時停止"));
-    m_statusLabel->setText(paused ? QStringLiteral("一時停止中") : QStringLiteral("実行中"));
+    m_pauseResumeButton->setText(paused ? I18n::t(QStringLiteral("▶ 再開")) : I18n::t(QStringLiteral("‖ 一時停止")));
+    m_statusLabel->setText(paused ? I18n::t(QStringLiteral("一時停止中")) : I18n::t(QStringLiteral("実行中")));
 }
 
 void MainWindow::onResourceUsageUpdated(double residentMemoryMB, double cpuPercent)
 {
     m_resourceUsageLabel->setText(
-        QStringLiteral("メモリ: %1 MB / CPU: %2%")
+        I18n::t(QStringLiteral("メモリ: %1 MB / CPU: %2%"))
             .arg(residentMemoryMB, 0, 'f', 1)
             .arg(cpuPercent, 0, 'f', 1));
 }
@@ -1518,7 +1549,7 @@ void MainWindow::onResourceUsageUpdated(double residentMemoryMB, double cpuPerce
 void MainWindow::onEngineFinished(const QString &reason)
 {
     setControlsEnabled(true);
-    m_statusLabel->setText(QStringLiteral("停止: %1").arg(reason));
+    m_statusLabel->setText(I18n::t(QStringLiteral("停止: %1")).arg(reason));
     m_uiTimer->stop();
     if (m_stopPanel) {
         m_stopPanel->close();
@@ -1559,7 +1590,7 @@ void MainWindow::appendLog(const QString &message)
 
 void MainWindow::onIterationCountChanged(qint64 count)
 {
-    m_iterationLabel->setText(QStringLiteral("実行回数: %1").arg(count));
+    m_iterationLabel->setText(I18n::t(QStringLiteral("実行回数: %1")).arg(count));
     if (m_stopPanel)
         m_stopPanel->setIterationCount(count);
 }
@@ -1589,7 +1620,7 @@ void MainWindow::onCurrentStepChanged(int index)
 void MainWindow::updateElapsedLabel()
 {
     const qint64 secs = m_runElapsed.elapsed() / 1000;
-    m_elapsedLabel->setText(QStringLiteral("経過: %1秒").arg(secs));
+    m_elapsedLabel->setText(I18n::t(QStringLiteral("経過: %1秒")).arg(secs));
 }
 
 void MainWindow::onClearLog()
@@ -1599,8 +1630,8 @@ void MainWindow::onClearLog()
 
 void MainWindow::onSaveLog()
 {
-    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("ログを保存"), QString(),
-                                                        QStringLiteral("テキストファイル (*.txt)"));
+    const QString path = QFileDialog::getSaveFileName(this, I18n::t(QStringLiteral("ログを保存")), QString(),
+                                                        I18n::t(QStringLiteral("テキストファイル (*.txt)")));
     if (path.isEmpty())
         return;
     QFile file(path);
@@ -1642,16 +1673,19 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
         QFile presetFile(presetPath);
         if (presetFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
             presetFile.write(QJsonDocument(preset).toJson(QJsonDocument::Indented));
-            appendLog(QStringLiteral("異常停止時のテスト設定（この乱数シードで再現できるはずです）を"
-                                      "保存しました: %1")
+            appendLog(I18n::t(QStringLiteral("異常停止時のテスト設定（この乱数シードで再現できるはずです）を"
+                                      "保存しました: %1"))
                            .arg(presetPath));
         }
 
         if (m_engine->hasRegionScreenshot()) {
-            const QString shotPath =
-                QStringLiteral("%1/anomaly_%2_region.png").arg(baseDir, summary.anomalyArtifactTimestamp);
+            QString regionName = m_engine->lastRegionScreenshotRegionName().remove(QLatin1Char(' ')).remove(QLatin1Char('/'));
+            if (regionName.isEmpty())
+                regionName = QStringLiteral("region");
+            const QString shotPath = QStringLiteral("%1/anomaly_%2_region_%3.png")
+                                          .arg(baseDir, summary.anomalyArtifactTimestamp, regionName);
             if (m_engine->lastRegionScreenshot().save(shotPath))
-                appendLog(QStringLiteral("異常停止時点の操作領域画像を保存しました: %1").arg(shotPath));
+                appendLog(I18n::t(QStringLiteral("異常停止時点の操作領域画像を保存しました: %1")).arg(shotPath));
         }
     }
 }
@@ -1661,14 +1695,14 @@ void MainWindow::onSaveSummary()
     if (!m_hasLastSummary)
         return;
     const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("実行結果サマリーを保存"), QStringLiteral("summary.json"),
-        QStringLiteral("JSON (*.json);;テキスト (*.txt)"));
+        this, I18n::t(QStringLiteral("実行結果サマリーを保存")), QStringLiteral("summary.json"),
+        I18n::t(QStringLiteral("JSON (*.json);;テキスト (*.txt)")));
     if (path.isEmpty())
         return;
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")), I18n::t(QStringLiteral("ファイルに書き込めませんでした。")));
         return;
     }
     if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
@@ -1690,7 +1724,7 @@ void MainWindow::onSaveRegionScreenshot()
     if (!m_engine->hasRegionScreenshot())
         return;
     const QString dir =
-        QFileDialog::getExistingDirectory(this, QStringLiteral("操作領域画像の保存先フォルダを選択"));
+        QFileDialog::getExistingDirectory(this, I18n::t(QStringLiteral("操作領域画像の保存先フォルダを選択")));
     if (dir.isEmpty())
         return;
 
@@ -1698,18 +1732,22 @@ void MainWindow::onSaveRegionScreenshot()
     QString label = m_engine->lastRegionScreenshotLabel().remove(QLatin1Char(' '));
     if (label.isEmpty())
         label = QStringLiteral("screenshot");
-    const QString path = QStringLiteral("%1/操作領域_%2_%3.png").arg(dir, label, timestamp);
+    QString regionName = m_engine->lastRegionScreenshotRegionName().remove(QLatin1Char(' ')).remove(QLatin1Char('/'));
+    if (regionName.isEmpty())
+        regionName = QStringLiteral("region");
+    const QString path =
+        I18n::t(QStringLiteral("%1/操作領域_%2_%3_%4.png")).arg(dir, label, regionName, timestamp);
     if (m_engine->lastRegionScreenshot().save(path))
-        appendLog(QStringLiteral("操作領域画像を保存しました: %1").arg(path));
+        appendLog(I18n::t(QStringLiteral("操作領域画像を保存しました: %1")).arg(path));
     else
-        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("画像を保存できませんでした。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")), I18n::t(QStringLiteral("画像を保存できませんでした。")));
 }
 
 void MainWindow::onGlobalEmergencyStop()
 {
     if (!m_engine->isRunning())
         return;
-    appendLog(QStringLiteral("グローバル緊急停止ホットキーが押されました。"));
+    appendLog(I18n::t(QStringLiteral("グローバル緊急停止ホットキーが押されました。")));
     m_engine->stop();
 }
 
@@ -1767,7 +1805,7 @@ void MainWindow::onSavePreset()
 {
     flushActionParamsEditor();
 
-    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("テスト設定を保存"),
+    const QString path = QFileDialog::getSaveFileName(this, I18n::t(QStringLiteral("テスト設定を保存")),
                                                         QStringLiteral("preset.json"),
                                                         QStringLiteral("JSON (*.json)"));
     if (path.isEmpty())
@@ -1775,38 +1813,38 @@ void MainWindow::onSavePreset()
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("ファイルに書き込めませんでした。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")), I18n::t(QStringLiteral("ファイルに書き込めませんでした。")));
         return;
     }
     file.write(QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Indented));
-    appendLog(QStringLiteral("テスト設定を保存しました: %1").arg(path));
+    appendLog(I18n::t(QStringLiteral("テスト設定を保存しました: %1")).arg(path));
 }
 
 void MainWindow::onLoadPreset()
 {
     if (!m_steps.isEmpty() || !m_namedRegions.isEmpty()) {
         const auto reply = QMessageBox::question(
-            this, QStringLiteral("確認"),
-            QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？"));
+            this, I18n::t(QStringLiteral("確認")),
+            I18n::t(QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？")));
         if (reply != QMessageBox::Yes)
             return;
     }
 
-    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("テスト設定を読み込む"), QString(),
+    const QString path = QFileDialog::getOpenFileName(this, I18n::t(QStringLiteral("テスト設定を読み込む")), QString(),
                                                         QStringLiteral("JSON (*.json)"));
     if (path.isEmpty())
         return;
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, QStringLiteral("読み込みエラー"), QStringLiteral("ファイルを開けませんでした。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("読み込みエラー")), I18n::t(QStringLiteral("ファイルを開けませんでした。")));
         return;
     }
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        QMessageBox::warning(this, QStringLiteral("読み込みエラー"),
-                              QStringLiteral("JSONとして解釈できませんでした: %1").arg(parseError.errorString()));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("読み込みエラー")),
+                              I18n::t(QStringLiteral("JSONとして解釈できませんでした: %1")).arg(parseError.errorString()));
         return;
     }
     const QJsonObject root = doc.object();
@@ -1856,8 +1894,8 @@ void MainWindow::onLoadPreset()
 
     const QString hint = root["targetAppNameHint"].toString();
     appendLog(hint.isEmpty()
-                  ? QStringLiteral("テスト設定を読み込みました: %1").arg(path)
-                  : QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
-                                    "①で対象ウィンドウを選び直してください）")
+                  ? I18n::t(QStringLiteral("テスト設定を読み込みました: %1")).arg(path)
+                  : I18n::t(QStringLiteral("テスト設定を読み込みました: %1（保存時の対象アプリ: %2 -- "
+                                    "①で対象ウィンドウを選び直してください）"))
                         .arg(path, hint));
 }

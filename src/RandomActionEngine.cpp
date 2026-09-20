@@ -2,6 +2,9 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
+#include <QFont>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QKeySequence>
@@ -13,6 +16,7 @@
 #include <QtMath>
 
 #include "platform/PlatformAutomation.h"
+#include "I18n.h"
 
 namespace
 {
@@ -38,21 +42,21 @@ bool parseShortcut(const QString &text, Qt::Key &outKey, Qt::KeyboardModifiers &
 QString RandomActionEngine::formatSummaryText(const RunSummary &summary)
 {
     QStringList lines;
-    lines << QStringLiteral("==== 実行結果サマリー ====");
-    lines << QStringLiteral("停止理由: %1%2")
-                 .arg(summary.stopReason, summary.anomaly ? QStringLiteral("（異常停止）") : QString());
-    lines << QStringLiteral("実行回数（全ステップ合計）: %1").arg(summary.totalIterations);
-    lines << QStringLiteral("完走したシーケンス回数: %1").arg(summary.sequenceLoopsCompleted);
-    lines << QStringLiteral("経過時間: %1 秒").arg(summary.elapsedMs / 1000.0, 0, 'f', 1);
-    lines << QStringLiteral("使用した乱数シード: %1").arg(summary.rngSeedUsed);
+    lines << I18n::t(QStringLiteral("==== 実行結果サマリー ===="));
+    lines << I18n::t(QStringLiteral("停止理由: %1%2"))
+                 .arg(summary.stopReason, summary.anomaly ? I18n::t(QStringLiteral("（異常停止）")) : QString());
+    lines << I18n::t(QStringLiteral("実行回数（全ステップ合計）: %1")).arg(summary.totalIterations);
+    lines << I18n::t(QStringLiteral("完走したシーケンス回数: %1")).arg(summary.sequenceLoopsCompleted);
+    lines << I18n::t(QStringLiteral("経過時間: %1 秒")).arg(summary.elapsedMs / 1000.0, 0, 'f', 1);
+    lines << I18n::t(QStringLiteral("使用した乱数シード: %1")).arg(summary.rngSeedUsed);
     if (summary.anomaly && !summary.anomalyArtifactTimestamp.isEmpty()) {
-        lines << QStringLiteral("異常停止時の記録一式: %1 内の「anomaly_%2」で始まるファイル/フォルダ")
+        lines << I18n::t(QStringLiteral("異常停止時の記録一式: %1 内の「anomaly_%2」で始まるファイル/フォルダ"))
                      .arg(RandomActionEngine::anomalyArtifactsDirectory(), summary.anomalyArtifactTimestamp);
     }
     if (summary.actionKindCounts.isEmpty()) {
-        lines << QStringLiteral("操作種別ごとの回数: (なし)");
+        lines << I18n::t(QStringLiteral("操作種別ごとの回数: (なし)"));
     } else {
-        lines << QStringLiteral("操作種別ごとの回数:");
+        lines << I18n::t(QStringLiteral("操作種別ごとの回数:"));
         for (auto it = summary.actionKindCounts.constBegin(); it != summary.actionKindCounts.constEnd();
              ++it)
             lines << QStringLiteral("  %1: %2").arg(it.key()).arg(it.value());
@@ -150,13 +154,13 @@ void RandomActionEngine::start(const TestConfig &config)
     m_rng.seed(seed);
     m_rngSeedUsed = seed;
     m_actionKindCounts.clear();
-    emit logMessage(QStringLiteral("乱数シード: %1（クラッシュ等の再現に使う場合はこの値を記録してください）")
+    emit logMessage(I18n::t(QStringLiteral("乱数シード: %1（クラッシュ等の再現に使う場合はこの値を記録してください）"))
                          .arg(seed));
 
     if (m_config.keepTargetActive)
         PlatformAutomation::activateProcess(m_config.targetPid);
 
-    emit logMessage(QStringLiteral("テストを開始しました（ステップ数: %1）").arg(m_config.steps.size()));
+    emit logMessage(I18n::t(QStringLiteral("テストを開始しました（ステップ数: %1）")).arg(m_config.steps.size()));
     emit iterationCountChanged(m_iterationCount);
     if (!m_config.steps.isEmpty())
         emit currentStepChanged(m_currentStepIndex);
@@ -164,7 +168,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_resourceTimer.start();
     m_hangCheckTimer.start();
     if (m_config.enableScreenRecording) {
-        emit logMessage(QStringLiteral("画面録画（直近%1秒分をリングバッファ保持）を有効にしました")
+        emit logMessage(I18n::t(QStringLiteral("画面録画（直近%1秒分をリングバッファ保持）を有効にしました"))
                              .arg(kRecordingFrameIntervalMs * kMaxRecordingFrames / 1000));
         m_recordingTimer.start();
     }
@@ -174,7 +178,7 @@ void RandomActionEngine::stop()
 {
     if (!m_running)
         return;
-    doStop(QStringLiteral("ユーザーにより停止されました"));
+    doStop(I18n::t(QStringLiteral("ユーザーにより停止されました")));
 }
 
 void RandomActionEngine::pause()
@@ -187,7 +191,7 @@ void RandomActionEngine::pause()
     m_resourceTimer.stop();
     m_hangCheckTimer.stop();
     emit pausedChanged(true);
-    emit logMessage(QStringLiteral("一時停止しました"));
+    emit logMessage(I18n::t(QStringLiteral("一時停止しました")));
 }
 
 void RandomActionEngine::resume()
@@ -197,7 +201,7 @@ void RandomActionEngine::resume()
     m_paused = false;
     m_elapsed.restart();
     emit pausedChanged(false);
-    emit logMessage(QStringLiteral("再開しました"));
+    emit logMessage(I18n::t(QStringLiteral("再開しました")));
     scheduleNext();
     m_resourceTimer.start();
     m_hangCheckTimer.start();
@@ -206,15 +210,15 @@ void RandomActionEngine::resume()
 QString RandomActionEngine::describeActionKind(ActionKind kind) const
 {
     switch (kind) {
-    case ActionKind::Click: return QStringLiteral("クリック");
-    case ActionKind::DoubleClick: return QStringLiteral("ダブルクリック");
-    case ActionKind::Drag: return QStringLiteral("ドラッグ");
-    case ActionKind::Key: return QStringLiteral("キー入力");
-    case ActionKind::ScrollUp: return QStringLiteral("スクロール(上)");
-    case ActionKind::ScrollDown: return QStringLiteral("スクロール(下)");
-    case ActionKind::ScrollHorizontal: return QStringLiteral("スクロール(横)");
-    case ActionKind::Shortcut: return QStringLiteral("ショートカット");
-    case ActionKind::WindowOp: return QStringLiteral("ウィンドウ操作");
+    case ActionKind::Click: return I18n::t(QStringLiteral("クリック"));
+    case ActionKind::DoubleClick: return I18n::t(QStringLiteral("ダブルクリック"));
+    case ActionKind::Drag: return I18n::t(QStringLiteral("ドラッグ"));
+    case ActionKind::Key: return I18n::t(QStringLiteral("キー入力"));
+    case ActionKind::ScrollUp: return I18n::t(QStringLiteral("スクロール(上)"));
+    case ActionKind::ScrollDown: return I18n::t(QStringLiteral("スクロール(下)"));
+    case ActionKind::ScrollHorizontal: return I18n::t(QStringLiteral("スクロール(横)"));
+    case ActionKind::Shortcut: return I18n::t(QStringLiteral("ショートカット"));
+    case ActionKind::WindowOp: return I18n::t(QStringLiteral("ウィンドウ操作"));
     }
     return QString();
 }
@@ -256,7 +260,7 @@ QString RandomActionEngine::captureAnomalyArtifacts(const QString &reason)
     Q_UNUSED(reason);
     const QString baseDir = anomalyArtifactsDirectory();
     if (!QDir().mkpath(baseDir)) {
-        emit logMessage(QStringLiteral("異常停止時の記録の保存先作成に失敗しました: %1").arg(baseDir));
+        emit logMessage(I18n::t(QStringLiteral("異常停止時の記録の保存先作成に失敗しました: %1")).arg(baseDir));
         return QString();
     }
 
@@ -275,10 +279,9 @@ QString RandomActionEngine::captureAnomalyArtifacts(const QString &reason)
 
     if (!savedPaths.isEmpty()) {
         emit logMessage(
-            QStringLiteral("異常検知時のスクリーンショットを保存しました: %1").arg(savedPaths.join(QStringLiteral(", "))));
+            I18n::t(QStringLiteral("異常検知時のスクリーンショットを保存しました: %1")).arg(savedPaths.join(QStringLiteral(", "))));
     } else {
-        emit logMessage(QStringLiteral(
-            "スクリーンショットの保存に失敗しました（macOSでは画面収録の権限が必要な場合があります）"));
+        emit logMessage(I18n::t(QStringLiteral("スクリーンショットの保存に失敗しました（macOSでは画面収録の権限が必要な場合があります）")));
     }
 
     if (m_config.enableScreenRecording)
@@ -288,17 +291,28 @@ QString RandomActionEngine::captureAnomalyArtifacts(const QString &reason)
         const QString crashReportPath =
             PlatformAutomation::findRecentCrashReport(m_config.targetPid, m_config.targetAppName);
         if (!crashReportPath.isEmpty()) {
-            emit logMessage(QStringLiteral("対象アプリのものと思われるクラッシュレポートを見つけました: %1")
+            emit logMessage(I18n::t(QStringLiteral("対象アプリのものと思われるクラッシュレポートを見つけました: %1"))
                                  .arg(crashReportPath));
+            // Non-admin Linux users commonly can list systemd-coredump's
+            // directory (world-searchable) but not read the individual
+            // files inside it (typically root-owned, mode 0640 or
+            // stricter) -- confirmed by direct testing (SPEC.md "非管理者
+            // Linuxユーザーでの動作"). Warn about that now rather than
+            // silently recording a path the user won't actually be able to
+            // open later.
+            if (!QFileInfo(crashReportPath).isReadable()) {
+                emit logMessage(I18n::t(QStringLiteral(
+                    "このファイルは現在のユーザー権限では読み取れません（root権限、またはcoredumpctl等の"
+                    "専用ツールが必要な場合があります）。パスの記録のみ行いました。")));
+            }
             const QString refPath =
                 QStringLiteral("%1/anomaly_%2_crashreport_location.txt").arg(baseDir, timestamp);
             QFile refFile(refPath);
             if (refFile.open(QIODevice::WriteOnly | QIODevice::Text))
                 refFile.write(crashReportPath.toUtf8());
         } else {
-            emit logMessage(QStringLiteral(
-                "対象アプリのクラッシュレポート/コアダンプは見つかりませんでした"
-                "（このシステムでその機能自体が無効になっている可能性があります）"));
+            emit logMessage(I18n::t(QStringLiteral("対象アプリのクラッシュレポート/コアダンプは見つかりませんでした"
+                "（このシステムでその機能自体が無効になっている可能性があります）")));
         }
     }
 
@@ -312,7 +326,7 @@ void RandomActionEngine::saveRecordingFrames(const QString &timestamp)
 
     const QString dir = QStringLiteral("%1/anomaly_%2_recording").arg(anomalyArtifactsDirectory(), timestamp);
     if (!QDir().mkpath(dir)) {
-        emit logMessage(QStringLiteral("録画フレームの保存先作成に失敗しました: %1").arg(dir));
+        emit logMessage(I18n::t(QStringLiteral("録画フレームの保存先作成に失敗しました: %1")).arg(dir));
         return;
     }
 
@@ -322,7 +336,7 @@ void RandomActionEngine::saveRecordingFrames(const QString &timestamp)
         if (m_recordingFrames[i].save(path))
             ++saved;
     }
-    emit logMessage(QStringLiteral("異常停止直前の画面録画（%1フレーム、約%2秒分）を保存しました: %3")
+    emit logMessage(I18n::t(QStringLiteral("異常停止直前の画面録画（%1フレーム、約%2秒分）を保存しました: %3"))
                          .arg(saved)
                          .arg(saved * kRecordingFrameIntervalMs / 1000)
                          .arg(dir));
@@ -367,21 +381,20 @@ void RandomActionEngine::checkTargetResponsiveness()
             // of treating "never worked" the same as "stopped working".
             ++m_neverRespondedStrikes;
             if (m_neverRespondedStrikes >= 3) {
-                emit logMessage(QStringLiteral(
-                    "対象アプリが応答確認（WM_PING）に一度も応答しないため、ハング検知を無効にします"
-                    "（対応していないツールキット/実装の可能性があります）"));
+                emit logMessage(I18n::t(QStringLiteral("対象アプリが応答確認（WM_PING）に一度も応答しないため、ハング検知を無効にします"
+                    "（対応していないツールキット/実装の可能性があります）")));
                 m_hangCheckTimer.stop();
             }
             return;
         }
         ++m_consecutiveUnresponsive;
         emit logMessage(
-            QStringLiteral("対象アプリの応答確認に失敗しました（%1回連続）").arg(m_consecutiveUnresponsive));
+            I18n::t(QStringLiteral("対象アプリの応答確認に失敗しました（%1回連続）")).arg(m_consecutiveUnresponsive));
         // Require two consecutive misses (~2 check intervals) before
         // treating this as a real hang rather than one slow/busy moment --
         // see the interval comment in the constructor.
         if (m_consecutiveUnresponsive >= 2) {
-            doStop(QStringLiteral("対象アプリが応答していない（ハング）ことを検知したため停止しました"),
+            doStop(I18n::t(QStringLiteral("対象アプリが応答していない（ハング）ことを検知したため停止しました")),
                    /*isAnomaly=*/true);
         }
     } else {
@@ -413,7 +426,7 @@ void RandomActionEngine::sampleResourceUsage()
     m_hasCpuSample = true;
 
     emit resourceUsageUpdated(stats.residentMemoryMB, cpuPercent);
-    emit logMessage(QStringLiteral("リソース使用状況: メモリ %1 MB, CPU %2%")
+    emit logMessage(I18n::t(QStringLiteral("リソース使用状況: メモリ %1 MB, CPU %2%"))
                          .arg(stats.residentMemoryMB, 0, 'f', 1)
                          .arg(cpuPercent, 0, 'f', 1));
 }
@@ -468,7 +481,7 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
     return false;  // referenced named region no longer exists
 }
 
-void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel,
+void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel, const QString &regionName,
                                                         const QList<QRect> &includeRegions,
                                                         const QList<QRect> &excludeRegions)
 {
@@ -490,12 +503,13 @@ void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel,
     if (!shouldCapture)
         return;
 
-    const QPixmap shot = renderRegionScreenshot(includeRegions, excludeRegions);
+    const QPixmap shot = renderRegionScreenshot(regionName, includeRegions, excludeRegions);
     if (shot.isNull())
         return;
 
     m_lastCapturedScreenshot = shot;
     m_lastCapturedScreenshotLabel = stepLabel;
+    m_lastCapturedScreenshotRegionName = regionName;
     m_hasCapturedScreenshot = true;
     m_capturedThisRun = true;
     m_lastScreenshotStepIndex = m_currentStepIndex;
@@ -523,7 +537,31 @@ QPixmap RandomActionEngine::grabTargetWindowScreenshot() const
                                localBounds.height());
 }
 
-QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRegions,
+namespace
+{
+// Draws `text` in a small filled background box anchored at `rect`'s
+// top-left corner (SPEC.md "保存するPNGの操作領域に名前を付ける") so the
+// region/exclude-mask name is legible directly on the saved image, not just
+// in its file name. Placed just inside the box's border rather than above
+// it, so it stays on-image even when the box touches the screenshot's edge.
+void drawRegionLabel(QPainter &painter, const QRect &rect, const QString &text, const QColor &background)
+{
+    if (text.isEmpty())
+        return;
+    QFont font = painter.font();
+    font.setPointSize(9);
+    font.setBold(true);
+    painter.setFont(font);
+    const QFontMetrics fm(font);
+    const QSize textSize = fm.size(Qt::TextSingleLine, text);
+    const QRect labelRect(rect.left() + 2, rect.top() + 2, textSize.width() + 6, textSize.height() + 4);
+    painter.fillRect(labelRect, background);
+    painter.setPen(Qt::white);
+    painter.drawText(labelRect, Qt::AlignCenter, text);
+}
+}  // namespace
+
+QPixmap RandomActionEngine::renderRegionScreenshot(const QString &regionName, const QList<QRect> &includeRegions,
                                                      const QList<QRect> &excludeRegions) const
 {
     if (includeRegions.isEmpty())
@@ -538,18 +576,36 @@ QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRe
         return shot;
 
     QPainter painter(&shot);
-    QPen includePen(QColor(0, 200, 0));
+    const QColor includeColor(0, 200, 0);
+    const QColor excludeColor(220, 0, 0);
+
+    QPen includePen(includeColor);
     includePen.setWidth(3);
     painter.setPen(includePen);
-    for (const QRect &r : includeRegions)
-        painter.drawRect(r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2));
+    QList<QRect> localIncludeRects;
+    for (const QRect &r : includeRegions) {
+        const QRect local = r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2);
+        painter.drawRect(local);
+        localIncludeRects << local;
+    }
 
-    QPen excludePen(QColor(220, 0, 0));
+    QPen excludePen(excludeColor);
     excludePen.setWidth(2);
     excludePen.setStyle(Qt::DashLine);
     painter.setPen(excludePen);
-    for (const QRect &r : excludeRegions)
-        painter.drawRect(r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2));
+    QList<QRect> localExcludeRects;
+    for (const QRect &r : excludeRegions) {
+        const QRect local = r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2);
+        painter.drawRect(local);
+        localExcludeRects << local;
+    }
+
+    // Labels drawn after all rectangles so they sit on top of overlapping
+    // include/exclude borders rather than getting drawn over by them.
+    for (const QRect &local : localIncludeRects)
+        drawRegionLabel(painter, local, regionName, includeColor);
+    for (const QRect &local : localExcludeRects)
+        drawRegionLabel(painter, local, I18n::t(QStringLiteral("除外")), excludeColor);
 
     return shot;
 }
@@ -657,9 +713,9 @@ void RandomActionEngine::advanceToNextStep()
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
     if (m_currentStepIndex == 0) {
         ++m_sequenceLoopCount;
-        emit logMessage(QStringLiteral("シーケンス %1 回目の実行を開始します").arg(m_sequenceLoopCount + 1));
+        emit logMessage(I18n::t(QStringLiteral("シーケンス %1 回目の実行を開始します")).arg(m_sequenceLoopCount + 1));
     }
-    emit logMessage(QStringLiteral("ステップ %1 へ移行します").arg(m_currentStepIndex + 1));
+    emit logMessage(I18n::t(QStringLiteral("ステップ %1 へ移行します")).arg(m_currentStepIndex + 1));
     emit currentStepChanged(m_currentStepIndex);
 }
 
@@ -681,9 +737,8 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
     // 150ms, clicking into "the" menu (or even just sending Escape) could
     // affect a different app entirely.
     if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
-        doStop(QStringLiteral(
-                   "メニュー選択の直前に対象アプリがアクティブでなくなったため、安全のため"
-                   "テストを停止しました"),
+        doStop(I18n::t(QStringLiteral("メニュー選択の直前に対象アプリがアクティブでなくなったため、安全のため"
+                   "テストを停止しました")),
                /*isAnomaly=*/true);
         return true;
     }
@@ -702,7 +757,7 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
                 const QString chosen = matches[int(m_rng.bounded(quint32(matches.size())))];
                 selected = PlatformAutomation::clickContextMenuItem(chosen, m_config.targetPid);
                 if (selected)
-                    desc += QStringLiteral(" → メニュー項目「%1」を選択").arg(chosen);
+                    desc += I18n::t(QStringLiteral(" → メニュー項目「%1」を選択")).arg(chosen);
             }
         } else {  // ByIndex
             QList<int> validIndices;
@@ -715,7 +770,7 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
                 const int chosen = validIndices[int(m_rng.bounded(quint32(validIndices.size())))];
                 selected = PlatformAutomation::clickContextMenuItemAt(chosen, m_config.targetPid);
                 if (selected)
-                    desc += QStringLiteral(" → メニュー項目(上から%1番目)を選択").arg(chosen + 1);
+                    desc += I18n::t(QStringLiteral(" → メニュー項目(上から%1番目)を選択")).arg(chosen + 1);
             }
         }
     }
@@ -758,15 +813,14 @@ bool RandomActionEngine::handleUnexpectedWindows()
 
     ++m_unexpectedWindowStrikes;
     if (m_unexpectedWindowStrikes >= kMaxUnexpectedWindowStrikes) {
-        doStop(QStringLiteral("対象アプリに予期しないウィンドウ（ダイアログ等）が開いたまま閉じられない"
-                              "ため、安全のためテストを停止しました"),
+        doStop(I18n::t(QStringLiteral("対象アプリに予期しないウィンドウ（ダイアログ等）が開いたまま閉じられない"
+                              "ため、安全のためテストを停止しました")),
                /*isAnomaly=*/true);
         return true;
     }
 
-    emit logMessage(QStringLiteral(
-        "対象アプリに予期しないウィンドウ（ダイアログ等）を検出しました。Escapeで閉じてみます"
-        "（%1/%2回目）")
+    emit logMessage(I18n::t(QStringLiteral("対象アプリに予期しないウィンドウ（ダイアログ等）を検出しました。Escapeで閉じてみます"
+        "（%1/%2回目）"))
                          .arg(m_unexpectedWindowStrikes)
                          .arg(kMaxUnexpectedWindowStrikes));
     PlatformAutomation::dismissContextMenu();  // generic "send Escape", not menu-specific
@@ -781,26 +835,26 @@ void RandomActionEngine::performRandomAction()
 
     if (m_config.maxDurationSec > 0 &&
         (m_pausedElapsedMs + m_elapsed.elapsed()) / 1000 >= m_config.maxDurationSec) {
-        doStop(QStringLiteral("時間制限に達したため停止しました"));
+        doStop(I18n::t(QStringLiteral("時間制限に達したため停止しました")));
         return;
     }
     if (m_config.maxIterations > 0 && m_iterationCount >= m_config.maxIterations) {
-        doStop(QStringLiteral("回数制限に達したため停止しました"));
+        doStop(I18n::t(QStringLiteral("回数制限に達したため停止しました")));
         return;
     }
     if (m_config.maxSequenceLoops > 0 && m_sequenceLoopCount >= m_config.maxSequenceLoops) {
-        doStop(QStringLiteral("シーケンスの繰り返し回数の上限に達したため停止しました"));
+        doStop(I18n::t(QStringLiteral("シーケンスの繰り返し回数の上限に達したため停止しました")));
         return;
     }
     if (!PlatformAutomation::isProcessRunning(m_config.targetPid)) {
-        doStop(QStringLiteral("対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました"),
+        doStop(I18n::t(QStringLiteral("対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました")),
                /*isAnomaly=*/true);
         return;
     }
     if (handleUnexpectedWindows())
         return;
     if (m_config.steps.isEmpty()) {
-        doStop(QStringLiteral("ステップが設定されていません"));
+        doStop(I18n::t(QStringLiteral("ステップが設定されていません")));
         return;
     }
 
@@ -812,7 +866,7 @@ void RandomActionEngine::performRandomAction()
         // increment), and the wait itself replaces the usual randomized
         // scheduleNext() delay before the next step's first action.
         emit logMessage(
-            QStringLiteral("ステップ %1: %2 ms 待機します").arg(m_currentStepIndex + 1).arg(step.waitDurationMs));
+            I18n::t(QStringLiteral("ステップ %1: %2 ms 待機します")).arg(m_currentStepIndex + 1).arg(step.waitDurationMs));
         advanceToNextStep();
         m_timer.start(qMax(1, step.waitDurationMs));
         return;
@@ -826,7 +880,7 @@ void RandomActionEngine::performRandomAction()
     QString desc;
     ActionKind kind;
     const ActionOutcome outcome =
-        runOneAction(step, QStringLiteral("ステップ %1").arg(m_currentStepIndex + 1), desc, kind);
+        runOneAction(step, I18n::t(QStringLiteral("ステップ %1")).arg(m_currentStepIndex + 1), desc, kind);
     if (outcome == ActionOutcome::StoppedEngine)
         return;
     if (outcome == ActionOutcome::SkippedNoCount) {
@@ -850,13 +904,13 @@ void RandomActionEngine::performRandomAction()
 void RandomActionEngine::performGroupAction(const RegionStep &group)
 {
     if (group.groupMembers.isEmpty()) {
-        doStop(QStringLiteral("ステップ %1（グループ）にステップが登録されていません").arg(m_currentStepIndex + 1));
+        doStop(I18n::t(QStringLiteral("ステップ %1（グループ）にステップが登録されていません")).arg(m_currentStepIndex + 1));
         return;
     }
 
     const int memberIndex = pickWeightedGroupMemberIndex(group);
     const RegionStep &member = group.groupMembers[memberIndex];
-    const QString label = QStringLiteral("ステップ %1（グループ内メンバー %2）")
+    const QString label = I18n::t(QStringLiteral("ステップ %1（グループ内メンバー %2）"))
                                .arg(m_currentStepIndex + 1)
                                .arg(memberIndex + 1);
 
@@ -907,20 +961,22 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     QList<QRect> includeRegions;
     QList<QRect> excludeRegions;
     if (!resolveStepRegion(step, includeRegions, excludeRegions) || includeRegions.isEmpty()) {
-        doStop(QStringLiteral("%1の対象領域が見つからないため停止しました（対象ウィンドウが"
-                              "消失した、または参照している操作領域が削除された可能性があります）")
+        doStop(I18n::t(QStringLiteral("%1の対象領域が見つからないため停止しました（対象ウィンドウが"
+                              "消失した、または参照している操作領域が削除された可能性があります）"))
                    .arg(stepLabel),
                /*isAnomaly=*/true);
         return ActionOutcome::StoppedEngine;
     }
 
-    maybeCaptureRegionScreenshot(stepLabel, includeRegions, excludeRegions);
+    const QString regionName =
+        step.useWholeWindow ? I18n::t(QStringLiteral("対象GUIの全領域")) : step.regionName;
+    maybeCaptureRegionScreenshot(stepLabel, regionName, includeRegions, excludeRegions);
 
     if (m_config.keepTargetActive)
         PlatformAutomation::activateProcess(m_config.targetPid);
 
     if (!step.hasAnyActionEnabled()) {
-        doStop(QStringLiteral("%1に有効な操作がありません").arg(stepLabel));
+        doStop(I18n::t(QStringLiteral("%1に有効な操作がありません")).arg(stepLabel));
         return ActionOutcome::StoppedEngine;
     }
     const ActionKind kind = pickWeightedActionKind(step);
@@ -932,7 +988,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                                  kind == ActionKind::ScrollDown || kind == ActionKind::ScrollHorizontal;
     if (!ok && kindNeedsPoint) {
         emit logMessage(
-            QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）"));
+            I18n::t(QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）")));
         return ActionOutcome::SkippedNoCount;
     }
 
@@ -943,16 +999,14 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     // or when it can't be positively confirmed -- see SPEC.md 6.7.
     if (kindNeedsPoint) {
         if (PlatformAutomation::windowPidAtPoint(pt) != m_config.targetPid) {
-            doStop(QStringLiteral(
-                       "対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました"),
+            doStop(I18n::t(QStringLiteral("対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました")),
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
     } else if (kind == ActionKind::Key || kind == ActionKind::Shortcut) {
         if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
-            doStop(QStringLiteral(
-                       "対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
-                       "安全のためテストを停止しました"),
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
+                       "安全のためテストを停止しました")),
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
@@ -972,8 +1026,8 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const Qt::MouseButton btn = buttons[m_rng.bounded(quint32(buttons.size()))];
 
         PlatformAutomation::mouseClick(pt, btn);
-        desc = QStringLiteral("クリック(%1) at (%2, %3)")
-                   .arg(btn == Qt::RightButton ? QStringLiteral("右") : QStringLiteral("左"))
+        desc = I18n::t(QStringLiteral("クリック(%1) at (%2, %3)"))
+                   .arg(btn == Qt::RightButton ? I18n::t(QStringLiteral("右")) : I18n::t(QStringLiteral("左")))
                    .arg(pt.x())
                    .arg(pt.y());
 
@@ -989,7 +1043,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
         QThread::msleep(80);
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
-        desc = QStringLiteral("ダブルクリック at (%1, %2)").arg(pt.x()).arg(pt.y());
+        desc = I18n::t(QStringLiteral("ダブルクリック at (%1, %2)")).arg(pt.x()).arg(pt.y());
         break;
     }
     case ActionKind::Drag: {
@@ -1021,8 +1075,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         to.setY(qBound(bounds.top(), to.y(), bounds.bottom()));
 
         if (PlatformAutomation::windowPidAtPoint(to) != m_config.targetPid) {
-            doStop(QStringLiteral(
-                       "ドラッグ先が対象アプリ以外のウィンドウになりそうなため、安全のためテストを停止しました"),
+            doStop(I18n::t(QStringLiteral("ドラッグ先が対象アプリ以外のウィンドウになりそうなため、安全のためテストを停止しました")),
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
@@ -1030,7 +1083,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const Qt::MouseButton btn =
             (step.enableRightClick && m_rng.bounded(2u) == 0) ? Qt::RightButton : Qt::LeftButton;
         PlatformAutomation::mouseDrag(pt, to, btn, 12);
-        desc = QStringLiteral("ドラッグ (%1, %2) → (%3, %4)").arg(pt.x()).arg(pt.y()).arg(to.x()).arg(to.y());
+        desc = I18n::t(QStringLiteral("ドラッグ (%1, %2) → (%3, %4)")).arg(pt.x()).arg(pt.y()).arg(to.x()).arg(to.y());
 
         if (btn == Qt::RightButton) {
             // A right-button drag can pop the same kind of context/popup
@@ -1061,18 +1114,18 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const int totalPool = chars.size() + namedKeys.size();
         if (totalPool == 0) {
             emit logMessage(
-                QStringLiteral("キー入力の候補がありません（使用文字・名前付きキーのいずれも未設定）"));
+                I18n::t(QStringLiteral("キー入力の候補がありません（使用文字・名前付きキーのいずれも未設定）")));
             return ActionOutcome::SkippedNoCount;
         }
         const int index = int(m_rng.bounded(quint32(totalPool)));
         if (index < chars.size()) {
             const QChar ch = chars[index];
             PlatformAutomation::keyTap(ch);
-            desc = QStringLiteral("キー入力 '%1'").arg(ch);
+            desc = I18n::t(QStringLiteral("キー入力 '%1'")).arg(ch);
         } else {
             const Qt::Key namedKey = namedKeys[index - chars.size()];
             PlatformAutomation::keyTapNamed(namedKey);
-            desc = QStringLiteral("キー入力 [%1]").arg(QKeySequence(namedKey).toString());
+            desc = I18n::t(QStringLiteral("キー入力 [%1]")).arg(QKeySequence(namedKey).toString());
         }
         break;
     }
@@ -1082,7 +1135,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const int amount = qMax(1, lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0));
         const int dy = amount;  // positive == scroll up, matching both backends' wheel-event convention
         PlatformAutomation::scroll(pt, 0, dy);
-        desc = QStringLiteral("スクロール(上) at (%1, %2) dy=%3").arg(pt.x()).arg(pt.y()).arg(dy);
+        desc = I18n::t(QStringLiteral("スクロール(上) at (%1, %2) dy=%3")).arg(pt.x()).arg(pt.y()).arg(dy);
         break;
     }
     case ActionKind::ScrollDown: {
@@ -1091,7 +1144,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const int amount = qMax(1, lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0));
         const int dy = -amount;  // negative == scroll down
         PlatformAutomation::scroll(pt, 0, dy);
-        desc = QStringLiteral("スクロール(下) at (%1, %2) dy=%3").arg(pt.x()).arg(pt.y()).arg(dy);
+        desc = I18n::t(QStringLiteral("スクロール(下) at (%1, %2) dy=%3")).arg(pt.x()).arg(pt.y()).arg(dy);
         break;
     }
     case ActionKind::ScrollHorizontal: {
@@ -1100,12 +1153,12 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const int amount = qMax(1, lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0));
         const int dx = m_rng.bounded(2u) == 0 ? amount : -amount;  // random left/right each time
         PlatformAutomation::scroll(pt, dx, 0);
-        desc = QStringLiteral("スクロール(横) at (%1, %2) dx=%3").arg(pt.x()).arg(pt.y()).arg(dx);
+        desc = I18n::t(QStringLiteral("スクロール(横) at (%1, %2) dx=%3")).arg(pt.x()).arg(pt.y()).arg(dx);
         break;
     }
     case ActionKind::Shortcut: {
         if (params.shortcutSequences.isEmpty()) {
-            emit logMessage(QStringLiteral("ショートカットが設定されていません"));
+            emit logMessage(I18n::t(QStringLiteral("ショートカットが設定されていません")));
             return ActionOutcome::SkippedNoCount;
         }
         const QString seqText =
@@ -1113,20 +1166,20 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         Qt::Key key = Qt::Key(0);
         Qt::KeyboardModifiers mods;
         if (!parseShortcut(seqText, key, mods)) {
-            emit logMessage(QStringLiteral("ショートカット '%1' を解釈できませんでした").arg(seqText));
+            emit logMessage(I18n::t(QStringLiteral("ショートカット '%1' を解釈できませんでした")).arg(seqText));
             return ActionOutcome::SkippedNoCount;
         }
         if (m_config.keepTargetActive)
             PlatformAutomation::activateProcess(m_config.targetPid);
         PlatformAutomation::keyShortcut(key, mods);
-        desc = QStringLiteral("ショートカット '%1'").arg(seqText);
+        desc = I18n::t(QStringLiteral("ショートカット '%1'")).arg(seqText);
         break;
     }
     case ActionKind::WindowOp: {
         QRect currentBounds;
         if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid,
                                                      currentBounds)) {
-            doStop(QStringLiteral("対象ウィンドウが見つからないため停止しました"), /*isAnomaly=*/true);
+            doStop(I18n::t(QStringLiteral("対象ウィンドウが見つからないため停止しました")), /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
 
@@ -1140,7 +1193,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         if (params.windowOpMaximize)
             opNames << QStringLiteral("maximize");
         if (opNames.isEmpty()) {
-            emit logMessage(QStringLiteral("ウィンドウ操作の種類が選択されていません"));
+            emit logMessage(I18n::t(QStringLiteral("ウィンドウ操作の種類が選択されていません")));
             return ActionOutcome::SkippedNoCount;
         }
         const QString op = opNames[int(m_rng.bounded(quint32(opNames.size())))];
@@ -1158,7 +1211,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             const QPoint newPos(minX + int(m_rng.bounded(quint32(qMax(1, maxX - minX + 1)))),
                                  minY + int(m_rng.bounded(quint32(qMax(1, maxY - minY + 1)))));
             PlatformAutomation::moveWindow(m_config.targetPid, m_config.targetWindowId, newPos);
-            desc = QStringLiteral("ウィンドウ移動 → (%1, %2)").arg(newPos.x()).arg(newPos.y());
+            desc = I18n::t(QStringLiteral("ウィンドウ移動 → (%1, %2)")).arg(newPos.x()).arg(newPos.y());
         } else if (op == QStringLiteral("resize")) {
             constexpr int kMinW = 200, kMinH = 150;
             const int maxW = qMax(kMinW, screenGeom.width());
@@ -1166,13 +1219,13 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             const QSize newSize(kMinW + int(m_rng.bounded(quint32(qMax(1, maxW - kMinW + 1)))),
                                  kMinH + int(m_rng.bounded(quint32(qMax(1, maxH - kMinH + 1)))));
             PlatformAutomation::resizeWindow(m_config.targetPid, m_config.targetWindowId, newSize);
-            desc = QStringLiteral("ウィンドウリサイズ → %1 x %2").arg(newSize.width()).arg(newSize.height());
+            desc = I18n::t(QStringLiteral("ウィンドウリサイズ → %1 x %2")).arg(newSize.width()).arg(newSize.height());
         } else if (op == QStringLiteral("minimize")) {
             PlatformAutomation::minimizeWindow(m_config.targetPid, m_config.targetWindowId);
-            desc = QStringLiteral("ウィンドウを最小化");
+            desc = I18n::t(QStringLiteral("ウィンドウを最小化"));
         } else {  // maximize
             PlatformAutomation::maximizeWindow(m_config.targetPid, m_config.targetWindowId);
-            desc = QStringLiteral("ウィンドウを最大化");
+            desc = I18n::t(QStringLiteral("ウィンドウを最大化"));
         }
         break;
     }
@@ -1190,7 +1243,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         QRect windowBounds;
         if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds)) {
             const QPoint rel = pt - windowBounds.topLeft();
-            desc += QStringLiteral(" [対象ウィンドウ相対: (%1, %2)]").arg(rel.x()).arg(rel.y());
+            desc += I18n::t(QStringLiteral(" [対象ウィンドウ相対: (%1, %2)]")).arg(rel.x()).arg(rel.y());
         }
         const QString widgetName = PlatformAutomation::accessibleNameAtPoint(pt);
         if (!widgetName.isEmpty())

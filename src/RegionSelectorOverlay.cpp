@@ -1,4 +1,5 @@
 #include "RegionSelectorOverlay.h"
+#include "I18n.h"
 
 #include <QApplication>
 #include <QEventLoop>
@@ -123,9 +124,8 @@ void RegionSelectorOverlay::paintEvent(QPaintEvent * /*event*/)
     p.setPen(Qt::white);
     p.setFont(QFont(font().family(), 14, QFont::Bold));
     const QString modeLabel =
-        (m_mode == Mode::Include) ? QStringLiteral("含める領域を選択中") : QStringLiteral("除外(マスク)領域を選択中");
-    const QString hint = QStringLiteral(
-        "%1  ―  ドラッグで矩形を追加（複数可） / Enter または右クリックで確定 / Esc でキャンセル")
+        (m_mode == Mode::Include) ? I18n::t(QStringLiteral("含める領域を選択中")) : I18n::t(QStringLiteral("除外(マスク)領域を選択中"));
+    const QString hint = I18n::t(QStringLiteral("%1  ―  ドラッグで矩形を追加（複数可） / Enter または右クリックで確定 / Esc でキャンセル"))
                               .arg(modeLabel);
     p.drawText(QRect(20, 16, width() - 40, 30), Qt::AlignLeft | Qt::AlignVCenter, hint);
 }

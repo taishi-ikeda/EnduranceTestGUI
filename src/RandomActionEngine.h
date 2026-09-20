@@ -83,6 +83,13 @@ public:
     // "ステップ2" or "ステップ1（グループ内メンバー2）" -- used to build a
     // sensible file name when saving it.
     QString lastRegionScreenshotLabel() const { return m_lastCapturedScreenshotLabel; }
+    // The operation region's own name (the NamedRegion's TestConfig::name,
+    // or "対象GUIの全領域" for a whole-window step) -- distinct from the
+    // step label above, and also drawn directly on the screenshot next to
+    // each include rectangle (see renderRegionScreenshot()) so a developer
+    // looking at the saved PNG can immediately tell which named region each
+    // box is, not just which step captured it.
+    QString lastRegionScreenshotRegionName() const { return m_lastCapturedScreenshotRegionName; }
 
 signals:
     void actionPerformed(const QString &description);
@@ -167,15 +174,20 @@ private:
     // runOneAction()) -- called on every action attempt, cheap to skip when
     // the mode's condition isn't met. Emits regionScreenshotCaptured() on
     // an actual capture.
-    void maybeCaptureRegionScreenshot(const QString &stepLabel, const QList<QRect> &includeRegions,
+    void maybeCaptureRegionScreenshot(const QString &stepLabel, const QString &regionName,
+                                       const QList<QRect> &includeRegions,
                                        const QList<QRect> &excludeRegions);
     // Grabs a screenshot of just the target window's current bounds and
     // draws `includeRegions` (solid green) / `excludeRegions` (dashed red)
     // on top of it in window-local coordinates, so the saved image shows
     // exactly where on the target app the operation region actually is.
+    // `regionName` (the NamedRegion's own name, or "対象GUIの全領域" for a
+    // whole-window step) is drawn as a small label at each include
+    // rectangle's top-left corner, so the region a box represents is
+    // legible directly from the image, not just from the file name.
     // Returns a null QPixmap if the target window's bounds or the screen it
     // is on can't currently be determined.
-    QPixmap renderRegionScreenshot(const QList<QRect> &includeRegions,
+    QPixmap renderRegionScreenshot(const QString &regionName, const QList<QRect> &includeRegions,
                                     const QList<QRect> &excludeRegions) const;
     // Just the grab, with no region overlay drawn on top -- shared by
     // renderRegionScreenshot() above and captureRecordingFrame() below, the
@@ -283,6 +295,7 @@ private:
     qint64 m_lastScreenshotIterationCount = -1;
     QPixmap m_lastCapturedScreenshot;
     QString m_lastCapturedScreenshotLabel;
+    QString m_lastCapturedScreenshotRegionName;
     bool m_hasCapturedScreenshot = false;
 
     // Rolling screen-recording buffer (SPEC.md 6.7/10, opt-in via

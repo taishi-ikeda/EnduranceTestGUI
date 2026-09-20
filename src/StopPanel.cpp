@@ -1,4 +1,5 @@
 #include "StopPanel.h"
+#include "I18n.h"
 
 #include <QGuiApplication>
 #include <QLabel>
@@ -12,10 +13,10 @@ StopPanel::StopPanel(QWidget *parent) : QWidget(parent)
     setAttribute(Qt::WA_ShowWithoutActivating);
 
     auto *layout = new QVBoxLayout(this);
-    m_countLabel = new QLabel(QStringLiteral("実行回数: 0"), this);
+    m_countLabel = new QLabel(I18n::t(QStringLiteral("実行回数: 0")), this);
     m_countLabel->setStyleSheet("color: white; font-weight: bold;");
 
-    auto *stopButton = new QPushButton(QStringLiteral("■ 停止 (STOP)"), this);
+    auto *stopButton = new QPushButton(I18n::t(QStringLiteral("■ 停止 (STOP)")), this);
     stopButton->setStyleSheet(
         "QPushButton { background-color: #d32f2f; color: white; font-weight: bold; "
         "font-size: 16px; padding: 10px; border-radius: 6px; }"
@@ -36,5 +37,5 @@ StopPanel::StopPanel(QWidget *parent) : QWidget(parent)
 
 void StopPanel::setIterationCount(qint64 count)
 {
-    m_countLabel->setText(QStringLiteral("実行回数: %1").arg(count));
+    m_countLabel->setText(I18n::t(QStringLiteral("実行回数: %1")).arg(count));
 }

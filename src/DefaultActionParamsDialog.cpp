@@ -9,12 +9,13 @@
 
 #include "ActionKindEditor.h"
 #include "ActionParamsEditor.h"
+#include "I18n.h"
 
 DefaultActionParamsDialog::DefaultActionParamsDialog(const RegionStep &initialKinds,
                                                        const ActionParams &initialParams, QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("デフォルトの操作設定"));
+    setWindowTitle(I18n::t(QStringLiteral("デフォルトの操作設定")));
 
     auto *layout = new QVBoxLayout(this);
 
@@ -25,11 +26,11 @@ DefaultActionParamsDialog::DefaultActionParamsDialog(const RegionStep &initialKi
     scroll->setWidget(scrollContent);
     auto *scrollLayout = new QVBoxLayout(scrollContent);
 
-    auto *kindGroup = new QGroupBox(QStringLiteral("デフォルトの操作種別・重み・回数"), scrollContent);
+    auto *kindGroup = new QGroupBox(I18n::t(QStringLiteral("デフォルトの操作種別・重み・回数")), scrollContent);
     auto *kindLayout = new QVBoxLayout(kindGroup);
     auto *kindHintLabel = new QLabel(
-        QStringLiteral("②で新しくステップを追加したときの初期値です。既存のステップには"
-                        "影響しません。"),
+        I18n::t(QStringLiteral("②で新しくステップを追加したときの初期値です。既存のステップには"
+                        "影響しません。")),
         kindGroup);
     kindHintLabel->setWordWrap(true);
     kindLayout->addWidget(kindHintLabel);
@@ -37,10 +38,10 @@ DefaultActionParamsDialog::DefaultActionParamsDialog(const RegionStep &initialKi
     kindLayout->addWidget(m_kindEditor);
     scrollLayout->addWidget(kindGroup);
 
-    auto *paramsGroup = new QGroupBox(QStringLiteral("デフォルトの操作の詳細設定"), scrollContent);
+    auto *paramsGroup = new QGroupBox(I18n::t(QStringLiteral("デフォルトの操作の詳細設定")), scrollContent);
     auto *paramsLayout = new QVBoxLayout(paramsGroup);
     auto *paramsHintLabel = new QLabel(
-        QStringLiteral("②で「デフォルトを使う」になっているすべてのステップに適用されます。"),
+        I18n::t(QStringLiteral("②で「デフォルトを使う」になっているすべてのステップに適用されます。")),
         paramsGroup);
     paramsHintLabel->setWordWrap(true);
     paramsLayout->addWidget(paramsHintLabel);

@@ -94,6 +94,8 @@ private slots:
     void onSavePreset();
     void onLoadPreset();
     void onGlobalEmergencyStop();
+    void onSelectLanguageJapanese();
+    void onSelectLanguageEnglish();
 
 private:
     void buildUi();
@@ -310,6 +312,8 @@ private:
     // alongside the rest of the ①②③ panels (setControlsEnabled()).
     QAction *m_savePresetAction = nullptr;
     QAction *m_loadPresetAction = nullptr;
+    QAction *m_languageJapaneseAction = nullptr;
+    QAction *m_languageEnglishAction = nullptr;
 
     // System-wide emergency-stop hotkey (Ctrl+Alt+Shift+Esc), a backstop
     // for the floating StopPanel button -- see GlobalHotkey.h and SPEC.md

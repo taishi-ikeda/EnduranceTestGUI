@@ -15,6 +15,7 @@
 #include "ActionKindEditor.h"
 #include "ActionParamsEditor.h"
 #include "StepEditorDialog.h"
+#include "I18n.h"
 
 namespace
 {
@@ -35,15 +36,15 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
       m_defaultActionKindsTemplate(defaultActionKindsTemplate),
       m_members(initialGroup.isGroup ? initialGroup.groupMembers : QList<RegionStep>())
 {
-    setWindowTitle(QStringLiteral("グループの編集"));
+    setWindowTitle(I18n::t(QStringLiteral("グループの編集")));
     resize(720, 560);
 
     auto *layout = new QVBoxLayout(this);
 
     auto *topRow = new QHBoxLayout;
     topRow->addWidget(new QLabel(
-        QStringLiteral("グループ全体の合計呼び出し回数（毎回ランダムに選ばれたメンバーが\n"
-                        "1操作ずつ実行され、この回数に達すると次のステップへ進みます）:"),
+        I18n::t(QStringLiteral("グループ全体の合計呼び出し回数（毎回ランダムに選ばれたメンバーが\n"
+                        "1操作ずつ実行され、この回数に達すると次のステップへ進みます）:")),
         this));
     m_totalCallCountSpin = new QSpinBox(this);
     m_totalCallCountSpin->setRange(1, 100000000);
@@ -56,20 +57,20 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
     auto *mainRow = new QHBoxLayout;
 
     auto *leftCol = new QVBoxLayout;
-    leftCol->addWidget(new QLabel(QStringLiteral("メンバー（各ステップの重みに応じてランダムに選ばれます）:"), this));
+    leftCol->addWidget(new QLabel(I18n::t(QStringLiteral("メンバー（各ステップの重みに応じてランダムに選ばれます）:")), this));
     m_memberListWidget = new QListWidget(this);
     leftCol->addWidget(m_memberListWidget, 1);
     auto *memberButtonsRow1 = new QHBoxLayout;
-    m_addMemberButton = new QPushButton(QStringLiteral("追加..."), this);
-    m_editMemberButton = new QPushButton(QStringLiteral("編集..."), this);
-    m_removeMemberButton = new QPushButton(QStringLiteral("削除"), this);
+    m_addMemberButton = new QPushButton(I18n::t(QStringLiteral("追加...")), this);
+    m_editMemberButton = new QPushButton(I18n::t(QStringLiteral("編集...")), this);
+    m_removeMemberButton = new QPushButton(I18n::t(QStringLiteral("削除")), this);
     memberButtonsRow1->addWidget(m_addMemberButton);
     memberButtonsRow1->addWidget(m_editMemberButton);
     memberButtonsRow1->addWidget(m_removeMemberButton);
     leftCol->addLayout(memberButtonsRow1);
     auto *memberButtonsRow2 = new QHBoxLayout;
-    m_moveMemberUpButton = new QPushButton(QStringLiteral("↑ 上へ"), this);
-    m_moveMemberDownButton = new QPushButton(QStringLiteral("↓ 下へ"), this);
+    m_moveMemberUpButton = new QPushButton(I18n::t(QStringLiteral("↑ 上へ")), this);
+    m_moveMemberDownButton = new QPushButton(I18n::t(QStringLiteral("↓ 下へ")), this);
     memberButtonsRow2->addWidget(m_moveMemberUpButton);
     memberButtonsRow2->addWidget(m_moveMemberDownButton);
     leftCol->addLayout(memberButtonsRow2);
@@ -81,13 +82,13 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
     auto *scrollContent = new QWidget;
     scroll->setWidget(scrollContent);
     auto *rightCol = new QVBoxLayout(scrollContent);
-    m_detailContextLabel = new QLabel(QStringLiteral("メンバー未選択"), scrollContent);
+    m_detailContextLabel = new QLabel(I18n::t(QStringLiteral("メンバー未選択")), scrollContent);
     m_detailContextLabel->setWordWrap(true);
     rightCol->addWidget(m_detailContextLabel);
 
     auto *weightRow = new QHBoxLayout;
     weightRow->addWidget(
-        new QLabel(QStringLiteral("グループ内での重み（大きいほど選ばれやすい）:"), scrollContent));
+        new QLabel(I18n::t(QStringLiteral("グループ内での重み（大きいほど選ばれやすい）:")), scrollContent));
     m_memberWeightSpin = new QSpinBox(scrollContent);
     m_memberWeightSpin->setRange(1, 100);
     weightRow->addWidget(m_memberWeightSpin);
@@ -103,15 +104,15 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
     rightCol->addWidget(m_kindEditor);
 
     auto *modeRow = new QHBoxLayout;
-    m_useDefaultParamsRadio = new QRadioButton(QStringLiteral("デフォルトを使う"), scrollContent);
-    m_useCustomParamsRadio = new QRadioButton(QStringLiteral("このステップ専用の設定を使う"), scrollContent);
+    m_useDefaultParamsRadio = new QRadioButton(I18n::t(QStringLiteral("デフォルトを使う")), scrollContent);
+    m_useCustomParamsRadio = new QRadioButton(I18n::t(QStringLiteral("このステップ専用の設定を使う")), scrollContent);
     modeRow->addWidget(m_useDefaultParamsRadio);
     modeRow->addWidget(m_useCustomParamsRadio);
     modeRow->addStretch();
     rightCol->addLayout(modeRow);
     auto *defaultsNoteLabel = new QLabel(
-        QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには①対象選択の"
-                        "「デフォルト」ボタンを使ってください。"),
+        I18n::t(QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには①対象選択の"
+                        "「デフォルト」ボタンを使ってください。")),
         scrollContent);
     defaultsNoteLabel->setWordWrap(true);
     rightCol->addWidget(defaultsNoteLabel);
@@ -154,34 +155,34 @@ QString StepGroupEditorDialog::describeMember(const RegionStep &member, int inde
 {
     QStringList actions;
     if (member.enableClick)
-        actions << QStringLiteral("クリック");
+        actions << I18n::t(QStringLiteral("クリック"));
     if (member.enableDoubleClick)
-        actions << QStringLiteral("ダブルクリック");
+        actions << I18n::t(QStringLiteral("ダブルクリック"));
     if (member.enableDrag)
-        actions << QStringLiteral("ドラッグ");
+        actions << I18n::t(QStringLiteral("ドラッグ"));
     if (member.enableKey)
-        actions << QStringLiteral("キー入力");
+        actions << I18n::t(QStringLiteral("キー入力"));
     if (member.enableScrollUp)
-        actions << QStringLiteral("スクロール(上)");
+        actions << I18n::t(QStringLiteral("スクロール(上)"));
     if (member.enableScrollDown)
-        actions << QStringLiteral("スクロール(下)");
+        actions << I18n::t(QStringLiteral("スクロール(下)"));
     if (member.enableScrollHorizontal)
-        actions << QStringLiteral("スクロール(横)");
+        actions << I18n::t(QStringLiteral("スクロール(横)"));
     if (member.enableShortcut)
-        actions << QStringLiteral("ショートカット");
+        actions << I18n::t(QStringLiteral("ショートカット"));
     if (member.enableWindowOp)
-        actions << QStringLiteral("ウィンドウ操作");
+        actions << I18n::t(QStringLiteral("ウィンドウ操作"));
 
     const QString regionDesc = member.useWholeWindow
-                                    ? QStringLiteral("対象GUIの全領域")
+                                    ? I18n::t(QStringLiteral("対象GUIの全領域"))
                                     : (member.regionName.isEmpty()
-                                           ? QStringLiteral("(未選択)")
-                                           : QStringLiteral("操作領域「%1」").arg(member.regionName));
+                                           ? I18n::t(QStringLiteral("(未選択)"))
+                                           : I18n::t(QStringLiteral("操作領域「%1」")).arg(member.regionName));
 
-    return QStringLiteral("メンバー%1: %2 | 操作: %3 | 重み: %4")
+    return I18n::t(QStringLiteral("メンバー%1: %2 | 操作: %3 | 重み: %4"))
         .arg(index + 1)
         .arg(regionDesc)
-        .arg(actions.isEmpty() ? QStringLiteral("(なし)") : actions.join(QStringLiteral(", ")))
+        .arg(actions.isEmpty() ? I18n::t(QStringLiteral("(なし)")) : actions.join(QStringLiteral(", ")))
         .arg(member.groupWeight);
 }
 
@@ -212,7 +213,7 @@ void StepGroupEditorDialog::loadMemberEditorForSelection()
 {
     const int row = m_memberListWidget->currentRow();
     if (row < 0 || row >= m_members.size()) {
-        m_detailContextLabel->setText(QStringLiteral("メンバー未選択"));
+        m_detailContextLabel->setText(I18n::t(QStringLiteral("メンバー未選択")));
         m_memberWeightSpin->setEnabled(false);
         m_kindEditor->setEnabled(false);
         m_useDefaultParamsRadio->setEnabled(false);
@@ -228,7 +229,7 @@ void StepGroupEditorDialog::loadMemberEditorForSelection()
     // which is connected straight to flushMemberEditor()).
     const RegionStep member = m_members[row];
 
-    m_detailContextLabel->setText(QStringLiteral("メンバー%1の操作種別・詳細設定を編集中").arg(row + 1));
+    m_detailContextLabel->setText(I18n::t(QStringLiteral("メンバー%1の操作種別・詳細設定を編集中")).arg(row + 1));
     m_memberWeightSpin->setEnabled(true);
     m_memberWeightSpin->blockSignals(true);
     m_memberWeightSpin->setValue(member.groupWeight);
@@ -266,8 +267,8 @@ void StepGroupEditorDialog::onAddMember()
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("ステップの設定エラー"),
-                              QStringLiteral("操作領域が選択されていません。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
 
@@ -293,8 +294,8 @@ void StepGroupEditorDialog::onEditSelectedMember()
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("ステップの設定エラー"),
-                              QStringLiteral("操作領域が選択されていません。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
 
@@ -352,8 +353,8 @@ void StepGroupEditorDialog::onAccept()
 {
     flushMemberEditor();
     if (m_members.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("入力エラー"),
-                              QStringLiteral("グループにステップを最低1つ追加してください。"));
+        QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                              I18n::t(QStringLiteral("グループにステップを最低1つ追加してください。")));
         return;
     }
     accept();

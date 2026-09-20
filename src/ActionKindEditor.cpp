@@ -1,4 +1,5 @@
 #include "ActionKindEditor.h"
+#include "I18n.h"
 
 #include <QCheckBox>
 #include <QHBoxLayout>
@@ -13,13 +14,13 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
 
     auto *weightHeaderRow = new QHBoxLayout;
     weightHeaderRow->addWidget(new QLabel(QString(), this), 1);
-    weightHeaderRow->addWidget(new QLabel(QStringLiteral("重み"), this));
+    weightHeaderRow->addWidget(new QLabel(I18n::t(QStringLiteral("重み")), this));
     layout->addLayout(weightHeaderRow);
 
     auto *clickRow = new QHBoxLayout;
-    m_clickCheck = new QCheckBox(QStringLiteral("クリック"), this);
-    m_leftClickCheck = new QCheckBox(QStringLiteral("左"), this);
-    m_rightClickCheck = new QCheckBox(QStringLiteral("右"), this);
+    m_clickCheck = new QCheckBox(I18n::t(QStringLiteral("クリック")), this);
+    m_leftClickCheck = new QCheckBox(I18n::t(QStringLiteral("左")), this);
+    m_rightClickCheck = new QCheckBox(I18n::t(QStringLiteral("右")), this);
     clickRow->addWidget(m_clickCheck);
     clickRow->addWidget(m_leftClickCheck);
     clickRow->addWidget(m_rightClickCheck);
@@ -30,7 +31,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(clickRow);
 
     auto *doubleClickRow = new QHBoxLayout;
-    m_doubleClickCheck = new QCheckBox(QStringLiteral("ダブルクリック（左のみ）"), this);
+    m_doubleClickCheck = new QCheckBox(I18n::t(QStringLiteral("ダブルクリック（左のみ）")), this);
     doubleClickRow->addWidget(m_doubleClickCheck);
     doubleClickRow->addStretch();
     m_doubleClickWeightSpin = new QSpinBox(this);
@@ -39,7 +40,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(doubleClickRow);
 
     auto *dragRow = new QHBoxLayout;
-    m_dragCheck = new QCheckBox(QStringLiteral("ドラッグ"), this);
+    m_dragCheck = new QCheckBox(I18n::t(QStringLiteral("ドラッグ")), this);
     dragRow->addWidget(m_dragCheck);
     dragRow->addStretch();
     m_dragWeightSpin = new QSpinBox(this);
@@ -48,7 +49,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(dragRow);
 
     auto *keyRow = new QHBoxLayout;
-    m_keyCheck = new QCheckBox(QStringLiteral("キー入力"), this);
+    m_keyCheck = new QCheckBox(I18n::t(QStringLiteral("キー入力")), this);
     keyRow->addWidget(m_keyCheck);
     keyRow->addStretch();
     m_keyWeightSpin = new QSpinBox(this);
@@ -57,7 +58,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(keyRow);
 
     auto *scrollUpRow = new QHBoxLayout;
-    m_scrollUpCheck = new QCheckBox(QStringLiteral("スクロール（上）"), this);
+    m_scrollUpCheck = new QCheckBox(I18n::t(QStringLiteral("スクロール（上）")), this);
     scrollUpRow->addWidget(m_scrollUpCheck);
     scrollUpRow->addStretch();
     m_scrollUpWeightSpin = new QSpinBox(this);
@@ -66,7 +67,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(scrollUpRow);
 
     auto *scrollDownRow = new QHBoxLayout;
-    m_scrollDownCheck = new QCheckBox(QStringLiteral("スクロール（下）"), this);
+    m_scrollDownCheck = new QCheckBox(I18n::t(QStringLiteral("スクロール（下）")), this);
     scrollDownRow->addWidget(m_scrollDownCheck);
     scrollDownRow->addStretch();
     m_scrollDownWeightSpin = new QSpinBox(this);
@@ -75,7 +76,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(scrollDownRow);
 
     auto *scrollHorizontalRow = new QHBoxLayout;
-    m_scrollHorizontalCheck = new QCheckBox(QStringLiteral("スクロール（横）"), this);
+    m_scrollHorizontalCheck = new QCheckBox(I18n::t(QStringLiteral("スクロール（横）")), this);
     scrollHorizontalRow->addWidget(m_scrollHorizontalCheck);
     scrollHorizontalRow->addStretch();
     m_scrollHorizontalWeightSpin = new QSpinBox(this);
@@ -84,7 +85,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(scrollHorizontalRow);
 
     auto *shortcutRow = new QHBoxLayout;
-    m_shortcutCheck = new QCheckBox(QStringLiteral("ショートカットキー"), this);
+    m_shortcutCheck = new QCheckBox(I18n::t(QStringLiteral("ショートカットキー")), this);
     shortcutRow->addWidget(m_shortcutCheck);
     shortcutRow->addStretch();
     m_shortcutWeightSpin = new QSpinBox(this);
@@ -93,7 +94,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addLayout(shortcutRow);
 
     auto *windowOpRow = new QHBoxLayout;
-    m_windowOpCheck = new QCheckBox(QStringLiteral("ウィンドウ操作\n（移動/リサイズ/最小化/最大化）"), this);
+    m_windowOpCheck = new QCheckBox(I18n::t(QStringLiteral("ウィンドウ操作\n（移動/リサイズ/最小化/最大化）")), this);
     windowOpRow->addWidget(m_windowOpCheck);
     windowOpRow->addStretch();
     m_windowOpWeightSpin = new QSpinBox(this);
@@ -104,7 +105,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     m_countRowWidget = new QWidget(this);
     auto *countRow = new QHBoxLayout(m_countRowWidget);
     countRow->setContentsMargins(0, 0, 0, 0);
-    countRow->addWidget(new QLabel(QStringLiteral("操作回数:"), m_countRowWidget));
+    countRow->addWidget(new QLabel(I18n::t(QStringLiteral("操作回数:")), m_countRowWidget));
     m_actionCountSpin = new QSpinBox(m_countRowWidget);
     m_actionCountSpin->setRange(1, 1000000);
     countRow->addWidget(m_actionCountSpin);

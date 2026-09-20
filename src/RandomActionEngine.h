@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QObject>
+#include <QPixmap>
 #include <QRandomGenerator>
 #include <QString>
 #include <QTimer>
@@ -58,6 +59,17 @@ public:
     bool isRunning() const { return m_running; }
     bool isPaused() const { return m_paused; }
 
+    // The most recently captured operation-region screenshot (SPEC.md
+    // 6.2/10), if any -- persists across runs until a new capture overwrites
+    // it (start() does not clear it), so MainWindow's save button can stay
+    // enabled between runs the same way its run-summary save button does.
+    bool hasRegionScreenshot() const { return m_hasCapturedScreenshot; }
+    QPixmap lastRegionScreenshot() const { return m_lastCapturedScreenshot; }
+    // Which step/member the returned screenshot was captured for, e.g.
+    // "ステップ2" or "ステップ1（グループ内メンバー2）" -- used to build a
+    // sensible file name when saving it.
+    QString lastRegionScreenshotLabel() const { return m_lastCapturedScreenshotLabel; }
+
 signals:
     void actionPerformed(const QString &description);
     void logMessage(const QString &message);
@@ -77,6 +89,9 @@ signals:
     // (SPEC.md 10) -- always paired one-to-one with a finished() emission
     // for the same run, emitted immediately before it.
     void summaryReady(const RandomActionEngine::RunSummary &summary);
+    // Emitted whenever a new operation-region screenshot has just been
+    // captured and is available via lastRegionScreenshot() (SPEC.md 6.2/10).
+    void regionScreenshotCaptured();
 
 private slots:
     void performRandomAction();
@@ -129,6 +144,24 @@ private:
     // referenced named region no longer exists / is empty).
     bool resolveStepRegion(const RegionStep &step, QList<QRect> &outIncludeRegions,
                             QList<QRect> &outExcludeRegions);
+    // Captures a fresh operation-region screenshot (see renderRegionScreenshot()
+    // below) and overwrites m_lastCapturedScreenshot with it, but only when
+    // m_config.screenshotCaptureMode's condition is actually met right now
+    // for the step/member currently being acted on (`stepLabel`,
+    // `includeRegions`/`excludeRegions` already resolved by the caller, e.g.
+    // runOneAction()) -- called on every action attempt, cheap to skip when
+    // the mode's condition isn't met. Emits regionScreenshotCaptured() on
+    // an actual capture.
+    void maybeCaptureRegionScreenshot(const QString &stepLabel, const QList<QRect> &includeRegions,
+                                       const QList<QRect> &excludeRegions);
+    // Grabs a screenshot of just the target window's current bounds and
+    // draws `includeRegions` (solid green) / `excludeRegions` (dashed red)
+    // on top of it in window-local coordinates, so the saved image shows
+    // exactly where on the target app the operation region actually is.
+    // Returns a null QPixmap if the target window's bounds or the screen it
+    // is on can't currently be determined.
+    QPixmap renderRegionScreenshot(const QList<QRect> &includeRegions,
+                                    const QList<QRect> &excludeRegions) const;
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
@@ -202,4 +235,20 @@ private:
     QString describeActionKind(ActionKind kind) const;
 
     QRandomGenerator m_rng;
+
+    // Operation-region screenshot capture (SPEC.md 6.2/10). The captured
+    // image/label/hasCapturedScreenshot below persist across runs (start()
+    // does not clear them) so a previously captured image stays available
+    // to save even before/between runs -- only m_capturedThisRun and
+    // m_lastScreenshotStepIndex, which gate *when* the next capture should
+    // happen, are reset per run.
+    bool m_capturedThisRun = false;         // OnceAtStart mode: capture at most once per run
+    int m_lastScreenshotStepIndex = -1;     // PerStepChange mode: capture on each step-index change
+    // FixedInterval mode: the m_iterationCount value last captured at, so a
+    // stretch of SkippedNoCount ticks (which don't advance m_iterationCount)
+    // doesn't re-trigger a capture on every one of those ticks.
+    qint64 m_lastScreenshotIterationCount = -1;
+    QPixmap m_lastCapturedScreenshot;
+    QString m_lastCapturedScreenshotLabel;
+    bool m_hasCapturedScreenshot = false;
 };

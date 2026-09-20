@@ -11,6 +11,13 @@ enum class DragDirectionMode { Random, Up, Down, Left, Right };
 
 enum class ContextMenuSelectionMode { ByName, ByIndex };
 
+// When RandomActionEngine captures an internal screenshot of the current
+// step's operation region (region boundary drawn on top, for later
+// inspection via MainWindow's "操作領域画像を保存..." button -- SPEC.md
+// 6.2/10). Only the single most recently captured image is kept in memory
+// (each new capture overwrites the previous one), not a running history.
+enum class ScreenshotCaptureMode { OnceAtStart, PerStepChange, FixedInterval };
+
 // The detailed "how" of each action kind (drag distance/direction, key
 // character set, scroll amount, shortcut list, context-menu candidates).
 // TestConfig::defaultActionParams is the set edited in the "対象選択"
@@ -242,6 +249,14 @@ struct TestConfig
     int maxDurationSec = 120;
 
     bool keepTargetActive = true;
+
+    // Controls when RandomActionEngine captures its internal operation-
+    // region screenshot (SPEC.md 6.2/10): once right before the first
+    // action of a run, every time the current top-level step changes, or
+    // every screenshotCaptureIntervalActions actions (that field is only
+    // used when the mode is FixedInterval; values <= 0 are treated as 1).
+    ScreenshotCaptureMode screenshotCaptureMode = ScreenshotCaptureMode::PerStepChange;
+    int screenshotCaptureIntervalActions = 50;
 
     // 0 = pick a fresh random seed each run (and log it). Any other value
     // seeds the run's random generator directly, so the exact same

@@ -83,6 +83,8 @@ private slots:
     void onSaveLog();
     void onRunSummaryReady(const RandomActionEngine::RunSummary &summary);
     void onSaveSummary();
+    void onRegionScreenshotCaptured();
+    void onSaveRegionScreenshot();
     void onOpenAccessibilitySettings();
     void updateElapsedLabel();
     void onAboutApp();
@@ -222,6 +224,16 @@ private:
     // 0 = pick a fresh random seed each run (see TestConfig::rngSeed).
     QSpinBox *m_rngSeedSpin = nullptr;
 
+    // When RandomActionEngine internally captures its operation-region
+    // screenshot (region boundary drawn on top -- SPEC.md 6.2/10):
+    // once right before the run's first action, every time the current
+    // step changes, or every N actions (m_screenshotIntervalSpin, only
+    // shown/used when the interval radio is selected).
+    QRadioButton *m_screenshotModeOnceRadio = nullptr;
+    QRadioButton *m_screenshotModePerStepRadio = nullptr;
+    QRadioButton *m_screenshotModeIntervalRadio = nullptr;
+    QSpinBox *m_screenshotIntervalSpin = nullptr;
+
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;
     QGroupBox *m_namedRegionGroup = nullptr;
@@ -243,6 +255,11 @@ private:
     QPushButton *m_saveSummaryButton = nullptr;
     RandomActionEngine::RunSummary m_lastSummary;
     bool m_hasLastSummary = false;
+    // Saves m_engine's most recently captured operation-region screenshot
+    // (SPEC.md 6.2/10) to a file the user picks a destination folder for.
+    // Enabled once the engine has ever captured one (persists across runs,
+    // like m_saveSummaryButton above).
+    QPushButton *m_saveRegionScreenshotButton = nullptr;
 
     RandomActionEngine *m_engine = nullptr;
     QPointer<StopPanel> m_stopPanel;

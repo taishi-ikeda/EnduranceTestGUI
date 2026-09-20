@@ -77,6 +77,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_engine, &RandomActionEngine::currentStepChanged, this,
             &MainWindow::onCurrentStepChanged);
     connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
+    connect(m_engine, &RandomActionEngine::regionScreenshotCaptured, this,
+            &MainWindow::onRegionScreenshotCaptured);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -189,14 +191,21 @@ void MainWindow::buildUi()
     m_saveSummaryButton = new QPushButton(QStringLiteral("実行結果サマリーを保存..."), logGroup);
     m_saveSummaryButton->setEnabled(false);
     m_saveSummaryButton->setToolTip(QStringLiteral("テストを一度実行すると保存できるようになります。"));
+    m_saveRegionScreenshotButton = new QPushButton(QStringLiteral("操作領域画像を保存..."), logGroup);
+    m_saveRegionScreenshotButton->setEnabled(false);
+    m_saveRegionScreenshotButton->setToolTip(
+        QStringLiteral("テスト実行中に操作領域のスクリーンショットが撮影されると保存できるようになります。"));
     logButtonsRow->addWidget(clearLogButton);
     logButtonsRow->addWidget(saveLogButton);
     logButtonsRow->addWidget(m_saveSummaryButton);
+    logButtonsRow->addWidget(m_saveRegionScreenshotButton);
     logButtonsRow->addStretch();
     logLayout->addLayout(logButtonsRow);
     connect(clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLog);
     connect(saveLogButton, &QPushButton::clicked, this, &MainWindow::onSaveLog);
     connect(m_saveSummaryButton, &QPushButton::clicked, this, &MainWindow::onSaveSummary);
+    connect(m_saveRegionScreenshotButton, &QPushButton::clicked, this,
+            &MainWindow::onSaveRegionScreenshot);
 
     bottomLayout->addWidget(logGroup, 1);
     outerSplitter->addWidget(bottomWidget);
@@ -422,6 +431,33 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_rngSeedSpin->setValue(0);
     m_rngSeedSpin->setSpecialValueText(QStringLiteral("ランダム"));
     timingForm->addRow(QStringLiteral("乱数シード（クラッシュ再現用。開始時にログに記録される）:"), m_rngSeedSpin);
+
+    // Operation-region screenshot capture timing (SPEC.md 6.2/10): which of
+    // the three radios is checked selects TestConfig::screenshotCaptureMode
+    // in buildConfigFromUi(); m_screenshotIntervalSpin only matters for the
+    // "一定間隔ごと" radio but stays visible/enabled together with it (no
+    // separate stacked page needed -- it's a single extra field, unlike the
+    // ms/rate interval switch above).
+    auto *screenshotContainer = new QWidget(m_timingGroup);
+    auto *screenshotLayout = new QVBoxLayout(screenshotContainer);
+    screenshotLayout->setContentsMargins(0, 0, 0, 0);
+    m_screenshotModeOnceRadio = new QRadioButton(QStringLiteral("実行前に一度だけ"), screenshotContainer);
+    m_screenshotModePerStepRadio =
+        new QRadioButton(QStringLiteral("ステップが変わるたび"), screenshotContainer);
+    m_screenshotModePerStepRadio->setChecked(true);
+    auto *screenshotIntervalRow = new QHBoxLayout;
+    m_screenshotModeIntervalRadio = new QRadioButton(QStringLiteral("一定間隔ごと:"), screenshotContainer);
+    m_screenshotIntervalSpin = new QSpinBox(screenshotContainer);
+    m_screenshotIntervalSpin->setRange(1, 1000000);
+    m_screenshotIntervalSpin->setValue(50);
+    m_screenshotIntervalSpin->setSuffix(QStringLiteral(" 操作ごと"));
+    screenshotIntervalRow->addWidget(m_screenshotModeIntervalRadio);
+    screenshotIntervalRow->addWidget(m_screenshotIntervalSpin);
+    screenshotIntervalRow->addStretch();
+    screenshotLayout->addWidget(m_screenshotModeOnceRadio);
+    screenshotLayout->addWidget(m_screenshotModePerStepRadio);
+    screenshotLayout->addLayout(screenshotIntervalRow);
+    timingForm->addRow(QStringLiteral("操作領域スクリーンショットの撮影タイミング:"), screenshotContainer);
 
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
@@ -1282,6 +1318,13 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.maxSequenceLoops = m_maxSequenceLoopsSpin->value();
     config.keepTargetActive = m_keepActiveCheck->isChecked();
     config.rngSeed = quint32(m_rngSeedSpin->value());
+    if (m_screenshotModeOnceRadio->isChecked())
+        config.screenshotCaptureMode = ScreenshotCaptureMode::OnceAtStart;
+    else if (m_screenshotModeIntervalRadio->isChecked())
+        config.screenshotCaptureMode = ScreenshotCaptureMode::FixedInterval;
+    else
+        config.screenshotCaptureMode = ScreenshotCaptureMode::PerStepChange;
+    config.screenshotCaptureIntervalActions = m_screenshotIntervalSpin->value();
 
     ok = true;
     return config;
@@ -1527,6 +1570,32 @@ void MainWindow::onSaveSummary()
     }
 }
 
+void MainWindow::onRegionScreenshotCaptured()
+{
+    m_saveRegionScreenshotButton->setEnabled(true);
+    m_saveRegionScreenshotButton->setToolTip(QString());
+}
+
+void MainWindow::onSaveRegionScreenshot()
+{
+    if (!m_engine->hasRegionScreenshot())
+        return;
+    const QString dir =
+        QFileDialog::getExistingDirectory(this, QStringLiteral("操作領域画像の保存先フォルダを選択"));
+    if (dir.isEmpty())
+        return;
+
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    QString label = m_engine->lastRegionScreenshotLabel().remove(QLatin1Char(' '));
+    if (label.isEmpty())
+        label = QStringLiteral("screenshot");
+    const QString path = QStringLiteral("%1/操作領域_%2_%3.png").arg(dir, label, timestamp);
+    if (m_engine->lastRegionScreenshot().save(path))
+        appendLog(QStringLiteral("操作領域画像を保存しました: %1").arg(path));
+    else
+        QMessageBox::warning(this, QStringLiteral("保存エラー"), QStringLiteral("画像を保存できませんでした。"));
+}
+
 void MainWindow::onGlobalEmergencyStop()
 {
     if (!m_engine->isRunning())
@@ -1583,6 +1652,10 @@ void MainWindow::onSavePreset()
     timing["maxSequenceLoops"] = m_maxSequenceLoopsSpin->value();
     timing["keepTargetActive"] = m_keepActiveCheck->isChecked();
     timing["rngSeed"] = m_rngSeedSpin->value();
+    timing["screenshotCaptureMode"] = m_screenshotModeOnceRadio->isChecked()   ? QStringLiteral("onceAtStart")
+                                       : m_screenshotModeIntervalRadio->isChecked() ? QStringLiteral("fixedInterval")
+                                                                                    : QStringLiteral("perStepChange");
+    timing["screenshotCaptureIntervalActions"] = m_screenshotIntervalSpin->value();
     root["timing"] = timing;
 
     QFile file(path);
@@ -1648,6 +1721,15 @@ void MainWindow::onLoadPreset()
     m_maxSequenceLoopsSpin->setValue(timing["maxSequenceLoops"].toInt(m_maxSequenceLoopsSpin->value()));
     m_keepActiveCheck->setChecked(timing["keepTargetActive"].toBool(m_keepActiveCheck->isChecked()));
     m_rngSeedSpin->setValue(timing["rngSeed"].toInt(m_rngSeedSpin->value()));
+    const QString screenshotMode = timing["screenshotCaptureMode"].toString();
+    if (screenshotMode == QStringLiteral("onceAtStart"))
+        m_screenshotModeOnceRadio->setChecked(true);
+    else if (screenshotMode == QStringLiteral("fixedInterval"))
+        m_screenshotModeIntervalRadio->setChecked(true);
+    else if (screenshotMode == QStringLiteral("perStepChange"))
+        m_screenshotModePerStepRadio->setChecked(true);
+    m_screenshotIntervalSpin->setValue(
+        timing["screenshotCaptureIntervalActions"].toInt(m_screenshotIntervalSpin->value()));
 
     m_lastEditedStepRow = -1;
     refreshNamedRegionList();

@@ -5,6 +5,7 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QKeySequence>
+#include <QPainter>
 #include <QPixmap>
 #include <QScreen>
 #include <QStandardPaths>
@@ -110,6 +111,9 @@ void RandomActionEngine::start(const TestConfig &config)
     m_consecutiveUnresponsive = 0;
     m_everRespondedToPing = false;
     m_neverRespondedStrikes = 0;
+    m_capturedThisRun = false;
+    m_lastScreenshotStepIndex = -1;
+    m_lastScreenshotIterationCount = -1;
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -372,6 +376,83 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
         }
     }
     return false;  // referenced named region no longer exists
+}
+
+void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel,
+                                                        const QList<QRect> &includeRegions,
+                                                        const QList<QRect> &excludeRegions)
+{
+    bool shouldCapture = false;
+    switch (m_config.screenshotCaptureMode) {
+    case ScreenshotCaptureMode::OnceAtStart:
+        shouldCapture = !m_capturedThisRun;
+        break;
+    case ScreenshotCaptureMode::PerStepChange:
+        shouldCapture = (m_currentStepIndex != m_lastScreenshotStepIndex);
+        break;
+    case ScreenshotCaptureMode::FixedInterval: {
+        const qint64 interval = qMax<qint64>(1, m_config.screenshotCaptureIntervalActions);
+        shouldCapture = (m_iterationCount % interval == 0) &&
+                         (m_iterationCount != m_lastScreenshotIterationCount);
+        break;
+    }
+    }
+    if (!shouldCapture)
+        return;
+
+    const QPixmap shot = renderRegionScreenshot(includeRegions, excludeRegions);
+    if (shot.isNull())
+        return;
+
+    m_lastCapturedScreenshot = shot;
+    m_lastCapturedScreenshotLabel = stepLabel;
+    m_hasCapturedScreenshot = true;
+    m_capturedThisRun = true;
+    m_lastScreenshotStepIndex = m_currentStepIndex;
+    m_lastScreenshotIterationCount = m_iterationCount;
+    emit regionScreenshotCaptured();
+}
+
+QPixmap RandomActionEngine::renderRegionScreenshot(const QList<QRect> &includeRegions,
+                                                     const QList<QRect> &excludeRegions) const
+{
+    if (includeRegions.isEmpty())
+        return QPixmap();
+
+    QRect windowBounds;
+    if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
+        return QPixmap();
+
+    QScreen *screen = QGuiApplication::screenAt(windowBounds.center());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return QPixmap();
+
+    // grabWindow(0, x, y, w, h) takes x/y relative to the given screen's own
+    // origin, not the virtual desktop's -- translate windowBounds into that
+    // screen's local coordinates before grabbing.
+    const QRect localBounds = windowBounds.translated(-screen->geometry().topLeft());
+    QPixmap shot = screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
+                                       localBounds.height());
+    if (shot.isNull())
+        return shot;
+
+    QPainter painter(&shot);
+    QPen includePen(QColor(0, 200, 0));
+    includePen.setWidth(3);
+    painter.setPen(includePen);
+    for (const QRect &r : includeRegions)
+        painter.drawRect(r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2));
+
+    QPen excludePen(QColor(220, 0, 0));
+    excludePen.setWidth(2);
+    excludePen.setStyle(Qt::DashLine);
+    painter.setPen(excludePen);
+    for (const QRect &r : excludeRegions)
+        painter.drawRect(r.translated(-windowBounds.topLeft()).adjusted(1, 1, -2, -2));
+
+    return shot;
 }
 
 bool RandomActionEngine::pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const
@@ -733,6 +814,8 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                /*isAnomaly=*/true);
         return ActionOutcome::StoppedEngine;
     }
+
+    maybeCaptureRegionScreenshot(stepLabel, includeRegions, excludeRegions);
 
     if (m_config.keepTargetActive)
         PlatformAutomation::activateProcess(m_config.targetPid);

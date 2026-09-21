@@ -2294,7 +2294,7 @@ void MainWindow::onLoadPreset()
     if (!m_steps.isEmpty() || !m_namedRegions.isEmpty() || !m_setupActions.isEmpty()) {
         const auto reply = QMessageBox::question(
             this, I18n::t(QStringLiteral("確認")),
-            I18n::t(QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？")));
+            I18n::t(QStringLiteral("現在の起動時セットアップ・操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？")));
         if (reply != QMessageBox::Yes)
             return;
     }

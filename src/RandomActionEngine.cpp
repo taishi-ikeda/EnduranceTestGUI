@@ -1386,7 +1386,17 @@ bool RandomActionEngine::trySetupAction(const SetupAction &action, QString &outD
         if (action.type == SetupActionType::TypeText) {
             for (const QChar &ch : action.text)
                 PlatformAutomation::keyTap(ch);
-            outDesc = I18n::t(QStringLiteral("文字入力 '%1'")).arg(action.text) + labelSuffix;
+            // Deliberately never includes the literal text: this is the exact
+            // mechanism SPEC.md's own example uses to type a login password
+            // during setup, and this description is what ends up in the
+            // on-screen log, the uncapped full-log file written every run,
+            // and RunSummary::recentActions -- which is also bundled into the
+            // anomaly diagnostic artifacts saved on a crash (SPEC.md 6.7).
+            // Logging a character count is enough to confirm "text input
+            // happened here" without persisting the credential in plaintext.
+            outDesc = I18n::t(QStringLiteral("文字入力（%1文字、内容はログに記録しません）"))
+                          .arg(action.text.size()) +
+                      labelSuffix;
         } else {
             Qt::Key key = Qt::Key(0);
             Qt::KeyboardModifiers mods;

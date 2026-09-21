@@ -277,6 +277,7 @@
       <li><a href="#requirements">Prerequisites &amp; required permissions</a></li>
       <li><a href="#layout">Screen layout</a></li>
       <li><a href="#target">① Selecting the target app</a></li>
+      <li><a href="#setup">Startup setup (running login etc. automatically, once)</a></li>
       <li><a href="#steps">② Creating steps</a></li>
       <li><a href="#params">③ Configuring action parameters</a></li>
       <li><a href="#timing">Timing / limits &amp; automatic anomaly recording</a></li>
@@ -327,7 +328,7 @@
       <li><strong>Run controls / Log</strong> (bottom): start/stop buttons, run status, and the log</li>
     </ul>
     <figure>
-      <img src="images_en/01_overview.png" alt="EnduranceTestGUI's full main window, showing the three vertical sections: Target Selection at top, Steps/Action Parameters in the middle, and the Log at the bottom.">
+      <img src="images/01_overview.png" alt="EnduranceTestGUI's full main window, showing the three vertical sections: Target Selection at top, Steps/Action Parameters in the middle, and the Log at the bottom.">
       <figcaption>Figure 1: The full main window (the ①②③ three-section layout)</figcaption>
     </figure>
   </section>
@@ -341,12 +342,26 @@
     </div>
   </section>
 
+  <section id="setup">
+    <h2><span class="num">5</span>Startup setup (running login etc. automatically, once)</h2>
+    <p>Some target apps require a fixed sequence of operations right after launch -- logging in, an initial-setup dialog -- before endurance testing by random actions can begin. Registering a sequence of actions in ①'s "Startup Setup" list runs them once, in order, right after the target app is confirmed running and before ②'s random actions begin.</p>
+    <p><span class="step-num">1</span>Clicking "Add..." opens a dialog for configuring one action. Choose a "Type": Click, Double-click, Right-click, Drag, Text Input, Key Input, or Wait.</p>
+    <p><span class="step-num">2</span>For click-family actions and Drag, clicking "Select Position..." covers the whole screen in a translucent overlay -- just click the spot on the target app you want (no need to type coordinates by hand). The position is stored relative to the target window's top-left corner, so it stays correct even if the window has moved by the next run.</p>
+    <p><span class="step-num">3</span>The optional "Description" field (e.g. "Username field") makes entries easier to tell apart in ①'s list.</p>
+    <p><span class="step-num">4</span>Clicking "OK" adds it to the list. Use "↑ Move Up"/"↓ Move Down" to reorder, "Edit..." to change an entry, or "Delete" to remove one.</p>
+    <div class="callout tip">
+      <div class="title">Passwords and other sensitive text can be entered too</div>
+      The "Text Input" type can be used for passwords and other sensitive text, but the content you type is never written to the run log, the full log file, or the diagnostic record saved on an abnormal stop (only the character count is recorded).
+    </div>
+    <p>Checking "Only run on the first run of consecutive auto-execution (① batch)" makes the startup setup skip every automatic restart after the first one when you set ①'s "Batch run count" to 2 or more. Use this for something that only needs to happen once, like a license-agreement dialog that only appears the first time the app launches.</p>
+  </section>
+
   <section id="steps">
-    <h2><span class="num">5</span>② Creating steps</h2>
+    <h2><span class="num">6</span>② Creating steps</h2>
     <p>A test is made up of one or more "steps" that run in order, repeating.</p>
     <p><span class="step-num">1</span>Clicking "Add..." opens a small dialog for choosing which region this step will operate on. Choose either "Entire target GUI area (auto-follows)" or one of the named operation regions registered in ①, then click "OK".</p>
     <figure>
-      <img src="images_en/02_step_region_dialog.png" alt="The step-region selection dialog, offering a choice between 'Entire target GUI area (auto-follows)' and a registered operation region.">
+      <img src="images/02_step_region_dialog.png" alt="The step-region selection dialog, offering a choice between 'Entire target GUI area (auto-follows)' and a registered operation region.">
       <figcaption>Figure 2: The operation-region selection dialog shown when adding a step</figcaption>
     </figure>
     <p><span class="step-num">2</span>The step is added to the list and automatically selected. Its action types aren't decided yet at this point — that's configured next, in "③ Action Parameters".</p>
@@ -354,20 +369,20 @@
   </section>
 
   <section id="params">
-    <h2><span class="num">6</span>③ Configuring action parameters</h2>
+    <h2><span class="num">7</span>③ Configuring action parameters</h2>
     <p>Selecting a step in ② shows its settings in the ③ panel. Check the action types you want to enable (Click, Double-click, Drag, Key Input, Scroll, Shortcut Key, Window Operation), and specify how many actions to run for that step (Action count) and how likely each type is to be picked (Weight — higher means more likely).</p>
     <figure>
-      <img src="images_en/03_step_added_params.png" alt="The Action Parameters panel right after a step is added, with Click and Left checked and Action count set to 50.">
+      <img src="images/03_step_added_params.png" alt="The Action Parameters panel right after a step is added, with Click and Left checked and Action count set to 50.">
       <figcaption>Figure 3: The ③ Action Parameters panel right after creating a step (Click / Left are enabled by default)</figcaption>
     </figure>
     <p>Detailed settings for each action — click/drag distance and direction, which characters to use for key input, scroll amount, and so on — are also available further down the same panel. The "Default" button in ① lets you edit the shared initial values used for newly created steps.</p>
   </section>
 
   <section id="timing">
-    <h2><span class="num">7</span>Timing / limits &amp; automatic anomaly recording</h2>
+    <h2><span class="num">8</span>Timing / limits &amp; automatic anomaly recording</h2>
     <p>The "Timing / Limits" area of panel ① sets the interval between actions (ms, or actions/sec), the max action count, max run time, and repeat count for the whole step sequence (all three are required — unlimited isn't an option), the RNG seed, and more. Scrolling down reveals the following additional settings.</p>
     <figure>
-      <img src="images_en/04_timing_limits.png" alt="The Timing/Limits panel scrolled down, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording and collecting crash dumps on an abnormal stop.">
+      <img src="images/04_timing_limits.png" alt="The Timing/Limits panel scrolled down, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording and collecting crash dumps on an abnormal stop.">
       <figcaption>Figure 4: Timing/Limits (lower part) — RNG seed, when to capture operation-region screenshots, and the recording/crash-dump options on an abnormal stop</figcaption>
     </figure>
     <table>
@@ -380,10 +395,10 @@
   </section>
 
   <section id="run">
-    <h2><span class="num">8</span>Starting and stopping a run</h2>
+    <h2><span class="num">9</span>Starting and stopping a run</h2>
     <p>Once configured, click "▶ Start" to begin the run. While it's running, an always-on-top floating panel appears in the upper right (showing the action count and a "■ Stop (STOP)" button), so you can stop it immediately even if focus has moved to the target app. "‖ Pause" lets you pause and resume as well.</p>
     <figure>
-      <img src="images_en/05_running.png" alt="The screen during a test run. A floating panel with the action count and a stop button appears in the upper right, and the log at the bottom records the coordinates and target-window-relative coordinates of each click.">
+      <img src="images/05_running.png" alt="The screen during a test run. A floating panel with the action count and a stop button appears in the upper right, and the log at the bottom records the coordinates and target-window-relative coordinates of each click.">
       <figcaption>Figure 5: The screen while a run is in progress — the floating panel in the upper right can stop it at any time</figcaption>
     </figure>
     <p>For each action, the log records its coordinates, the coordinates relative to the target window, and (when available) the name of the UI widget that was clicked. The full log is also written incrementally to a file under <code>~/Documents/EnduranceTestGUI_Logs/</code>, so even after older lines scroll out of the on-screen display (capped at the most recent 5000 lines), the complete history remains available afterward.</p>
@@ -398,10 +413,10 @@
   </section>
 
   <section id="crash">
-    <h2><span class="num">9</span>Crash detection &amp; re-testing</h2>
+    <h2><span class="num">10</span>Crash detection &amp; re-testing</h2>
     <p>When the target app's process is detected as gone, the run stops immediately and a dialog like the following appears.</p>
     <figure>
-      <img src="images_en/06_crash_dialog.png" alt="A dialog titled 'Target App Crash Detected', showing which step was running when it was detected, the action count, and the RNG seed, and noting that records have been saved automatically.">
+      <img src="images/06_crash_dialog.png" alt="A dialog titled 'Target App Crash Detected', showing which step was running when it was detected, the action count, and the RNG seed, and noting that records have been saved automatically.">
       <figcaption>Figure 6: The crash-detection dialog — it's immediately clear which step was running when the app went down</figcaption>
     </figure>
     <p>Both the dialog and the log show <strong>which step was running when the crash was detected, how many actions had run so far, and the RNG seed</strong>. At the same time, a JSON snapshot of the test settings (with that seed), a screenshot of the operation region, a recording of the recent screen (if enabled), and the location of the OS's crash dump (if found) are all saved automatically under <code>~/Pictures/EnduranceTestGUI_Screenshots/</code>.</p>
@@ -412,21 +427,21 @@
   </section>
 
   <section id="preset">
-    <h2><span class="num">10</span>Saving &amp; loading test settings</h2>
+    <h2><span class="num">11</span>Saving &amp; loading test settings</h2>
     <p>"Save Test Settings..." in the "File" menu saves the operation regions, step configuration, and timing settings assembled in ①②③ together into a JSON file. "Load Test Settings..." loads it back and, if the app it was targeting when saved is currently running, automatically selects it again (otherwise a message prompts you to pick it manually). This lets the same configuration be reused across sessions or across different builds, without rebuilding it from scratch each time.</p>
   </section>
 
   <section id="lang">
-    <h2><span class="num">11</span>Switching the display language</h2>
+    <h2><span class="num">12</span>Switching the display language</h2>
     <p>Choose "日本語" or "English" from the "言語 / Language" menu in the menu bar. Your choice is saved and takes effect <strong>from the next launch onward</strong> (the currently running window doesn't switch live).</p>
     <figure>
-      <img src="images_en/07_language_menu.png" alt="The 'Language' menu open in the menu bar, showing two options: Japanese and English.">
+      <img src="images/07_language_menu.png" alt="The 'Language' menu open in the menu bar, showing two options: Japanese and English.">
       <figcaption>Figure 7: The "言語 / Language" menu</figcaption>
     </figure>
   </section>
 
   <section id="faq">
-    <h2><span class="num">12</span>Troubleshooting</h2>
+    <h2><span class="num">13</span>Troubleshooting</h2>
     <h3>Clicking "Start" fails with a safety-check error</h3>
     <p>Check that the target window isn't covered by another window and isn't minimized. If that doesn't help, some environments (particularly certain tiling window managers on Linux) don't support the mechanism used to confirm the target app can be operated safely at all.</p>
     <h3>The target app doesn't appear in the window list</h3>
@@ -436,7 +451,7 @@
   </section>
 
   <section id="license">
-    <h2><span class="num">13</span>Licensing</h2>
+    <h2><span class="num">14</span>Licensing</h2>
     <p>EnduranceTestGUI's own source code is released under the <strong>MIT License</strong> (see <code>LICENSE</code> at the repository root). The app uses Qt (the Widgets module); the free-software edition of Qt is distributed under the GNU LGPL version 3 (some modules under the GPL). You can always check exactly which license the Qt build in use is distributed under from "Help" → "About Qt..." inside the app itself. For details on the other dynamically linked libraries, see <code>THIRD_PARTY_NOTICES.md</code> at the repository root.</p>
   </section>
 

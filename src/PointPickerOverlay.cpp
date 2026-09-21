@@ -1,5 +1,6 @@
 #include "PointPickerOverlay.h"
 #include "I18n.h"
+#include "OverlayGeometry.h"
 
 #include <QEventLoop>
 #include <QGuiApplication>
@@ -8,25 +9,8 @@
 #include <QPainter>
 #include <QScreen>
 
-namespace
-{
-QRect virtualDesktopGeometry()
-{
-    QRect all;
-    for (QScreen *screen : QGuiApplication::screens())
-        all = all.united(screen->geometry());
-    return all;
-}
-
-QPoint globalPosOf(QMouseEvent *event)
-{
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    return event->globalPosition().toPoint();
-#else
-    return event->globalPos();
-#endif
-}
-}  // namespace
+using OverlayGeometry::globalPosOf;
+using OverlayGeometry::virtualDesktopGeometry;
 
 PointPickerOverlay::PointPickerOverlay(QWidget *parent)
     : QWidget(parent)

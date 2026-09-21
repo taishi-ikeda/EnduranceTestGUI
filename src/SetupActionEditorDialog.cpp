@@ -54,6 +54,15 @@ SetupActionEditorDialog::SetupActionEditorDialog(const SetupAction &initial, con
     : QDialog(parent),
       m_point(initial.point),
       m_dragToPoint(initial.dragToPoint),
+      // An action being edited that already has a non-origin point was
+      // necessarily picked at some point in the past (a fresh SetupAction
+      // from "追加..." always starts at QPoint(0, 0), see TestConfig.h) --
+      // treat that as already valid so re-opening an existing entry doesn't
+      // spuriously demand re-picking it. A genuinely-(0,0) point (new, or an
+      // old entry saved before this validation existed) still requires an
+      // explicit pick before OK is accepted (see onAccept()).
+      m_pointPicked(!initial.point.isNull()),
+      m_dragToPicked(!initial.dragToPoint.isNull()),
       m_targetTopLeft(targetTopLeft),
       m_hasTarget(hasTarget)
 {
@@ -166,6 +175,9 @@ QWidget *SetupActionEditorDialog::buildTypeTextPage()
     layout->addWidget(new QLabel(I18n::t(QStringLiteral("入力するテキスト:")), page));
     m_typeTextEdit = new QLineEdit(page);
     layout->addWidget(m_typeTextEdit);
+    auto *hint = new QLabel(I18n::t(QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません。")), page);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
     layout->addStretch(1);
     return page;
 }
@@ -203,7 +215,7 @@ void SetupActionEditorDialog::onTypeChanged(int index)
     m_stack->setCurrentIndex(pageForType(type));
 }
 
-void SetupActionEditorDialog::onPickPoint()
+void SetupActionEditorDialog::pickPointInto(QPoint &target, bool &pickedFlag)
 {
     if (!m_hasTarget) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウ未選択")),
@@ -212,37 +224,25 @@ void SetupActionEditorDialog::onPickPoint()
     }
     QPoint picked;
     if (PointPickerOverlay::run(picked)) {
-        m_point = picked - m_targetTopLeft;
+        target = picked - m_targetTopLeft;
+        pickedFlag = true;
         refreshPointLabels();
     }
+}
+
+void SetupActionEditorDialog::onPickPoint()
+{
+    pickPointInto(m_point, m_pointPicked);
 }
 
 void SetupActionEditorDialog::onPickDragFromPoint()
 {
-    if (!m_hasTarget) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウ未選択")),
-                              I18n::t(QStringLiteral("対象ウィンドウを選択してから位置を指定してください。")));
-        return;
-    }
-    QPoint picked;
-    if (PointPickerOverlay::run(picked)) {
-        m_point = picked - m_targetTopLeft;
-        refreshPointLabels();
-    }
+    pickPointInto(m_point, m_pointPicked);
 }
 
 void SetupActionEditorDialog::onPickDragToPoint()
 {
-    if (!m_hasTarget) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウ未選択")),
-                              I18n::t(QStringLiteral("対象ウィンドウを選択してから位置を指定してください。")));
-        return;
-    }
-    QPoint picked;
-    if (PointPickerOverlay::run(picked)) {
-        m_dragToPoint = picked - m_targetTopLeft;
-        refreshPointLabels();
-    }
+    pickPointInto(m_dragToPoint, m_dragToPicked);
 }
 
 void SetupActionEditorDialog::refreshPointLabels()
@@ -256,6 +256,18 @@ void SetupActionEditorDialog::onAccept()
 {
     const SetupActionType type =
         static_cast<SetupActionType>(m_typeCombo->itemData(m_typeCombo->currentIndex()).toInt());
+    const bool needsPoint = type == SetupActionType::Click || type == SetupActionType::DoubleClick ||
+                             type == SetupActionType::RightClick || type == SetupActionType::Drag;
+    if (needsPoint && !m_pointPicked) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                              I18n::t(QStringLiteral("「位置を選択...」から位置を指定してください。")));
+        return;
+    }
+    if (type == SetupActionType::Drag && !m_dragToPicked) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                              I18n::t(QStringLiteral("「終了位置を選択...」から位置を指定してください。")));
+        return;
+    }
     if (type == SetupActionType::TypeText && m_typeTextEdit->text().isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
                               I18n::t(QStringLiteral("入力するテキストを入力してください。")));

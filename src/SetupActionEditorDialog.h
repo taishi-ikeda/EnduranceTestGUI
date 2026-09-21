@@ -42,6 +42,14 @@ private slots:
     void onAccept();
 
 private:
+    // Shared by onPickPoint()/onPickDragFromPoint() (both write `m_point` --
+    // Drag's "from" point is the same field a plain Click/DoubleClick/
+    // RightClick uses) and onPickDragToPoint() (`m_dragToPoint`). Runs
+    // PointPickerOverlay, converts the picked absolute point to
+    // window-relative, and marks `pickedFlag` true so onAccept() can tell a
+    // deliberately-picked point apart from an untouched default QPoint(0,0)
+    // (see m_pointPicked's comment).
+    void pickPointInto(QPoint &target, bool &pickedFlag);
     void refreshPointLabels();
     QWidget *buildPointPage();
     QWidget *buildDragPage();
@@ -67,6 +75,16 @@ private:
 
     QPoint m_point;
     QPoint m_dragToPoint;
+    // True once the user has actually pressed "位置を選択.../終了位置を選択..." in
+    // this dialog session (or the action being edited already had a
+    // non-origin point, see the constructor) -- lets onAccept() reject a
+    // Click/DoubleClick/RightClick/Drag action whose point was left at the
+    // default QPoint(0,0) (which typically lands on the target window's
+    // frame/decoration, not any real content) instead of silently accepting
+    // it, which previously made a forgotten point pick fail every run at
+    // runtime with a confusing safety-stop (see SPEC.md 6.13).
+    bool m_pointPicked = false;
+    bool m_dragToPicked = false;
     QPoint m_targetTopLeft;
     bool m_hasTarget = false;
 };

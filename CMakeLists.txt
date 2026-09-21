@@ -73,6 +73,7 @@ set(HEADERS
     src/RandomActionEngine.h
     src/RegionSelectorOverlay.h
     src/RegionHighlightOverlay.h
+    src/OverlayGeometry.h
     src/PointPickerOverlay.h
     src/StopPanel.h
     src/StepEditorDialog.h

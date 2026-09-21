@@ -23,3 +23,7 @@ NamedRegion namedRegionFromJson(const QJsonObject &obj);
 // RegionStep whose region/customActionParams fields are unused.
 QJsonObject regionStepToJson(const RegionStep &step);
 RegionStep regionStepFromJson(const QJsonObject &obj);
+
+// TestConfig::setupActions entries ("起動時セットアップ", SPEC.md 6.x).
+QJsonObject setupActionToJson(const SetupAction &action);
+SetupAction setupActionFromJson(const QJsonObject &obj);

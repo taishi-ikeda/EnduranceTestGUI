@@ -54,10 +54,12 @@ set(SOURCES
     src/RandomActionEngine.cpp
     src/RegionSelectorOverlay.cpp
     src/RegionHighlightOverlay.cpp
+    src/PointPickerOverlay.cpp
     src/StopPanel.cpp
     src/StepEditorDialog.cpp
     src/ActionParamsEditor.cpp
     src/NamedRegionEditorDialog.cpp
+    src/SetupActionEditorDialog.cpp
     src/DefaultActionParamsDialog.cpp
     src/ActionKindEditor.cpp
     src/StepGroupEditorDialog.cpp
@@ -71,10 +73,12 @@ set(HEADERS
     src/RandomActionEngine.h
     src/RegionSelectorOverlay.h
     src/RegionHighlightOverlay.h
+    src/PointPickerOverlay.h
     src/StopPanel.h
     src/StepEditorDialog.h
     src/ActionParamsEditor.h
     src/NamedRegionEditorDialog.h
+    src/SetupActionEditorDialog.h
     src/DefaultActionParamsDialog.h
     src/ActionKindEditor.h
     src/StepGroupEditorDialog.h

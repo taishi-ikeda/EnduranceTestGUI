@@ -44,6 +44,7 @@
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
 #include "RegionSelectorOverlay.h"
+#include "SetupActionEditorDialog.h"
 #include "StatisticsDialog.h"
 #include "StepEditorDialog.h"
 #include "StepGroupEditorDialog.h"
@@ -416,6 +417,45 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::launchTargetAppFromConfiguredCommand);
 
     layout->addWidget(m_targetGroup);
+
+    // --- Startup setup macro (SPEC.md 6.x) ---
+    m_setupActionsGroup = new QGroupBox(
+        I18n::t(QStringLiteral("起動時セットアップ（対象アプリ起動直後に一度だけ実行。ログイン等）")), container);
+    auto *setupActionsLayout = new QVBoxLayout(m_setupActionsGroup);
+    m_setupActionListWidget = new QListWidget(m_setupActionsGroup);
+    m_setupActionListWidget->setMaximumHeight(110);
+    setupActionsLayout->addWidget(m_setupActionListWidget);
+    auto *setupActionsButtonsRow = new QHBoxLayout;
+    m_addSetupActionButton = new QPushButton(I18n::t(QStringLiteral("追加...")), m_setupActionsGroup);
+    m_editSetupActionButton = new QPushButton(I18n::t(QStringLiteral("編集...")), m_setupActionsGroup);
+    m_removeSetupActionButton = new QPushButton(I18n::t(QStringLiteral("削除")), m_setupActionsGroup);
+    setupActionsButtonsRow->addWidget(m_addSetupActionButton);
+    setupActionsButtonsRow->addWidget(m_editSetupActionButton);
+    setupActionsButtonsRow->addWidget(m_removeSetupActionButton);
+    setupActionsLayout->addLayout(setupActionsButtonsRow);
+    auto *setupActionsOrderRow = new QHBoxLayout;
+    m_moveSetupActionUpButton = new QPushButton(I18n::t(QStringLiteral("↑ 上へ")), m_setupActionsGroup);
+    m_moveSetupActionDownButton = new QPushButton(I18n::t(QStringLiteral("↓ 下へ")), m_setupActionsGroup);
+    setupActionsOrderRow->addWidget(m_moveSetupActionUpButton);
+    setupActionsOrderRow->addWidget(m_moveSetupActionDownButton);
+    setupActionsLayout->addLayout(setupActionsOrderRow);
+    m_setupActionsFirstRunOnlyCheck = new QCheckBox(
+        I18n::t(QStringLiteral("連続自動実行（①バッチ）では初回のみ実行する")), m_setupActionsGroup);
+    m_setupActionsFirstRunOnlyCheck->setToolTip(
+        I18n::t(QStringLiteral("オフの場合、バッチの自動再起動のたびに毎回このセットアップを実行します。"
+                        "オンの場合、2回目以降の自動再起動ではスキップします"
+                        "（初回だけ出るライセンス同意等を想定）。")));
+    setupActionsLayout->addWidget(m_setupActionsFirstRunOnlyCheck);
+
+    connect(m_addSetupActionButton, &QPushButton::clicked, this, &MainWindow::onAddSetupAction);
+    connect(m_editSetupActionButton, &QPushButton::clicked, this,
+            &MainWindow::onEditSelectedSetupAction);
+    connect(m_removeSetupActionButton, &QPushButton::clicked, this,
+            &MainWindow::onRemoveSelectedSetupAction);
+    connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
+    connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
+
+    layout->addWidget(m_setupActionsGroup);
 
     // --- Named operation regions ---
     m_namedRegionGroup = new QGroupBox(
@@ -878,6 +918,49 @@ void MainWindow::refreshNamedRegionList()
         m_namedRegionListWidget->addItem(describeNamedRegion(region));
 }
 
+QString MainWindow::describeSetupAction(const SetupAction &action, int index) const
+{
+    QString kindDesc;
+    switch (action.type) {
+    case SetupActionType::Click:
+        kindDesc = I18n::t(QStringLiteral("クリック (%1, %2)")).arg(action.point.x()).arg(action.point.y());
+        break;
+    case SetupActionType::DoubleClick:
+        kindDesc =
+            I18n::t(QStringLiteral("ダブルクリック (%1, %2)")).arg(action.point.x()).arg(action.point.y());
+        break;
+    case SetupActionType::RightClick:
+        kindDesc = I18n::t(QStringLiteral("右クリック (%1, %2)")).arg(action.point.x()).arg(action.point.y());
+        break;
+    case SetupActionType::Drag:
+        kindDesc = I18n::t(QStringLiteral("ドラッグ (%1, %2) → (%3, %4)"))
+                       .arg(action.point.x())
+                       .arg(action.point.y())
+                       .arg(action.dragToPoint.x())
+                       .arg(action.dragToPoint.y());
+        break;
+    case SetupActionType::TypeText:
+        kindDesc = I18n::t(QStringLiteral("文字入力 '%1'")).arg(action.text);
+        break;
+    case SetupActionType::KeyPress:
+        kindDesc = I18n::t(QStringLiteral("キー入力 '%1'")).arg(action.keySequence);
+        break;
+    case SetupActionType::Wait:
+        kindDesc = I18n::t(QStringLiteral("待機 %1ms")).arg(action.waitMs);
+        break;
+    }
+    const QString labelSuffix =
+        action.label.isEmpty() ? QString() : I18n::t(QStringLiteral(" [%1]")).arg(action.label);
+    return I18n::t(QStringLiteral("%1: %2%3")).arg(index + 1).arg(kindDesc).arg(labelSuffix);
+}
+
+void MainWindow::refreshSetupActionList()
+{
+    m_setupActionListWidget->clear();
+    for (int i = 0; i < m_setupActions.size(); ++i)
+        m_setupActionListWidget->addItem(describeSetupAction(m_setupActions[i], i));
+}
+
 QStringList MainWindow::stepsReferencing(const QString &regionName) const
 {
     QStringList result;
@@ -1026,6 +1109,63 @@ void MainWindow::onRemoveSelectedNamedRegion()
 
     m_namedRegions.removeAt(row);
     refreshNamedRegionList();
+}
+
+void MainWindow::onAddSetupAction()
+{
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
+    SetupAction initial;
+    SetupActionEditorDialog dialog(initial, targetTopLeft, hasTarget, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_setupActions.append(dialog.result());
+    refreshSetupActionList();
+    m_setupActionListWidget->setCurrentRow(m_setupActions.size() - 1);
+}
+
+void MainWindow::onEditSelectedSetupAction()
+{
+    const int row = m_setupActionListWidget->currentRow();
+    if (row < 0 || row >= m_setupActions.size())
+        return;
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
+    SetupActionEditorDialog dialog(m_setupActions[row], targetTopLeft, hasTarget, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_setupActions[row] = dialog.result();
+    refreshSetupActionList();
+    m_setupActionListWidget->setCurrentRow(row);
+}
+
+void MainWindow::onRemoveSelectedSetupAction()
+{
+    const int row = m_setupActionListWidget->currentRow();
+    if (row < 0 || row >= m_setupActions.size())
+        return;
+    m_setupActions.removeAt(row);
+    refreshSetupActionList();
+}
+
+void MainWindow::onMoveSetupActionUp()
+{
+    const int row = m_setupActionListWidget->currentRow();
+    if (row > 0 && row < m_setupActions.size()) {
+        m_setupActions.move(row, row - 1);
+        refreshSetupActionList();
+        m_setupActionListWidget->setCurrentRow(row - 1);
+    }
+}
+
+void MainWindow::onMoveSetupActionDown()
+{
+    const int row = m_setupActionListWidget->currentRow();
+    if (row >= 0 && row < m_setupActions.size() - 1) {
+        m_setupActions.move(row, row + 1);
+        refreshSetupActionList();
+        m_setupActionListWidget->setCurrentRow(row + 1);
+    }
 }
 
 void MainWindow::flushActionParamsEditor()
@@ -1456,6 +1596,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     }
     config.steps = m_steps;
     config.namedRegions = m_namedRegions;
+    config.setupActions = m_setupActions;
     config.defaultActionParams = m_defaultActionParams;
 
     for (int i = 0; i < m_steps.size(); ++i) {
@@ -1513,6 +1654,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 void MainWindow::setControlsEnabled(bool enabled)
 {
     m_targetGroup->setEnabled(enabled);
+    m_setupActionsGroup->setEnabled(enabled);
     m_namedRegionGroup->setEnabled(enabled);
     m_stepsGroup->setEnabled(enabled);
     m_actionParamsGroup->setEnabled(enabled);
@@ -1571,7 +1713,7 @@ bool MainWindow::beginRun(bool interactive)
 
     bool ok = false;
     QString errorMessage;
-    const TestConfig config = buildConfigFromUi(ok, errorMessage);
+    TestConfig config = buildConfigFromUi(ok, errorMessage);
     if (!ok) {
         if (interactive)
             QMessageBox::warning(this, I18n::t(QStringLiteral("設定エラー")), errorMessage);
@@ -1581,6 +1723,13 @@ bool MainWindow::beginRun(bool interactive)
         }
         return false;
     }
+
+    // SPEC.md 6.x: "連続自動実行では初回のみ実行する" -- TestConfig::
+    // setupActions itself always means "run these now" (see its own
+    // comment), so trimming it for batch runs after the first happens here,
+    // not in RandomActionEngine.
+    if (m_setupActionsFirstRunOnlyCheck->isChecked() && m_batchRunsCompleted > 0)
+        config.setupActions.clear();
 
     // Preflight safety self-test: RandomActionEngine refuses to operate
     // anything it can't positively confirm is the target (see SPEC.md
@@ -2091,6 +2240,12 @@ QJsonObject MainWindow::buildPresetJson() const
         stepsArr.append(regionStepToJson(s));
     root["steps"] = stepsArr;
 
+    QJsonArray setupActionsArr;
+    for (const SetupAction &a : m_setupActions)
+        setupActionsArr.append(setupActionToJson(a));
+    root["setupActions"] = setupActionsArr;
+    root["setupActionsFirstRunOnly"] = m_setupActionsFirstRunOnlyCheck->isChecked();
+
     root["defaultActionParams"] = actionParamsToJson(m_defaultActionParams);
     root["defaultActionKinds"] = regionStepToJson(m_defaultActionKinds);
 
@@ -2136,7 +2291,7 @@ void MainWindow::onSavePreset()
 
 void MainWindow::onLoadPreset()
 {
-    if (!m_steps.isEmpty() || !m_namedRegions.isEmpty()) {
+    if (!m_steps.isEmpty() || !m_namedRegions.isEmpty() || !m_setupActions.isEmpty()) {
         const auto reply = QMessageBox::question(
             this, I18n::t(QStringLiteral("確認")),
             I18n::t(QStringLiteral("現在の操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？")));
@@ -2171,6 +2326,11 @@ void MainWindow::onLoadPreset()
     for (const QJsonValue &v : root["steps"].toArray())
         m_steps.append(regionStepFromJson(v.toObject()));
 
+    m_setupActions.clear();
+    for (const QJsonValue &v : root["setupActions"].toArray())
+        m_setupActions.append(setupActionFromJson(v.toObject()));
+    m_setupActionsFirstRunOnlyCheck->setChecked(root["setupActionsFirstRunOnly"].toBool(false));
+
     m_defaultActionParams = actionParamsFromJson(root["defaultActionParams"].toObject());
     m_defaultActionKinds = regionStepFromJson(root["defaultActionKinds"].toObject());
 
@@ -2203,6 +2363,7 @@ void MainWindow::onLoadPreset()
 
     m_lastEditedStepRow = -1;
     refreshNamedRegionList();
+    refreshSetupActionList();
     refreshStepList();
     loadActionParamsEditorForSelection();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());

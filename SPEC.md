@@ -1167,6 +1167,117 @@ UI表示言語を日本語・英語から選べるようにした。
   変化がないことも確認した。
   -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
+### 6.13 起動時セットアップ（デターミニスティックなセットアップマクロ、v0.53）
+
+検証するテストツールによっては、起動直後にログイン・初期設定など決まった手順を
+踏んでから初めてランダム操作による耐久テストを始めたい場合がある（例:
+「ユーザー名欄をクリック→アカウント名を入力→Tab→パスワードを入力→Return」）。
+従来の②ステップ構成は「同じ領域内で*ランダムに選んだ*操作を繰り返す」設計のため、
+こうした*毎回同じ順序で同じ操作を1回だけ*行う用途には向かなかった。この節の機能は、
+②のランダムループが始まる**前**に、①「対象選択」パネルで組んだ固定シーケンスを
+一度だけ実行する仕組みを追加するもの。
+
+- **データモデル**（`TestConfig.h`）: `enum class SetupActionType { Click,
+  DoubleClick, RightClick, Drag, TypeText, KeyPress, Wait }`と、1件分の操作を表す
+  `struct SetupAction`（`type`、`point`/`dragToPoint`（対象ウィンドウ左上を基準とした
+  相対座標）、`text`（TypeText用）、`keySequence`（KeyPress用、`QKeySequence`形式）、
+  `waitMs`（Wait用）、`label`（任意の説明文））を新設。`TestConfig::setupActions`
+  （`QList<SetupAction>`）に順序付きで保持する。座標は`NamedRegion::followsTargetWindow`
+  のような追従有無のトグルを設けず、**常に**対象ウィンドウの現在位置を基準に解決する
+  設計にした（セットアップマクロは起動のたびに再実行するのが通常の使い方であり、
+  「追従しない」を選ぶ意味がある場面がほぼ無いため）。
+- **座標の指定方法（`PointPickerOverlay`）**: `src/PointPickerOverlay.h/.cpp`を新設。
+  `RegionSelectorOverlay`（6.3節、矩形をドラッグで複数指定）を単純化し、画面全体を
+  覆う半透明オーバーレイ上で1回左クリックした地点を返すだけの部品にした
+  （`Esc`でキャンセル）。ドラッグ追跡用の状態を持たない分`RegionSelectorOverlay`より
+  シンプルで、`SetupActionEditorDialog`がクリック/ダブルクリック/右クリック/ドラッグの
+  座標欄から呼び出す。
+- **1件を編集するダイアログ（`SetupActionEditorDialog`）**: `src/
+  SetupActionEditorDialog.h/.cpp`を新設。「種類」コンボボックスで7種類から選び、
+  `QStackedWidget`で種類ごとの入力欄（点1つ/ドラッグの2点/文字列/キー/待機ミリ秒）を
+  切り替える。点は「位置を選択...」ボタンから`PointPickerOverlay`で拾った絶対座標を、
+  ダイアログを開いた時点の対象ウィンドウ左上との差分（相対座標）に変換して保持する
+  （`NamedRegionEditorDialog`が対象ウィンドウ位置を`MainWindow::currentTargetTopLeft()`
+  から受け取る手法と同じ）。対象ウィンドウが選択されていない状態では座標選択を
+  無効化し、警告ダイアログを出す。
+- **①パネルへのUI統合**: 「対象」グループの下に「起動時セットアップ（対象アプリ
+  起動直後に一度だけ実行。ログイン等）」グループボックスを新設した。中身は
+  ②ステップ一覧と同様の一覧+ボタン構成（追加.../編集.../削除/↑上へ/↓下へ）に加えて、
+  「連続自動実行（①バッチ）では初回のみ実行する」チェックボックスを配置（下記参照）。
+  一覧の各行は`MainWindow::describeSetupAction()`が「1: クリック (195, 67)
+  [Button1Click]」のような1行要約を生成する。実行中はこのグループも他の①②③パネル
+  同様に無効化される（`setControlsEnabled()`）。
+- **実行ロジック（`RandomActionEngine`）**: `start()`で`m_config.setupActions`が
+  空でなければ`m_inSetupPhase = true`にし、`performRandomAction()`（`m_timer`の
+  スロット）の先頭付近、既存の時間/回数制限チェックや対象クラッシュ検知・予期しない
+  ウィンドウ処理より後・②のステップ処理より前で`performSetupAction()`に分岐させる
+  ことで、②の乱数ループと全く同じタイマー駆動・単一スレッドの仕組みを再利用しつつ
+  「セットアップフェーズ中は別の処理をする」を実現した。`trySetupAction()`が
+  1件を実際にディスパッチする: Click/DoubleClick/RightClick/Dragは
+  `queryWindowBounds()`で対象ウィンドウの*現在の*左上を取得し相対座標を絶対座標に
+  変換したうえで、6.7節と全く同じ「`windowPidAtPoint(pt) == targetPid`でなければ
+  安全のため停止」というfail-closedの安全確認を行ってから`PlatformAutomation::
+  mouseClick`/`mouseDrag`を呼ぶ。TypeText/KeyPressは同様に`activeProcessPid() ==
+  targetPid`を確認してから`keyTap`/`keyShortcut`（`parseShortcut()`を`ActionKind::
+  Shortcut`と共用）を呼ぶ。右クリックが開いたコンテキストメニューは6.7節の
+  `handlePossibleContextMenu()`を再利用して必ず閉じるが、セットアップは
+  「毎回同じ操作をする」ものなのでメニュー項目のランダム選択（`ActionParams::
+  enableContextMenuSelection`）はここでは使わず、常にEscapeで閉じるだけにしている。
+- **安全確認失敗時の再試行（提案④相当）**: 起動直後は対象ウィンドウがまだ
+  最終的な位置・サイズに落ち着いていない、あるいはまだマップされていないことが
+  ありうるため、上記の安全確認（`windowPidAtPoint`/`activeProcessPid`/
+  `queryWindowBounds`自体の失敗）に対しては即座に`doStop()`せず、
+  `retrySetupOrFail()`が`m_timer`を短い間隔（300ms）で再スケジュールして同じ
+  `SetupAction`を再試行する（ブロッキングsleepではなくタイマー再スケジュールなので
+  再試行中でも■停止は即座に効く）。最大20回（`kMaxSetupSafetyRetries`）まで再試行し、
+  それでも解決しなければ`doStop(..., isAnomaly=true)`で異常停止として扱う
+  （6.7節のスクリーンショット/クラッシュダンプ収集が自動的に働く）。1件成功する
+  たびに再試行カウンタは0に戻る。
+- **ログ・サマリーへの記録**: 各セットアップ操作は「起動時セットアップ 1/2:
+  クリック at (452, 124) (説明文)」のようにログへ出力され、②の乱数操作と同じ
+  `recordRecentAction()`で`RunSummary::recentActions`にも含まれる（クラッシュ直前の
+  操作列を追うときにセットアップ分も見えるようにするため）。ただし
+  `RunSummary::actionKindCounts`（操作種別ごとの回数）や`iterationCount`
+  （実行回数）には含めない設計にした。これらは②の乱数操作の統計を表す指標であり、
+  「毎回同じ回数だけ必ず実行される」セットアップの回数を混ぜると、たとえば
+  「クリック: 5回」が乱数操作5回なのかセットアップ込みの数なのか紛らわしくなる
+  ため。
+- **①バッチ（連続自動実行）との連携**: `TestConfig::setupActions`自体は「常に今回
+  実行する」という意味に統一し（`TestConfig.h`のコメント参照）、「バッチ2回目以降は
+  スキップする」という判断は`RandomActionEngine`ではなく`MainWindow::beginRun()`が
+  行う。①の「連続自動実行（①バッチ）では初回のみ実行する」チェックボックスが
+  オンかつ`m_batchRunsCompleted > 0`（＝このバッチの2回目以降の実行）のときだけ、
+  `buildConfigFromUi()`が返した`TestConfig`の`setupActions`を`beginRun()`が
+  その場で空にしてから`m_engine->start()`に渡す。初回だけ出るライセンス同意
+  ダイアログのようなケースを想定した機能。
+- **プリセット保存/読込**: `TestConfigJson.h/.cpp`に`setupActionToJson`/
+  `setupActionFromJson`を追加し、`MainWindow::buildPresetJson()`/`onLoadPreset()`が
+  `setupActions`配列と`setupActionsFirstRunOnly`真偽値をプリセットJSONの一部として
+  保存/復元する（他の①②③設定と同じ扱い）。
+- **翻訳**: 新設した約45件の文字列をすべて`I18n::t()`でラップし、`I18n.cpp`の
+  翻訳テーブルに英訳を追加した。実機テストで発見した1件の訳漏れ（種類コンボの
+  「文字入力」単体キーが、ログ用の「文字入力 '%1'」とは別キーだったため未登録
+  だった）を修正済み。
+- **既知の制約**: `PointPickerOverlay`は`RegionSelectorOverlay`と同じ
+  `Qt::WA_TranslucentBackground`を使っているため、コンポジットマネージャの無い
+  Xvfb+openbox環境では半透明部分が不透明な黒として描画される（8章の既存の制約と
+  同一原因）。クリック自体は正しく機能する（実機テストでボタン中央をクリックして
+  座標が正しく拾えることを確認済み）。
+- **実機確認**（Xvfb + openbox、日英両モード）: ①パネルに「起動時セットアップ」
+  グループが正しく配置されること、「追加...」→種類コンボの全7種類が正しく翻訳
+  されること（英語モードで発見した「文字入力」未訳を上記の通り修正）、Wait種別で
+  待機時間分だけ②開始が遅れログに「起動時セットアップが完了しました。ランダム
+  操作を開始します」と出ること、Click種別で`PointPickerOverlay`により拾った座標が
+  対象ウィンドウ（TestTarget）の実際のボタンを正しくクリックし
+  （TestTargetの左クリックカウンタが1増え、TestTarget自身のログにも記録される
+  ことで確認）、その後②の乱数操作へ正しく引き継がれることを確認した。
+  プリセット保存→読込の往復でセットアップ一覧・「初回のみ実行」チェックが
+  正しく復元されることも確認した。「初回のみ実行」チェックを付けて連続実行回数2で
+  バッチ実行し、1回目のログには起動時セットアップの実行が含まれる一方、2回目の
+  ログ（「連続実行: 2/2回目を開始します」の直後）には起動時セットアップの行が
+  一切現れず②の乱数操作からいきなり始まることを確認した。
+  -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
+
 ## 7. 動作確認用アプリ (TestTarget)
 
 `testtarget/` にある簡易Qtアプリ。EnduranceTestGUI が実際に他プロセスへ入力を
@@ -2310,6 +2421,30 @@ UI表示言語を日本語・英語から選べるようにした。
     環境では静かに英語表示へフォールバックするため、後方互換上のリスクはない。
   - 上記の修正を反映した上で-Wall -Wextra -Wpedantic付きのクリーンビルドを
     再度確認し、日本語・英語両モードで主要画面に問題がないことを実機で確認した。
+- v0.53: 「テストツールの起動後にある決められた操作を行なってからランダム操作を
+  行いたい」という要望を受けて提案した4機能（10章参照）のうち①「起動時セットアップ
+  マクロ」・②「実行タイミング設定（連続自動実行の初回のみ／毎回）」・④「失敗時の
+  検知・診断強化（安全確認失敗時の再試行と異常停止）」を実装した（詳細は6.13節）。
+  ③「記録（レコーディング）モードでの作成支援」は、真のシステム全体パッシブ入力
+  記録（X11 XInput2の生イベント購読やmacOS CGEventTapなど、プラットフォームごとの
+  低レベルフック実装が必要で、対話的に検証できないmacOS側のリスクが大きい）
+  ではなく、`PointPickerOverlay`によるクリックでの座標指定＋直接のテキスト/キー
+  入力という、それ自体で「座標を手入力しなくて済む」という③の主目的を満たす形に
+  スコープを絞って実装した。
+  - `TestConfig::setupActions`（`SetupAction`/`SetupActionType`）、`PointPickerOverlay`、
+    `SetupActionEditorDialog`を新設。`RandomActionEngine`に起動時セットアップ
+    フェーズの実行ロジック（`performSetupAction`/`trySetupAction`/
+    `retrySetupOrFail`）を追加し、①パネルにセットアップ一覧UIと「連続自動実行では
+    初回のみ実行する」チェックボックスを追加、プリセット保存/読込にも対応した。
+  - 実機（Xvfb + openbox、日英両モード）で、Wait/Click両種別のセットアップ操作が
+    ②の乱数操作開始前に正しく1回だけ実行されること（Clickは対象アプリの実際の
+    ボタンを正しくクリックできることをTestTarget側のカウンタで確認）、プリセット
+    保存/読込の往復、「初回のみ実行」チェックがバッチ2回目以降のセットアップを
+    正しくスキップすることを確認した。この過程で1件、英語モードの種類コンボ
+    ボックスで「文字入力」（TypeText）が未翻訳のまま表示される不具合を発見・修正
+    した（ログ用の「文字入力 '%1'」とは別キーだったため翻訳テーブルへの登録が
+    漏れていた）。
+  - -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

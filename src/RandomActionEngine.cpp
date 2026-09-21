@@ -112,6 +112,15 @@ constexpr int kMaxRecordingFrames = 20;
 // keeps (SPEC.md 6.7/10) -- enough to see the short pattern of operations
 // leading up to a crash without ballooning every summary.
 constexpr int kRecentActionHistorySize = 15;
+// Startup setup-phase safety-check retries (SPEC.md 6.x "起動時セットアップ"
+// ④): how many times in a row a single SetupAction may fail its
+// target-window/target-active safety check (e.g. the window hasn't finished
+// appearing/laying out yet right after launch) before the run gives up and
+// stops, and how long to wait between attempts. Bounded and short, since a
+// genuinely wrong setup macro (pointing at a widget that will never appear)
+// should fail fast rather than stall the run for a long time.
+constexpr int kMaxSetupSafetyRetries = 20;
+constexpr int kSetupSafetyRetryDelayMs = 300;
 }  // namespace
 
 void RandomActionEngine::recordRecentAction(const QString &desc)
@@ -168,6 +177,9 @@ void RandomActionEngine::start(const TestConfig &config)
     m_lastScreenshotIterationCount = -1;
     m_recordingFrames.clear();
     m_recentActionDescriptions.clear();
+    m_inSetupPhase = !m_config.setupActions.isEmpty();
+    m_setupActionIndex = 0;
+    m_setupSafetyRetryCount = 0;
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -188,6 +200,10 @@ void RandomActionEngine::start(const TestConfig &config)
     emit iterationCountChanged(m_iterationCount);
     if (!m_config.steps.isEmpty())
         emit currentStepChanged(m_currentStepIndex);
+    if (m_inSetupPhase) {
+        emit logMessage(I18n::t(QStringLiteral("起動時セットアップを開始します（%1件） -- 完了後にランダム操作を開始します"))
+                             .arg(m_config.setupActions.size()));
+    }
     scheduleNext();
     m_resourceTimer.start();
     m_hangCheckTimer.start();
@@ -882,6 +898,12 @@ void RandomActionEngine::performRandomAction()
     }
     if (handleUnexpectedWindows())
         return;
+
+    if (m_inSetupPhase) {
+        performSetupAction();
+        return;
+    }
+
     if (m_config.steps.isEmpty()) {
         doStop(I18n::t(QStringLiteral("ステップが設定されていません")));
         return;
@@ -1284,4 +1306,156 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     outDesc = desc;
     outKind = kind;
     return ActionOutcome::Performed;
+}
+
+void RandomActionEngine::performSetupAction()
+{
+    if (m_setupActionIndex >= m_config.setupActions.size()) {
+        // Setup phase complete -- hand off to the normal randomized loop.
+        m_inSetupPhase = false;
+        emit logMessage(I18n::t(QStringLiteral("起動時セットアップが完了しました。ランダム操作を開始します")));
+        scheduleNext();
+        return;
+    }
+
+    const SetupAction &action = m_config.setupActions[m_setupActionIndex];
+    QString desc;
+    if (!trySetupAction(action, desc))
+        return;  // doStop() was called, or a retry was already scheduled
+
+    emit logMessage(I18n::t(QStringLiteral("起動時セットアップ %1/%2: %3"))
+                         .arg(m_setupActionIndex + 1)
+                         .arg(m_config.setupActions.size())
+                         .arg(desc));
+    emit actionPerformed(desc);
+    recordRecentAction(desc);
+
+    ++m_setupActionIndex;
+    m_setupSafetyRetryCount = 0;
+
+    // A Wait action's own waitMs replaces the usual randomized scheduling
+    // delay, mirroring how a wait *step* behaves in the main loop (see
+    // isWaitStep above in performRandomAction()).
+    if (action.type == SetupActionType::Wait)
+        m_timer.start(qMax(1, action.waitMs));
+    else
+        scheduleNext();
+}
+
+bool RandomActionEngine::retrySetupOrFail(const QString &stepLabel, const QString &reason)
+{
+    ++m_setupSafetyRetryCount;
+    if (m_setupSafetyRetryCount > kMaxSetupSafetyRetries) {
+        doStop(I18n::t(QStringLiteral("%1に失敗しました（%2）。%3回再試行しましたが解決しなかったため、"
+                              "安全のためテストを停止しました"))
+                   .arg(stepLabel, reason)
+                   .arg(kMaxSetupSafetyRetries),
+               /*isAnomaly=*/true);
+        return false;
+    }
+    emit logMessage(I18n::t(QStringLiteral("%1を再試行します（%2、%3/%4回目）"))
+                         .arg(stepLabel, reason)
+                         .arg(m_setupSafetyRetryCount)
+                         .arg(kMaxSetupSafetyRetries));
+    m_timer.start(kSetupSafetyRetryDelayMs);
+    return false;
+}
+
+bool RandomActionEngine::trySetupAction(const SetupAction &action, QString &outDesc)
+{
+    const QString stepLabel = I18n::t(QStringLiteral("起動時セットアップ %1/%2"))
+                                   .arg(m_setupActionIndex + 1)
+                                   .arg(m_config.setupActions.size());
+    const QString labelSuffix =
+        action.label.isEmpty() ? QString() : I18n::t(QStringLiteral("（%1）")).arg(action.label);
+
+    if (action.type == SetupActionType::Wait) {
+        outDesc = I18n::t(QStringLiteral("待機 %1ms")).arg(action.waitMs) + labelSuffix;
+        return true;
+    }
+
+    if (action.type == SetupActionType::TypeText || action.type == SetupActionType::KeyPress) {
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        // Same fail-closed rationale as runOneAction()'s Key/Shortcut check:
+        // don't send keyboard input anywhere unless the target is
+        // positively confirmed to be the active process right now.
+        if (PlatformAutomation::activeProcessPid() != m_config.targetPid)
+            return retrySetupOrFail(stepLabel, I18n::t(QStringLiteral("対象アプリがアクティブになっていません")));
+
+        if (action.type == SetupActionType::TypeText) {
+            for (const QChar &ch : action.text)
+                PlatformAutomation::keyTap(ch);
+            outDesc = I18n::t(QStringLiteral("文字入力 '%1'")).arg(action.text) + labelSuffix;
+        } else {
+            Qt::Key key = Qt::Key(0);
+            Qt::KeyboardModifiers mods;
+            if (!parseShortcut(action.keySequence, key, mods)) {
+                doStop(I18n::t(QStringLiteral("%1: キー '%2' を解釈できないため、テストを開始できません"))
+                           .arg(stepLabel, action.keySequence));
+                return false;
+            }
+            PlatformAutomation::keyShortcut(key, mods);
+            outDesc = I18n::t(QStringLiteral("キー入力 '%1'")).arg(action.keySequence) + labelSuffix;
+        }
+        return true;
+    }
+
+    // Click/DoubleClick/RightClick/Drag: point(s) stored relative to the
+    // target window's top-left corner, resolved against its *current*
+    // bounds every run (TestConfig.h's SetupAction comment) -- not a
+    // one-time resolution, since the window may not have finished its
+    // initial layout/positioning the first few ticks right after launch.
+    QRect windowBounds;
+    if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
+        return retrySetupOrFail(stepLabel, I18n::t(QStringLiteral("対象ウィンドウが見つかりません")));
+
+    const QPoint pt = windowBounds.topLeft() + action.point;
+    // Same fail-closed safety net as runOneAction(): confirm the point
+    // actually lands on the target before dispatching anything to it.
+    if (PlatformAutomation::windowPidAtPoint(pt) != m_config.targetPid)
+        return retrySetupOrFail(stepLabel, I18n::t(QStringLiteral("指定位置に対象アプリのウィンドウが見つかりません")));
+
+    if (m_config.keepTargetActive)
+        PlatformAutomation::activateProcess(m_config.targetPid);
+
+    switch (action.type) {
+    case SetupActionType::Click:
+        PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        outDesc = I18n::t(QStringLiteral("クリック at (%1, %2)")).arg(pt.x()).arg(pt.y()) + labelSuffix;
+        break;
+    case SetupActionType::DoubleClick:
+        PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        QThread::msleep(80);
+        PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        outDesc = I18n::t(QStringLiteral("ダブルクリック at (%1, %2)")).arg(pt.x()).arg(pt.y()) + labelSuffix;
+        break;
+    case SetupActionType::RightClick: {
+        PlatformAutomation::mouseClick(pt, Qt::RightButton);
+        QString desc = I18n::t(QStringLiteral("右クリック at (%1, %2)")).arg(pt.x()).arg(pt.y());
+        // A right click may open a native context/popup menu -- always
+        // dismiss it (never try to select an item: setup is meant to be a
+        // fixed, deterministic sequence, not a place for the same
+        // randomized item-selection runOneAction() does for regular
+        // steps), so it can't swallow the next setup action.
+        if (handlePossibleContextMenu(ActionParams(), desc))
+            return false;  // doStop() was already called
+        outDesc = desc + labelSuffix;
+        break;
+    }
+    case SetupActionType::Drag: {
+        const QPoint to = windowBounds.topLeft() + action.dragToPoint;
+        if (PlatformAutomation::windowPidAtPoint(to) != m_config.targetPid)
+            return retrySetupOrFail(stepLabel, I18n::t(QStringLiteral("ドラッグ先に対象アプリのウィンドウが見つかりません")));
+        PlatformAutomation::mouseDrag(pt, to, Qt::LeftButton, 12);
+        outDesc =
+            I18n::t(QStringLiteral("ドラッグ (%1, %2) → (%3, %4)")).arg(pt.x()).arg(pt.y()).arg(to.x()).arg(to.y()) +
+            labelSuffix;
+        break;
+    }
+    default:
+        break;
+    }
+
+    return true;
 }

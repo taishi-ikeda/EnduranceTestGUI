@@ -26,6 +26,31 @@ DragDirectionMode dragDirectionFromString(const QString &s)
     return DragDirectionMode::Random;
 }
 
+QString setupActionTypeToString(SetupActionType type)
+{
+    switch (type) {
+    case SetupActionType::Click: return QStringLiteral("click");
+    case SetupActionType::DoubleClick: return QStringLiteral("doubleClick");
+    case SetupActionType::RightClick: return QStringLiteral("rightClick");
+    case SetupActionType::Drag: return QStringLiteral("drag");
+    case SetupActionType::TypeText: return QStringLiteral("typeText");
+    case SetupActionType::KeyPress: return QStringLiteral("keyPress");
+    case SetupActionType::Wait: return QStringLiteral("wait");
+    }
+    return QStringLiteral("click");
+}
+
+SetupActionType setupActionTypeFromString(const QString &s)
+{
+    if (s == QStringLiteral("doubleClick")) return SetupActionType::DoubleClick;
+    if (s == QStringLiteral("rightClick")) return SetupActionType::RightClick;
+    if (s == QStringLiteral("drag")) return SetupActionType::Drag;
+    if (s == QStringLiteral("typeText")) return SetupActionType::TypeText;
+    if (s == QStringLiteral("keyPress")) return SetupActionType::KeyPress;
+    if (s == QStringLiteral("wait")) return SetupActionType::Wait;
+    return SetupActionType::Click;
+}
+
 QString contextMenuModeToString(ContextMenuSelectionMode mode)
 {
     return mode == ContextMenuSelectionMode::ByIndex ? QStringLiteral("byIndex") : QStringLiteral("byName");
@@ -262,4 +287,32 @@ RegionStep regionStepFromJson(const QJsonObject &o)
             s.groupMembers.append(regionStepFromJson(v.toObject()));
     }
     return s;
+}
+
+QJsonObject setupActionToJson(const SetupAction &a)
+{
+    QJsonObject o;
+    o["type"] = setupActionTypeToString(a.type);
+    o["pointX"] = a.point.x();
+    o["pointY"] = a.point.y();
+    o["dragToPointX"] = a.dragToPoint.x();
+    o["dragToPointY"] = a.dragToPoint.y();
+    o["text"] = a.text;
+    o["keySequence"] = a.keySequence;
+    o["waitMs"] = a.waitMs;
+    o["label"] = a.label;
+    return o;
+}
+
+SetupAction setupActionFromJson(const QJsonObject &o)
+{
+    SetupAction a;
+    a.type = setupActionTypeFromString(o["type"].toString());
+    a.point = QPoint(o["pointX"].toInt(), o["pointY"].toInt());
+    a.dragToPoint = QPoint(o["dragToPointX"].toInt(), o["dragToPointY"].toInt());
+    a.text = o["text"].toString();
+    a.keySequence = o["keySequence"].toString();
+    a.waitMs = o["waitMs"].toInt(a.waitMs);
+    a.label = o["label"].toString();
+    return a;
 }

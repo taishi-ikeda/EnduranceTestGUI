@@ -218,6 +218,42 @@ struct RegionStep
     }
 };
 
+// What kind of operation a single SetupAction (below) performs.
+enum class SetupActionType { Click, DoubleClick, RightClick, Drag, TypeText, KeyPress, Wait };
+
+// One deterministic action performed exactly once, in the order it appears
+// in TestConfig::setupActions ("起動時セットアップ", SPEC.md 6.x) --
+// unlike RegionStep (which repeats a *randomly chosen* action many times
+// within a region), a SetupAction always does the exact same thing every
+// run: click this exact point, type this exact text, press this exact key.
+// Meant for the fixed login/navigation/configuration sequence some target
+// apps require right after launch, before randomized testing should begin
+// (e.g. "click the username field, type the account name, press Tab, type
+// the password, press Return").
+struct SetupAction
+{
+    SetupActionType type = SetupActionType::Click;
+
+    // Click/DoubleClick/RightClick/Drag(from): position relative to the
+    // target window's top-left corner *at the moment this action runs*
+    // (RandomActionEngine re-resolves against the window's current bounds
+    // every run, the same way a step referencing "対象GUIの全領域" does --
+    // there is no separate "follow window" toggle here, since a setup
+    // macro re-run against a window that's since moved is the normal case,
+    // not an opt-in one).
+    QPoint point;
+    QPoint dragToPoint;  // Drag only: the release point, also window-relative
+
+    QString text;         // TypeText only: the literal text to type, one key event per character
+    QString keySequence;  // KeyPress only: QKeySequence-parseable, e.g. "Return", "Ctrl+A"
+    int waitMs = 500;      // Wait only
+
+    // Purely descriptive (e.g. "ユーザー名欄"), shown in the setup list;
+    // has no effect on execution. Falls back to a generic per-type
+    // description when empty (see MainWindow::describeSetupAction()).
+    QString label;
+};
+
 // Random action engine configuration. Holds everything the UI collects
 // before a run starts; RandomActionEngine only reads from this.
 struct TestConfig
@@ -225,6 +261,15 @@ struct TestConfig
     qint64 targetPid = -1;
     QString targetAppName;
     quint32 targetWindowId = 0;
+
+    // Fixed, deterministic sequence run exactly once, in order, right
+    // after the target is confirmed alive and before the randomized
+    // `steps` loop begins (SPEC.md 6.x "起動時セットアップ"). Empty by
+    // default (no setup phase, same as before this existed). Whether this
+    // is skipped on batch runs after the first (SPEC.md 10 ②) is decided
+    // by MainWindow before calling RandomActionEngine::start() -- this
+    // field always means "run these now", never "run these only if...".
+    QList<SetupAction> setupActions;
 
     // Pool of named, reusable operation regions (see NamedRegion above),
     // managed in the "①対象選択" column. Referenced by name from steps

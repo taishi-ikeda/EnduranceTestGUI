@@ -163,6 +163,29 @@ private:
         StoppedEngine,  // doStop() was already called; caller must return immediately
     };
 
+    // Runs TestConfig::setupActions in order, one per tick, before the
+    // randomized `steps` loop begins (SPEC.md 6.x "起動時セットアップ") --
+    // called from performRandomAction() while m_inSetupPhase is true, in
+    // place of the normal step logic. Advances m_setupActionIndex and hands
+    // off to the normal loop (clears m_inSetupPhase, calls scheduleNext())
+    // once every setup action has been performed.
+    void performSetupAction();
+    // Dispatches exactly one SetupAction, with the same fail-closed safety
+    // checks as runOneAction() (target-window-at-point / target-active).
+    // Returns true (outDesc filled in) on success; false if it either
+    // called doStop() or scheduled a bounded retry via m_timer (see
+    // retrySetupOrFail()) -- either way the caller must just return without
+    // advancing m_setupActionIndex.
+    bool trySetupAction(const SetupAction &action, QString &outDesc);
+    // Shared by trySetupAction()'s safety-check failure paths: retries the
+    // *same* setup action after a short delay (bounded by
+    // kMaxSetupSafetyRetries), via QTimer rescheduling rather than a
+    // blocking sleep so stop() still takes effect immediately even mid-
+    // retry. Calls doStop() (isAnomaly=true) once retries are exhausted.
+    // Always returns false, so call sites can just `return
+    // retrySetupOrFail(...);` from within trySetupAction().
+    bool retrySetupOrFail(const QString &stepLabel, const QString &reason);
+
     const ActionParams &effectiveParams(const RegionStep &step) const;
     // Resolves `step`'s region, picks a weighted-random enabled action kind
     // for it, runs the usual pre-dispatch safety checks, and dispatches
@@ -259,6 +282,16 @@ private:
     bool handleUnexpectedWindows();
 
     TestConfig m_config;
+    // Startup setup-phase state (SPEC.md 6.x "起動時セットアップ"): while
+    // m_inSetupPhase is true, performRandomAction() runs
+    // performSetupAction() instead of the normal randomized-step logic.
+    // m_setupActionIndex is this run's progress through m_config.setupActions
+    // (both reset in start()); m_setupSafetyRetryCount is reset to 0
+    // whenever a setup action succeeds and counts consecutive safety-check
+    // retries of the *current* one (see retrySetupOrFail()).
+    bool m_inSetupPhase = false;
+    int m_setupActionIndex = 0;
+    int m_setupSafetyRetryCount = 0;
     QTimer m_timer;
     QTimer m_resourceTimer;
     // Periodic target-responsiveness (hang) check -- see

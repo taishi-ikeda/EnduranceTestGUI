@@ -61,6 +61,12 @@ private slots:
     void onEditSelectedNamedRegion();
     void onRemoveSelectedNamedRegion();
 
+    void onAddSetupAction();
+    void onEditSelectedSetupAction();
+    void onRemoveSelectedSetupAction();
+    void onMoveSetupActionUp();
+    void onMoveSetupActionDown();
+
     void onAddStep();
     void onAddWaitStep();
     void onEditSelectedStep();
@@ -110,6 +116,8 @@ private:
 
     void refreshStepList();
     void refreshNamedRegionList();
+    void refreshSetupActionList();
+    QString describeSetupAction(const SetupAction &action, int index) const;
     // Live bounds top-left of whatever target is currently selected in
     // m_targetCombo, if any -- used as the anchor point for a named
     // region's "follow target window" option (SPEC.md 6.3/10). Returns
@@ -230,6 +238,29 @@ private:
     QPushButton *m_editNamedRegionButton = nullptr;
     QPushButton *m_removeNamedRegionButton = nullptr;
     QList<NamedRegion> m_namedRegions;
+
+    // Startup setup macro (SPEC.md 6.x "起動時セットアップ"): a fixed,
+    // deterministic sequence run once, in order, right after the target is
+    // confirmed alive and before ②'s randomized steps begin -- e.g. the
+    // login/navigation/configuration some target apps require right after
+    // launch. Points are picked on screen via PointPickerOverlay
+    // (SetupActionEditorDialog), stored window-relative like NamedRegion
+    // (see TestConfig.h's SetupAction comment).
+    QGroupBox *m_setupActionsGroup = nullptr;
+    QListWidget *m_setupActionListWidget = nullptr;
+    QPushButton *m_addSetupActionButton = nullptr;
+    QPushButton *m_editSetupActionButton = nullptr;
+    QPushButton *m_removeSetupActionButton = nullptr;
+    QPushButton *m_moveSetupActionUpButton = nullptr;
+    QPushButton *m_moveSetupActionDownButton = nullptr;
+    // If checked, a batch (① 連続自動実行) only runs this setup macro before
+    // its first run, skipping it on every automatic restart after that
+    // (e.g. a one-time EULA/license dialog that only appears the very first
+    // time the target app is launched) -- decided in beginRun(), since
+    // TestConfig::setupActions itself always means "run these now" (see its
+    // own comment in TestConfig.h).
+    QCheckBox *m_setupActionsFirstRunOnlyCheck = nullptr;
+    QList<SetupAction> m_setupActions;
 
     // Steps
     QListWidget *m_stepListWidget = nullptr;

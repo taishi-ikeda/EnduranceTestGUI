@@ -235,9 +235,6 @@ void StepGroupEditorDialog::loadMemberEditorForSelection()
     m_memberWeightSpin->setValue(member.groupWeight);
     m_memberWeightSpin->blockSignals(false);
 
-    m_kindEditor->setEnabled(true);
-    m_kindEditor->setKinds(member);
-
     m_useDefaultParamsRadio->setEnabled(true);
     m_useCustomParamsRadio->setEnabled(true);
     m_useDefaultParamsRadio->blockSignals(true);
@@ -249,10 +246,26 @@ void StepGroupEditorDialog::loadMemberEditorForSelection()
     m_useDefaultParamsRadio->blockSignals(false);
     m_useCustomParamsRadio->blockSignals(false);
 
+    // Must be set *before* setKinds() below, not after: setKinds() fires a
+    // reentrant flushMemberEditor() per checkbox as it programmatically
+    // toggles them, and flushMemberEditor() writes into
+    // m_members[m_lastEditedMemberRow]. Setting this after setKinds() left
+    // it pointing at the *previous* member while setKinds() was still
+    // running, so those reentrant flushes overwrote the previous member
+    // with (a partial, then final) copy of the member being switched to --
+    // corrupting whichever member the user had just switched away from
+    // every time they clicked a different member in the list. The weight
+    // spin and params-mode radios above are also read by flushMemberEditor(),
+    // so they're likewise set (with blockSignals) before this, not after --
+    // otherwise the same reentrant flush would still read stale values for
+    // them even though it now writes to the right row.
+    m_lastEditedMemberRow = row;
+
+    m_kindEditor->setEnabled(true);
+    m_kindEditor->setKinds(member);
+
     m_paramsEditor->setEnabled(!member.useDefaultActionParams);
     m_paramsEditor->setParams(effectiveParamsOf(member, m_defaultActionParams));
-
-    m_lastEditedMemberRow = row;
 }
 
 void StepGroupEditorDialog::onMemberSelectionChanged()

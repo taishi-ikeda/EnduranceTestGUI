@@ -43,6 +43,7 @@
 #include "ActionParamsEditor.h"
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
+#include "RecordingIndicatorPanel.h"
 #include "RegionSelectorOverlay.h"
 #include "SetupActionEditorDialog.h"
 #include "StatisticsDialog.h"
@@ -51,6 +52,7 @@
 #include "StopPanel.h"
 #include "TestConfigJson.h"
 #include "platform/GlobalHotkey.h"
+#include "platform/InputRecorder.h"
 #include "I18n.h"
 
 namespace
@@ -86,6 +88,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
     connect(m_engine, &RandomActionEngine::regionScreenshotCaptured, this,
             &MainWindow::onRegionScreenshotCaptured);
+
+    m_inputRecorder = new InputRecorder(this);
+    connect(m_inputRecorder, &InputRecorder::actionRecorded, this, &MainWindow::onSetupActionRecorded);
+    connect(m_inputRecorder, &InputRecorder::finished, this, &MainWindow::onRecordingFinished);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -462,6 +468,16 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     setupActionsOrderRow->addWidget(m_moveSetupActionUpButton);
     setupActionsOrderRow->addWidget(m_moveSetupActionDownButton);
     setupActionsLayout->addLayout(setupActionsOrderRow);
+    // SPEC.md 6.13追加実装及び修正依頼: records real mouse/keyboard
+    // operations (system-wide, including the target app's own dialogs)
+    // directly into the list above, instead of picking one action at a
+    // time via "追加...".
+    m_recordSetupButton = new QPushButton(I18n::t(QStringLiteral("● 記録...")), m_setupActionsGroup);
+    m_recordSetupButton->setToolTip(
+        I18n::t(QStringLiteral("押すと、①で選択中の対象ウィンドウを基準に、次にEscキーが押されるまでの"
+                                "マウスクリック・ドラッグ・キー入力（対象アプリが開くダイアログへの操作も"
+                                "含む）を記録し、この一覧に追加していきます。")));
+    setupActionsLayout->addWidget(m_recordSetupButton);
     m_setupActionsFirstRunOnlyCheck = new QCheckBox(
         I18n::t(QStringLiteral("連続自動実行（①バッチ）では初回のみ実行する")), m_setupActionsGroup);
     m_setupActionsFirstRunOnlyCheck->setToolTip(
@@ -477,6 +493,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onRemoveSelectedSetupAction);
     connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
     connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
+    connect(m_recordSetupButton, &QPushButton::clicked, this, &MainWindow::onRecordSetupActions);
 
     layout->addWidget(m_setupActionsGroup);
 
@@ -1191,6 +1208,79 @@ void MainWindow::onMoveSetupActionDown()
     }
 }
 
+void MainWindow::onRecordSetupActions()
+{
+    QPoint targetTopLeft;
+    if (!currentTargetTopLeft(targetTopLeft)) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("対象が選択されていません")),
+            I18n::t(QStringLiteral("記録された座標は①で選択中の対象ウィンドウを基準に保存されるため、"
+                                    "先に①で対象アプリを選択してください。")));
+        return;
+    }
+    if (!m_inputRecorder->start()) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("記録を開始できませんでした")),
+            I18n::t(QStringLiteral("システム全体の入力監視を開始できませんでした。OSの権限設定"
+                                    "（Linux: XInput2拡張が利用できるか / macOS: 入力監視の許可）"
+                                    "を確認してください。")));
+        return;
+    }
+
+    m_recordedActionCount = 0;
+    setControlsEnabled(false);
+    m_statusLabel->setText(I18n::t(QStringLiteral("記録中")));
+
+    m_recordingPanel = new RecordingIndicatorPanel();
+    connect(m_recordingPanel, &RecordingIndicatorPanel::stopRequested, m_inputRecorder,
+            &InputRecorder::stop);
+    m_recordingPanel->show();
+
+    appendLog(I18n::t(QStringLiteral("起動時セットアップの記録を開始しました（Escキーで終了）")));
+}
+
+void MainWindow::onSetupActionRecorded(SetupActionType type, QPoint point, QPoint dragToPoint,
+                                        QString text, QString keySequence)
+{
+    QPoint targetTopLeft;
+    if (!currentTargetTopLeft(targetTopLeft)) {
+        appendLog(I18n::t(QStringLiteral("記録: 対象ウィンドウが見つからないため、この操作は記録されません"
+                                          "でした")));
+        return;
+    }
+
+    SetupAction action;
+    action.type = type;
+    // point/dragToPoint arrive screen-absolute (see InputRecorder.h);
+    // translated to window-relative *now*, against the target's current
+    // bounds, the same as every other SetupAction/NamedRegion in this app.
+    action.point = point - targetTopLeft;
+    action.dragToPoint = dragToPoint - targetTopLeft;
+    action.text = text;
+    action.keySequence = keySequence;
+    m_setupActions.append(action);
+    refreshSetupActionList();
+    m_setupActionListWidget->setCurrentRow(m_setupActions.size() - 1);
+
+    ++m_recordedActionCount;
+    if (m_recordingPanel)
+        m_recordingPanel->setRecordedActionCount(m_recordedActionCount);
+    appendLog(I18n::t(QStringLiteral("記録: %1")).arg(describeSetupAction(action, m_setupActions.size() - 1)));
+}
+
+void MainWindow::onRecordingFinished(bool escapePressed)
+{
+    if (m_recordingPanel) {
+        m_recordingPanel->close();
+        m_recordingPanel->deleteLater();
+    }
+    setControlsEnabled(true);
+    m_statusLabel->setText(I18n::t(QStringLiteral("待機中")));
+    appendLog(escapePressed
+                  ? I18n::t(QStringLiteral("記録を終了しました（Escキー）。記録件数: %1")).arg(m_recordedActionCount)
+                  : I18n::t(QStringLiteral("記録を終了しました。記録件数: %1")).arg(m_recordedActionCount));
+}
+
 void MainWindow::flushActionParamsEditor()
 {
     if (!m_actionParamsEditor)
@@ -1893,6 +1983,16 @@ void MainWindow::onContinuousRun()
 
 void MainWindow::onStop()
 {
+    // The controls row's "■ 停止" also becomes enabled while the startup
+    // setup "記録" feature is active (setControlsEnabled(false) toggles it
+    // the same as during a real run) -- route it to ending the recording in
+    // that case, so the button does something sensible either way instead
+    // of silently no-op'ing (m_engine itself was never started).
+    if (m_inputRecorder->isRecording()) {
+        m_inputRecorder->stop();
+        return;
+    }
+
     // A manual stop always cancels the whole batch, not just whatever run
     // is currently in progress (or being waited for -- see below) --
     // otherwise onEngineFinished()'s continueBatchIfNeeded() would just

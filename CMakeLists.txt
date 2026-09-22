@@ -67,6 +67,8 @@ set(SOURCES
     src/TestConfigJson.cpp
     src/TestStatistics.cpp
     src/StatisticsDialog.cpp
+    src/RecordingIndicatorPanel.cpp
+    src/platform/InputRecorder.cpp
 )
 
 set(HEADERS
@@ -89,18 +91,22 @@ set(HEADERS
     src/TestConfigJson.h
     src/TestStatistics.h
     src/StatisticsDialog.h
+    src/RecordingIndicatorPanel.h
 )
 
-list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h)
+list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)
 
 if(APPLE)
     enable_language(OBJCXX)
-    list(APPEND SOURCES src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm)
-    set_source_files_properties(src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm PROPERTIES
+    list(APPEND SOURCES src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm
+        src/platform/macos/InputRecorder_mac.mm)
+    set_source_files_properties(src/platform/macos/Automation_mac.mm src/platform/macos/GlobalHotkey_mac.mm
+        src/platform/macos/InputRecorder_mac.mm PROPERTIES
         COMPILE_FLAGS "-fobjc-arc"
     )
 elseif(UNIX)
-    list(APPEND SOURCES src/platform/linux/Automation_linux.cpp src/platform/linux/GlobalHotkey_linux.cpp)
+    list(APPEND SOURCES src/platform/linux/Automation_linux.cpp src/platform/linux/GlobalHotkey_linux.cpp
+        src/platform/linux/InputRecorder_linux.cpp)
 endif()
 
 add_executable(EnduranceTestGUI ${SOURCES} ${HEADERS})
@@ -138,10 +144,16 @@ elseif(UNIX)
     if(NOT X11_XTest_FOUND)
         message(FATAL_ERROR "XTest extension development files not found (libxtst-dev / libXtst-devel)")
     endif()
+    if(NOT X11_Xi_FOUND)
+        message(FATAL_ERROR "XInput2 extension development files not found (libxi-dev / libXi-devel) "
+            "-- required for the startup setup '記録' (record) feature's system-wide input observation "
+            "(src/platform/linux/InputRecorder_linux.cpp)")
+    endif()
     target_include_directories(EnduranceTestGUI PRIVATE ${X11_INCLUDE_DIR})
     target_link_libraries(EnduranceTestGUI PRIVATE
         ${X11_LIBRARIES}
         ${X11_XTest_LIB}
+        ${X11_Xi_LIB}
         gobject-2.0
     )
 

@@ -27,9 +27,11 @@ class QGroupBox;
 class QTimer;
 class QAction;
 class StopPanel;
+class RecordingIndicatorPanel;
 class ActionParamsEditor;
 class ActionKindEditor;
 class GlobalHotkey;
+class InputRecorder;
 
 // Main window, laid out (per SPEC.md 6.9) as three columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
@@ -66,6 +68,15 @@ private slots:
     void onRemoveSelectedSetupAction();
     void onMoveSetupActionUp();
     void onMoveSetupActionDown();
+
+    // SPEC.md 6.13追加実装及び修正依頼: records the user's own mouse/
+    // keyboard operations (system-wide, including the target app's own
+    // dialogs) into m_setupActions until Escape is pressed. See
+    // InputRecorder for the actual observation mechanism.
+    void onRecordSetupActions();
+    void onSetupActionRecorded(SetupActionType type, QPoint point, QPoint dragToPoint, QString text,
+                                QString keySequence);
+    void onRecordingFinished(bool escapePressed);
 
     void onAddStep();
     void onAddWaitStep();
@@ -276,6 +287,16 @@ private:
     QPushButton *m_removeSetupActionButton = nullptr;
     QPushButton *m_moveSetupActionUpButton = nullptr;
     QPushButton *m_moveSetupActionDownButton = nullptr;
+    // SPEC.md 6.13追加実装及び修正依頼「記録」ボタン: appends to
+    // m_setupActions in real time while InputRecorder is observing (see
+    // onRecordSetupActions()/onSetupActionRecorded()). m_inputRecorder is
+    // owned (parented to this); m_recordingPanel is a QPointer since it's a
+    // separate top-level widget the user (or Escape) can close independent
+    // of MainWindow, the same pattern as m_stopPanel.
+    QPushButton *m_recordSetupButton = nullptr;
+    InputRecorder *m_inputRecorder = nullptr;
+    QPointer<RecordingIndicatorPanel> m_recordingPanel;
+    int m_recordedActionCount = 0;
     // If checked, a batch (① 連続自動実行) only runs this setup macro before
     // its first run, skipping it on every automatic restart after that
     // (e.g. a one-time EULA/license dialog that only appears the very first

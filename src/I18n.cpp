@@ -352,8 +352,6 @@ const QHash<QString, QString> &translationTable()
                         "見つからなくても実行には影響しません。"), QStringLiteral("If a crash report/core dump that appears to belong to the target app is found on the system, its path is included in the abnormal-stop log and record set. Not finding one has no effect on the run.")},
         {QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
                             "先にそれらのステップの領域を変更するか、ステップを削除してください。"), QStringLiteral("This operation region cannot be deleted because it is used by the following steps: %1\nPlease change those steps' region or delete the steps first.")},
-        {QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
-                                "（グループの入れ子は未対応です）。"), QStringLiteral("Wait steps and groups themselves cannot be grouped together with other steps (nested groups are not supported).")},
         {QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
             "パネルで操作種別を1つ以上有効にしてください。"), QStringLiteral("%1 has no action type selected. Select this step in ② and enable at least one action type in the ③ Action Parameters panel.")},
         {QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
@@ -511,6 +509,9 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Specify the drag's start and end positions, both relative to the target window.")},
         {QStringLiteral("開始位置を選択..."), QStringLiteral("Select Start Position...")},
         {QStringLiteral("終了位置を選択..."), QStringLiteral("Select End Position...")},
+        {QStringLiteral("位置"), QStringLiteral("Position")},
+        {QStringLiteral("開始"), QStringLiteral("Start")},
+        {QStringLiteral("終了"), QStringLiteral("End")},
         {QStringLiteral("入力するテキスト:"), QStringLiteral("Text to type:")},
         {QStringLiteral("キー（例: Return, Tab, Ctrl+A）:"), QStringLiteral("Key (e.g. Return, Tab, Ctrl+A):")},
         {QStringLiteral("例: Return"), QStringLiteral("e.g. Return")},
@@ -566,6 +567,146 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("右クリック (%1, %2)"), QStringLiteral("Right-click (%1, %2)")},
         {QStringLiteral(" [%1]"), QStringLiteral(" [%1]")},
         {QStringLiteral("%1: %2%3"), QStringLiteral("%1: %2%3")},
+
+        // v0.59: ▶開始の「起動してから開始する」オプション・独立した「連続実行」ボタン
+        {QStringLiteral("⟳ 連続実行"), QStringLiteral("⟳ Continuous Run")},
+        {QStringLiteral("対象アプリが起動中でも必ず一度終了してから新しく起動し、起動時セットアップと"
+                        "ステップ構成の実行を行います。実行後に対象アプリが残っていれば終了し、"
+                        "連続実行回数の分だけ繰り返します。①の自動起動コマンドの設定が必要です。"),
+         QStringLiteral("Always terminates the target app first (even if it's already running) and "
+                        "launches a fresh instance, then runs the startup setup and steps. If the "
+                        "target app is still running afterward, it's terminated, and this repeats for "
+                        "the batch run count. Requires ①'s auto-launch command to be set.")},
+        {QStringLiteral("▶開始: 1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
+                        "自動的に次を開始し、指定回数繰り返します。\n"
+                        "⟳連続実行: 常にこの回数だけ、対象アプリの終了→再起動→実行を繰り返します。"),
+         QStringLiteral("▶ Start: setting this above 1 automatically starts the next run (waiting for "
+                        "the target app to relaunch) each time one finishes, repeating that many "
+                        "times.\n⟳ Continuous Run: always repeats terminate target -> relaunch -> run "
+                        "this many times.")},
+        {QStringLiteral("開始時にこのコマンドで対象ツールを起動してから開始する"),
+         QStringLiteral("Launch the target tool with this command before starting")},
+        {QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
+                        "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。"),
+         QStringLiteral("When checked, pressing ▶ Start first launches the target app with the "
+                        "auto-launch command above, then begins the startup setup and steps once its "
+                        "launch is confirmed.")},
+        {QStringLiteral("「開始時にこのコマンドで対象ツールを起動してから開始する」を有効にする"
+                        "場合は、①に対象アプリの自動起動コマンドを設定してください。"),
+         QStringLiteral("To enable \"Launch the target tool with this command before starting\", "
+                        "please set the target app's auto-launch command in ①.")},
+        {QStringLiteral("対象ツールを起動しています...起動を確認してから開始します"),
+         QStringLiteral("Launching the target tool... will start once its launch is confirmed")},
+        {QStringLiteral("連続実行を使うには、①に対象アプリの自動起動コマンドを設定してください。"),
+         QStringLiteral("To use Continuous Run, please set the target app's auto-launch command in ①.")},
+        {QStringLiteral("連続実行: 1回目の準備中..."), QStringLiteral("Continuous run: preparing run 1...")},
+        {QStringLiteral("連続実行を開始します（対象アプリが残っている場合は終了してから起動します）"),
+         QStringLiteral("Starting continuous run (if the target app is still running, it will be "
+                        "terminated before launching)")},
+        {QStringLiteral("連続実行を中断しました（対象アプリの終了/再起動待ち中でした）"),
+         QStringLiteral("Continuous run interrupted (was waiting for the target app to exit/relaunch)")},
+        {QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）"),
+         QStringLiteral("Batch run interrupted (was waiting for the target app to relaunch)")},
+        {QStringLiteral("連続実行を中断します（現在の実行が終わり次第停止します）"),
+         QStringLiteral("Interrupting the batch run (will stop once the current run finishes)")},
+        {QStringLiteral("連続実行: 対象アプリ（PID %1）が残っているため終了します"),
+         QStringLiteral("Continuous run: the target app (PID %1) is still running, terminating it")},
+        {QStringLiteral("連続実行: 対象アプリの終了を確認しました。新しいインスタンスを"
+                        "起動します"),
+         QStringLiteral("Continuous run: confirmed the target app has exited. Launching a new "
+                        "instance")},
+        {QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します"),
+         QStringLiteral("Continuous run: detected the target app has launched. Starting the next run")},
+        {QStringLiteral("対象ツールの起動を検知しました。開始します"),
+         QStringLiteral("Detected the target tool has launched. Starting")},
+
+        // v0.60: 起動時セットアップ「記録」機能 (InputRecorder/RecordingIndicatorPanel)
+        {QStringLiteral("● 記録..."), QStringLiteral("● Record...")},
+        {QStringLiteral("押すと、①で選択中の対象ウィンドウを基準に、次にEscキーが押されるまでの"
+                        "マウスクリック・ドラッグ・キー入力（対象アプリが開くダイアログへの操作も"
+                        "含む）を記録し、この一覧に追加していきます。"),
+         QStringLiteral("Click to start recording mouse clicks/drags/keyboard input -- including "
+                        "operating dialogs the target app opens -- relative to whichever target window "
+                        "is selected in ①, and append them to this list, until Escape is pressed.")},
+        {QStringLiteral("記録中"), QStringLiteral("Recording")},
+        {QStringLiteral("対象が選択されていません"), QStringLiteral("No Target Selected")},
+        {QStringLiteral("記録された座標は①で選択中の対象ウィンドウを基準に保存されるため、"
+                        "先に①で対象アプリを選択してください。"),
+         QStringLiteral("Recorded coordinates are saved relative to the target window selected in "
+                        "①, so please select the target app in ① first.")},
+        {QStringLiteral("記録を開始できませんでした"), QStringLiteral("Could Not Start Recording")},
+        {QStringLiteral("システム全体の入力監視を開始できませんでした。OSの権限設定"
+                        "（Linux: XInput2拡張が利用できるか / macOS: 入力監視の許可）"
+                        "を確認してください。"),
+         QStringLiteral("Could not start system-wide input observation. Please check your OS "
+                        "permission settings (Linux: whether the XInput2 extension is available / "
+                        "macOS: Input Monitoring permission).")},
+        {QStringLiteral("起動時セットアップの記録を開始しました（Escキーで終了）"),
+         QStringLiteral("Started recording the startup setup (press Escape to stop)")},
+        {QStringLiteral("記録: 対象ウィンドウが見つからないため、この操作は記録されません"
+                        "でした"),
+         QStringLiteral("Record: the target window could not be found, so this action was not "
+                        "recorded")},
+        {QStringLiteral("記録: %1"), QStringLiteral("Recorded: %1")},
+        {QStringLiteral("記録を終了しました（Escキー）。記録件数: %1"),
+         QStringLiteral("Recording stopped (Escape). Actions recorded: %1")},
+        {QStringLiteral("記録を終了しました。記録件数: %1"),
+         QStringLiteral("Recording stopped. Actions recorded: %1")},
+        {QStringLiteral("● 記録中... (Escで終了)"), QStringLiteral("● Recording... (Escape to stop)")},
+        {QStringLiteral("記録件数: %1"), QStringLiteral("Actions recorded: %1")},
+        {QStringLiteral("■ 記録終了"), QStringLiteral("■ Stop Recording")},
+
+        // v0.61: ステップ構成「タスク」機能 (TaskEditorDialog)
+        {QStringLiteral("タスク化"), QStringLiteral("Task")},
+        {QStringLiteral("タスク化できません"), QStringLiteral("Cannot Task")},
+        {QStringLiteral("タスク解除"), QStringLiteral("Untask")},
+        {QStringLiteral("タスクの編集"), QStringLiteral("Edit Task")},
+        {QStringLiteral("タスクの操作（一覧の順番通りに、毎回すべて1回ずつ実行されます。\n"
+                        "タスク全体で1回分の操作としてカウントされます）:"),
+         QStringLiteral("The task's actions (all run once each, in list order, every time.\n"
+                        "The whole task counts as a single action):")},
+        {QStringLiteral("操作（この順番で実行されます）:"), QStringLiteral("Actions (run in this order):")},
+        {QStringLiteral("操作未選択"), QStringLiteral("No action selected")},
+        {QStringLiteral("操作%1の操作種別・詳細設定を編集中"),
+         QStringLiteral("Editing action types/details for Action%1")},
+        {QStringLiteral("タスクに操作を最低1つ追加してください。"),
+         QStringLiteral("Please add at least one action to the task.")},
+        {QStringLiteral("%1: %2 | 操作: %3"), QStringLiteral("%1: %2 | Action: %3")},
+        {QStringLiteral("%1ステップ%2: タスク（%3個の操作を順番に実行）%4"),
+         QStringLiteral("%1Step%2: Task (%3 actions, run in order)%4")},
+        {QStringLiteral("ステップ %1 はタスクです。「編集...」から操作を設定してください"),
+         QStringLiteral("Step %1 is a task. Configure its actions via \"Edit...\"")},
+        {QStringLiteral("ステップ %1（タスク内操作 %2/%3）"), QStringLiteral("Step %1 (task action %2/%3)")},
+        {QStringLiteral("ステップ %1（タスク）にステップが登録されていません"),
+         QStringLiteral("Step %1 (task) has no actions registered")},
+        {QStringLiteral("ステップ%1（タスク内操作%2）"), QStringLiteral("Step%1 (task action%2)")},
+        {QStringLiteral("ステップ%1（タスク）に操作が登録されていません。"),
+         QStringLiteral("Step%1 (task) has no actions registered.")},
+        {QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にグループ化"
+                        "できません（コンテナの入れ子は未対応です）。"),
+         QStringLiteral("Wait steps, groups, and tasks themselves cannot be combined with other "
+                        "steps into a group (nesting containers is not supported).")},
+        {QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にタスク化"
+                        "できません（コンテナの入れ子は未対応です）。"),
+         QStringLiteral("Wait steps, groups, and tasks themselves cannot be combined with other "
+                        "steps into a task (nesting containers is not supported).")},
+
+        // v0.62: タスクメンバーの「新しく出現したダイアログを対象にする」機能
+        {QStringLiteral("新しく出現したウィンドウ（ダイアログ等）を対象にする（自動検出）"),
+         QStringLiteral("Target a newly appeared window (dialog, etc.) (auto-detected)")},
+        {QStringLiteral("※このタスク内で直前までに実行した操作が開いたダイアログ等、対象アプリの"
+                        "メインウィンドウ以外に新しく出現したウィンドウ全体を操作領域にします。"
+                        "実行時にそのようなウィンドウが見つからない場合は、見つかるまで待機します。"),
+         QStringLiteral("Uses the entire area of whatever window newly appeared besides the target "
+                        "app's main window as the operation region -- e.g. a dialog opened by an "
+                        "earlier action in this task. If no such window is found yet when this runs, "
+                        "it waits until one appears.")},
+        {QStringLiteral("新しく出現したダイアログ（自動検出）"), QStringLiteral("Newly appeared dialog (auto-detected)")},
+        {QStringLiteral("新しく出現したダイアログ"), QStringLiteral("Newly appeared dialog")},
+        {QStringLiteral("%1が対象とする新しいウィンドウ（ダイアログ等）が現れないため、"
+                        "安全のためテストを停止しました"),
+         QStringLiteral("%1's target window (a dialog, etc.) never appeared, so the test was stopped "
+                        "for safety")},
     };
     return table;
 }

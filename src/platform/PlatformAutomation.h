@@ -71,6 +71,15 @@ bool activateProcess(qint64 pid);
 // having closed).
 bool isProcessRunning(qint64 pid);
 
+// Best-effort, asynchronous request that the process exit (SIGTERM on
+// Linux/macOS) -- used by 連続実行 (SPEC.md 10 ⑤) to get rid of a leftover
+// target instance before launching a fresh one. Does not wait for the
+// process to actually exit: callers must poll isProcessRunning() themselves
+// (see MainWindow::killTargetThenRelaunchForContinuousRun()) before treating
+// it as gone, since a process can ignore or take time to act on the signal.
+// No-op (and safe to call) if the pid is already gone.
+void terminateProcess(qint64 pid);
+
 // Current resident memory and cumulative CPU time for this process. Sample
 // twice and divide the CPU-time delta by the wall-clock delta to get a CPU
 // percentage (see RandomActionEngine's resource-usage sampler).

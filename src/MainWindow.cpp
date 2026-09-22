@@ -43,14 +43,17 @@
 #include "ActionParamsEditor.h"
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
+#include "RecordingIndicatorPanel.h"
 #include "RegionSelectorOverlay.h"
 #include "SetupActionEditorDialog.h"
 #include "StatisticsDialog.h"
 #include "StepEditorDialog.h"
 #include "StepGroupEditorDialog.h"
 #include "StopPanel.h"
+#include "TaskEditorDialog.h"
 #include "TestConfigJson.h"
 #include "platform/GlobalHotkey.h"
+#include "platform/InputRecorder.h"
 #include "I18n.h"
 
 namespace
@@ -86,6 +89,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
     connect(m_engine, &RandomActionEngine::regionScreenshotCaptured, this,
             &MainWindow::onRegionScreenshotCaptured);
+
+    m_inputRecorder = new InputRecorder(this);
+    connect(m_inputRecorder, &InputRecorder::actionRecorded, this, &MainWindow::onSetupActionRecorded);
+    connect(m_inputRecorder, &InputRecorder::finished, this, &MainWindow::onRecordingFinished);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -169,12 +176,23 @@ void MainWindow::buildUi()
     // narrow (SPEC.md 6.9).
     auto *controlsRow = new QHBoxLayout;
     m_startButton = new QPushButton(I18n::t(QStringLiteral("▶ 開始")), central);
+    // SPEC.md 10 ⑤: 独立した「連続実行」ボタン -- 押すと対象アプリが起動中
+    // かどうかに関わらず必ず終了→再起動してから②③を実行し、それを
+    // 連続実行回数（m_batchRunCountSpinを共用）だけ繰り返す。▶開始＋
+    // 連続実行回数>1（従来のバッチ）とは異なり、常にキル→再起動する点が
+    // 違う（see onContinuousRun()/killTargetThenRelaunchForContinuousRun()）。
+    m_continuousRunButton = new QPushButton(I18n::t(QStringLiteral("⟳ 連続実行")), central);
+    m_continuousRunButton->setToolTip(
+        I18n::t(QStringLiteral("対象アプリが起動中でも必ず一度終了してから新しく起動し、起動時セットアップと"
+                                "ステップ構成の実行を行います。実行後に対象アプリが残っていれば終了し、"
+                                "連続実行回数の分だけ繰り返します。①の自動起動コマンドの設定が必要です。")));
     m_stopButton = new QPushButton(I18n::t(QStringLiteral("■ 停止")), central);
     m_stopButton->setEnabled(false);
     m_pauseResumeButton = new QPushButton(I18n::t(QStringLiteral("‖ 一時停止")), central);
     m_pauseResumeButton->setEnabled(false);
     m_statusLabel = new QLabel(I18n::t(QStringLiteral("待機中")), central);
     controlsRow->addWidget(m_startButton);
+    controlsRow->addWidget(m_continuousRunButton);
     controlsRow->addWidget(m_stopButton);
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_statusLabel);
@@ -188,8 +206,9 @@ void MainWindow::buildUi()
     m_batchRunCountSpin->setRange(1, 100000);
     m_batchRunCountSpin->setValue(1);
     m_batchRunCountSpin->setToolTip(
-        I18n::t(QStringLiteral("1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
-                                "自動的に次を開始し、指定回数繰り返します。")));
+        I18n::t(QStringLiteral("▶開始: 1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
+                                "自動的に次を開始し、指定回数繰り返します。\n"
+                                "⟳連続実行: 常にこの回数だけ、対象アプリの終了→再起動→実行を繰り返します。")));
     controlsRow->addWidget(m_batchRunCountSpin);
     m_batchProgressLabel = new QLabel(central);
     controlsRow->addWidget(m_batchProgressLabel);
@@ -218,6 +237,7 @@ void MainWindow::buildUi()
     connect(m_showStatisticsButton, &QPushButton::clicked, this, &MainWindow::onShowStatistics);
 
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
+    connect(m_continuousRunButton, &QPushButton::clicked, this, &MainWindow::onContinuousRun);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
     connect(m_pauseResumeButton, &QPushButton::clicked, this, &MainWindow::onPauseResume);
 
@@ -404,6 +424,16 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_launchTargetNowButton = new QPushButton(I18n::t(QStringLiteral("今すぐ起動")), m_targetGroup);
     targetLayout->addWidget(m_launchTargetNowButton);
 
+    // SPEC.md 10 ⑤: ▶開始時に、この起動コマンドで対象アプリをまず起動して
+    // から②③を実行するオプション。連続実行（m_continuousRunButton）は常に
+    // 起動コマンドを使うので、これはあくまで▶開始（単発実行）用。
+    m_launchBeforeStartCheck =
+        new QCheckBox(I18n::t(QStringLiteral("開始時にこのコマンドで対象ツールを起動してから開始する")), m_targetGroup);
+    m_launchBeforeStartCheck->setToolTip(
+        I18n::t(QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
+                                "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。")));
+    targetLayout->addWidget(m_launchBeforeStartCheck);
+
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
@@ -439,6 +469,16 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     setupActionsOrderRow->addWidget(m_moveSetupActionUpButton);
     setupActionsOrderRow->addWidget(m_moveSetupActionDownButton);
     setupActionsLayout->addLayout(setupActionsOrderRow);
+    // SPEC.md 6.13追加実装及び修正依頼: records real mouse/keyboard
+    // operations (system-wide, including the target app's own dialogs)
+    // directly into the list above, instead of picking one action at a
+    // time via "追加...".
+    m_recordSetupButton = new QPushButton(I18n::t(QStringLiteral("● 記録...")), m_setupActionsGroup);
+    m_recordSetupButton->setToolTip(
+        I18n::t(QStringLiteral("押すと、①で選択中の対象ウィンドウを基準に、次にEscキーが押されるまでの"
+                                "マウスクリック・ドラッグ・キー入力（対象アプリが開くダイアログへの操作も"
+                                "含む）を記録し、この一覧に追加していきます。")));
+    setupActionsLayout->addWidget(m_recordSetupButton);
     m_setupActionsFirstRunOnlyCheck = new QCheckBox(
         I18n::t(QStringLiteral("連続自動実行（①バッチ）では初回のみ実行する")), m_setupActionsGroup);
     m_setupActionsFirstRunOnlyCheck->setToolTip(
@@ -454,6 +494,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onRemoveSelectedSetupAction);
     connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
     connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
+    connect(m_recordSetupButton, &QPushButton::clicked, this, &MainWindow::onRecordSetupActions);
 
     layout->addWidget(m_setupActionsGroup);
 
@@ -681,6 +722,18 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     groupButtonsRow->addWidget(m_ungroupStepButton);
     stepsLayout->addLayout(groupButtonsRow);
 
+    // SPEC.md 6.2追加実装及び修正依頼: select 2+ plain steps and combine
+    // them into a task that always runs every member exactly once, in the
+    // order shown, as a single atomic action each time its turn comes up
+    // (unlike a group's random per-action member pick above). "タスク解除"
+    // reverses this, same as "グループ解除".
+    auto *taskButtonsRow = new QHBoxLayout;
+    m_taskifyStepsButton = new QPushButton(I18n::t(QStringLiteral("タスク化")), m_stepsGroup);
+    m_untaskifyStepButton = new QPushButton(I18n::t(QStringLiteral("タスク解除")), m_stepsGroup);
+    taskButtonsRow->addWidget(m_taskifyStepsButton);
+    taskButtonsRow->addWidget(m_untaskifyStepButton);
+    stepsLayout->addLayout(taskButtonsRow);
+
     connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
             &MainWindow::onStepSelectionChanged);
     connect(m_stepListWidget, &QListWidget::itemSelectionChanged, this,
@@ -694,6 +747,8 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_clearStepsButton, &QPushButton::clicked, this, &MainWindow::onClearSteps);
     connect(m_groupStepsButton, &QPushButton::clicked, this, &MainWindow::onGroupSelectedSteps);
     connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
+    connect(m_taskifyStepsButton, &QPushButton::clicked, this, &MainWindow::onTaskifySelectedSteps);
+    connect(m_untaskifyStepButton, &QPushButton::clicked, this, &MainWindow::onUntaskifySelectedStep);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
     return wrapper;
@@ -854,6 +909,16 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
             .arg(crashBadge);
     }
 
+    if (step.isTask) {
+        const QString runningPrefix =
+            index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
+        return I18n::t(QStringLiteral("%1ステップ%2: タスク（%3個の操作を順番に実行）%4"))
+            .arg(runningPrefix)
+            .arg(index + 1)
+            .arg(step.taskMembers.size())
+            .arg(crashBadge);
+    }
+
     QStringList actions;
     if (step.enableClick)
         actions << I18n::t(QStringLiteral("クリック"));
@@ -972,6 +1037,12 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
                 if (!member.useWholeWindow && member.regionName == regionName)
                     result << I18n::t(QStringLiteral("ステップ%1（グループ内メンバー%2）")).arg(i + 1).arg(j + 1);
             }
+        } else if (step.isTask) {
+            for (int j = 0; j < step.taskMembers.size(); ++j) {
+                const RegionStep &member = step.taskMembers[j];
+                if (!member.useWholeWindow && member.regionName == regionName)
+                    result << I18n::t(QStringLiteral("ステップ%1（タスク内操作%2）")).arg(i + 1).arg(j + 1);
+            }
         } else if (!step.useWholeWindow && step.regionName == regionName) {
             result << I18n::t(QStringLiteral("ステップ%1")).arg(i + 1);
         }
@@ -985,6 +1056,8 @@ void MainWindow::renameRegionReferences(QList<RegionStep> &steps, const QString 
     for (RegionStep &step : steps) {
         if (step.isGroup)
             renameRegionReferences(step.groupMembers, oldName, newName);
+        else if (step.isTask)
+            renameRegionReferences(step.taskMembers, oldName, newName);
         else if (!step.useWholeWindow && step.regionName == oldName)
             step.regionName = newName;
     }
@@ -1168,6 +1241,79 @@ void MainWindow::onMoveSetupActionDown()
     }
 }
 
+void MainWindow::onRecordSetupActions()
+{
+    QPoint targetTopLeft;
+    if (!currentTargetTopLeft(targetTopLeft)) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("対象が選択されていません")),
+            I18n::t(QStringLiteral("記録された座標は①で選択中の対象ウィンドウを基準に保存されるため、"
+                                    "先に①で対象アプリを選択してください。")));
+        return;
+    }
+    if (!m_inputRecorder->start()) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("記録を開始できませんでした")),
+            I18n::t(QStringLiteral("システム全体の入力監視を開始できませんでした。OSの権限設定"
+                                    "（Linux: XInput2拡張が利用できるか / macOS: 入力監視の許可）"
+                                    "を確認してください。")));
+        return;
+    }
+
+    m_recordedActionCount = 0;
+    setControlsEnabled(false);
+    m_statusLabel->setText(I18n::t(QStringLiteral("記録中")));
+
+    m_recordingPanel = new RecordingIndicatorPanel();
+    connect(m_recordingPanel, &RecordingIndicatorPanel::stopRequested, m_inputRecorder,
+            &InputRecorder::stop);
+    m_recordingPanel->show();
+
+    appendLog(I18n::t(QStringLiteral("起動時セットアップの記録を開始しました（Escキーで終了）")));
+}
+
+void MainWindow::onSetupActionRecorded(SetupActionType type, QPoint point, QPoint dragToPoint,
+                                        QString text, QString keySequence)
+{
+    QPoint targetTopLeft;
+    if (!currentTargetTopLeft(targetTopLeft)) {
+        appendLog(I18n::t(QStringLiteral("記録: 対象ウィンドウが見つからないため、この操作は記録されません"
+                                          "でした")));
+        return;
+    }
+
+    SetupAction action;
+    action.type = type;
+    // point/dragToPoint arrive screen-absolute (see InputRecorder.h);
+    // translated to window-relative *now*, against the target's current
+    // bounds, the same as every other SetupAction/NamedRegion in this app.
+    action.point = point - targetTopLeft;
+    action.dragToPoint = dragToPoint - targetTopLeft;
+    action.text = text;
+    action.keySequence = keySequence;
+    m_setupActions.append(action);
+    refreshSetupActionList();
+    m_setupActionListWidget->setCurrentRow(m_setupActions.size() - 1);
+
+    ++m_recordedActionCount;
+    if (m_recordingPanel)
+        m_recordingPanel->setRecordedActionCount(m_recordedActionCount);
+    appendLog(I18n::t(QStringLiteral("記録: %1")).arg(describeSetupAction(action, m_setupActions.size() - 1)));
+}
+
+void MainWindow::onRecordingFinished(bool escapePressed)
+{
+    if (m_recordingPanel) {
+        m_recordingPanel->close();
+        m_recordingPanel->deleteLater();
+    }
+    setControlsEnabled(true);
+    m_statusLabel->setText(I18n::t(QStringLiteral("待機中")));
+    appendLog(escapePressed
+                  ? I18n::t(QStringLiteral("記録を終了しました（Escキー）。記録件数: %1")).arg(m_recordedActionCount)
+                  : I18n::t(QStringLiteral("記録を終了しました。記録件数: %1")).arg(m_recordedActionCount));
+}
+
 void MainWindow::flushActionParamsEditor()
 {
     if (!m_actionParamsEditor)
@@ -1232,6 +1378,23 @@ void MainWindow::loadActionParamsEditorForSelection()
         // "編集..." button) rather than here -- see RegionStep::isGroup.
         m_actionParamsContextLabel->setText(
             I18n::t(QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください")).arg(row + 1));
+        m_stepUseDefaultParamsRadio->blockSignals(true);
+        m_stepUseDefaultParamsRadio->setChecked(true);
+        m_stepUseDefaultParamsRadio->blockSignals(false);
+        m_stepUseDefaultParamsRadio->setEnabled(false);
+        m_stepUseCustomParamsRadio->setEnabled(false);
+        m_actionParamsEditor->setParams(m_defaultActionParams);
+        m_stepKindGroup->setEnabled(false);
+        m_lastEditedStepRow = -1;
+        return;
+    }
+
+    if (m_steps[row].isTask) {
+        // A task's members each have their own region/action-kind/
+        // ActionParams settings, edited in TaskEditorDialog (via ②'s
+        // "編集..." button) rather than here -- see RegionStep::isTask.
+        m_actionParamsContextLabel->setText(
+            I18n::t(QStringLiteral("ステップ %1 はタスクです。「編集...」から操作を設定してください")).arg(row + 1));
         m_stepUseDefaultParamsRadio->blockSignals(true);
         m_stepUseDefaultParamsRadio->setChecked(true);
         m_stepUseDefaultParamsRadio->blockSignals(false);
@@ -1390,6 +1553,17 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    if (m_steps[row].isTask) {
+        TaskEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams, m_defaultActionKinds,
+                                 this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        m_steps[row] = dialog.result();
+        refreshStepList();
+        m_stepListWidget->setCurrentRow(row);
+        return;
+    }
+
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -1472,11 +1646,12 @@ void MainWindow::onGroupSelectedSteps()
     if (rows.size() < 2)
         return;
     for (int row : rows) {
-        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup ||
+            m_steps[row].isTask) {
             QMessageBox::warning(
                 this, I18n::t(QStringLiteral("グループ化できません")),
-                I18n::t(QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
-                                "（グループの入れ子は未対応です）。")));
+                I18n::t(QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にグループ化"
+                                "できません（コンテナの入れ子は未対応です）。")));
             return;
         }
     }
@@ -1532,11 +1707,81 @@ void MainWindow::onUngroupSelectedStep()
     loadActionParamsEditorForSelection();
 }
 
+void MainWindow::onTaskifySelectedSteps()
+{
+    QList<int> rows;
+    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
+        rows.append(m_stepListWidget->row(item));
+    std::sort(rows.begin(), rows.end());
+    if (rows.size() < 2)
+        return;
+    for (int row : rows) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup ||
+            m_steps[row].isTask) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("タスク化できません")),
+                I18n::t(QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にタスク化"
+                                "できません（コンテナの入れ子は未対応です）。")));
+            return;
+        }
+    }
+
+    flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
+
+    RegionStep task;
+    task.isTask = true;
+    for (int row : rows) {
+        RegionStep member = m_steps[row];
+        // Reset fields that only make sense at the top level (see
+        // onGroupSelectedSteps()'s identical rationale) -- groupWeight is
+        // irrelevant for a task member (order, not weight, decides
+        // execution), so it's left at its default rather than reset.
+        member.isGroup = false;
+        member.groupMembers.clear();
+        member.isTask = false;
+        member.taskMembers.clear();
+        task.taskMembers.append(member);
+    }
+
+    const int insertAt = rows.first();
+    for (int i = rows.size() - 1; i >= 0; --i)  // remove highest index first so earlier ones stay valid
+        m_steps.removeAt(rows[i]);
+    m_steps.insert(insertAt, task);
+
+    refreshStepList();
+    m_stepListWidget->setCurrentRow(insertAt);
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
+}
+
+void MainWindow::onUntaskifySelectedStep()
+{
+    const int row = m_stepListWidget->currentRow();
+    if (row < 0 || row >= m_steps.size() || !m_steps[row].isTask)
+        return;
+
+    flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
+    const QList<RegionStep> members = m_steps[row].taskMembers;
+    m_steps.removeAt(row);
+    for (int i = 0; i < members.size(); ++i)
+        m_steps.insert(row + i, members[i]);
+
+    refreshStepList();
+    if (!members.isEmpty())
+        m_stepListWidget->setCurrentRow(row);
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
+}
+
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                             QString &errorMessage) const
 {
-    if (step.isWaitStep || step.isGroup)
-        return true;  // nothing here to validate (a group's members are validated individually)
+    if (step.isWaitStep || step.isGroup || step.isTask)
+        return true;  // nothing here to validate (a group's/task's members are validated individually)
     if (!step.hasAnyActionEnabled()) {
         errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
             "パネルで操作種別を1つ以上有効にしてください。"))
@@ -1618,6 +1863,21 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
             }
             continue;
         }
+        if (step.isTask) {
+            if (step.taskMembers.isEmpty()) {
+                errorMessage =
+                    I18n::t(QStringLiteral("ステップ%1（タスク）に操作が登録されていません。")).arg(i + 1);
+                return config;
+            }
+            for (int j = 0; j < step.taskMembers.size(); ++j) {
+                if (!validateStepActionConfig(
+                        step.taskMembers[j],
+                        I18n::t(QStringLiteral("ステップ%1（タスク内操作%2）")).arg(i + 1).arg(j + 1),
+                        errorMessage))
+                    return config;
+            }
+            continue;
+        }
         if (!validateStepActionConfig(step, I18n::t(QStringLiteral("ステップ%1")).arg(i + 1), errorMessage))
             return config;
     }
@@ -1661,7 +1921,8 @@ void MainWindow::setControlsEnabled(bool enabled)
     const int selectedStepRow = m_stepListWidget->currentRow();
     const bool kindGroupApplicable = selectedStepRow >= 0 && selectedStepRow < m_steps.size() &&
                                       !m_steps[selectedStepRow].isWaitStep &&
-                                      !m_steps[selectedStepRow].isGroup;
+                                      !m_steps[selectedStepRow].isGroup &&
+                                      !m_steps[selectedStepRow].isTask;
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
@@ -1669,6 +1930,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_loadPresetAction->setEnabled(enabled);
     m_batchRunCountSpin->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
+    m_continuousRunButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
     if (enabled) {
@@ -1684,14 +1946,19 @@ void MainWindow::updateGroupButtonsEnabled()
     int plainCount = 0;
     for (QListWidgetItem *item : selected) {
         const int row = m_stepListWidget->row(item);
-        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup)
+        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup &&
+            !m_steps[row].isTask)
             ++plainCount;
     }
     m_groupStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
                                     plainCount == selected.size());
+    m_taskifyStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
+                                      plainCount == selected.size());
     const int row = m_stepListWidget->currentRow();
     m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
                                      row < m_steps.size() && m_steps[row].isGroup);
+    m_untaskifyStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
+                                       row < m_steps.size() && m_steps[row].isTask);
 }
 
 bool MainWindow::beginRun(bool interactive)
@@ -1723,6 +1990,11 @@ bool MainWindow::beginRun(bool interactive)
         }
         return false;
     }
+
+    // SPEC.md 10 ⑤: remembered so killTargetThenRelaunchForContinuousRun()
+    // still has a pid to terminate even if the target has already vanished
+    // from ①'s live window list by the time it's needed.
+    m_lastRunTargetPid = config.targetPid;
 
     // SPEC.md 6.x: "連続自動実行では初回のみ実行する" -- TestConfig::
     // setupActions itself always means "run these now" (see its own
@@ -1812,25 +2084,87 @@ void MainWindow::onStart()
     m_batchRunsRequested = qMax(1, m_batchRunCountSpin->value());
     m_batchRunsCompleted = 0;
     m_batchModeActive = m_batchRunsRequested > 1;
+    m_continuousRunMode = false;
     m_batchProgressLabel->setText(QString());
+
+    // SPEC.md 10 ⑤: launch the target first, then wait for it to appear,
+    // before actually beginning the run -- rather than assuming whichever
+    // window ①currently has selected is already the one to operate.
+    if (m_launchBeforeStartCheck->isChecked()) {
+        if (m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("設定エラー")),
+                I18n::t(QStringLiteral("「開始時にこのコマンドで対象ツールを起動してから開始する」を有効にする"
+                                        "場合は、①に対象アプリの自動起動コマンドを設定してください。")));
+            return;
+        }
+        setControlsEnabled(false);
+        m_stopButton->setEnabled(true);
+        m_launchBeforeStartPending = true;
+        appendLog(I18n::t(QStringLiteral("対象ツールを起動しています...起動を確認してから開始します")));
+        launchTargetAppFromConfiguredCommand();
+        m_batchWaitTimer->start();
+        return;
+    }
+
     beginRun(/*interactive=*/true);
+}
+
+void MainWindow::onContinuousRun()
+{
+    // SPEC.md 10 ⑤: independent of ▶開始 -- always kills any leftover
+    // target instance and launches a fresh one before every cycle,
+    // regardless of whether one was already running, then repeats that for
+    // m_batchRunCountSpin's configured number of times.
+    if (m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("設定エラー")),
+            I18n::t(QStringLiteral("連続実行を使うには、①に対象アプリの自動起動コマンドを設定してください。")));
+        return;
+    }
+    m_batchRunsRequested = qMax(1, m_batchRunCountSpin->value());
+    m_batchRunsCompleted = 0;
+    m_batchModeActive = true;
+    m_continuousRunMode = true;
+    m_batchProgressLabel->setText(
+        I18n::t(QStringLiteral("連続実行: 1回目の準備中...")));
+    setControlsEnabled(false);
+    m_stopButton->setEnabled(true);
+    appendLog(I18n::t(QStringLiteral("連続実行を開始します（対象アプリが残っている場合は終了してから起動します）")));
+    killTargetThenRelaunchForContinuousRun();
 }
 
 void MainWindow::onStop()
 {
+    // The controls row's "■ 停止" also becomes enabled while the startup
+    // setup "記録" feature is active (setControlsEnabled(false) toggles it
+    // the same as during a real run) -- route it to ending the recording in
+    // that case, so the button does something sensible either way instead
+    // of silently no-op'ing (m_engine itself was never started).
+    if (m_inputRecorder->isRecording()) {
+        m_inputRecorder->stop();
+        return;
+    }
+
     // A manual stop always cancels the whole batch, not just whatever run
     // is currently in progress (or being waited for -- see below) --
     // otherwise onEngineFinished()'s continueBatchIfNeeded() would just
     // start the next one right back up.
     const bool wasBatching = m_batchModeActive;
+    const bool wasContinuous = m_continuousRunMode;
     m_batchModeActive = false;
+    m_continuousRunMode = false;
+    m_continuousWaitPhase = ContinuousWaitPhase::None;
+    m_launchBeforeStartPending = false;
 
     if (m_batchWaitTimer->isActive()) {
-        // Between batch runs: the target app crashed/exited and we're
-        // polling for it to come back (SPEC.md 10 ①). Nothing is actually
-        // running for m_engine to stop, so undo the waiting state directly.
+        // Between batch/連続実行 runs, or waiting for ▶開始's "起動してから
+        // 開始する" launch to appear: nothing is actually running for
+        // m_engine to stop, so undo the waiting state directly.
         m_batchWaitTimer->stop();
-        appendLog(I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
+        appendLog(wasContinuous
+                      ? I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの終了/再起動待ち中でした）"))
+                      : I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
         m_batchProgressLabel->setText(QString());
         setControlsEnabled(true);
         return;
@@ -1912,6 +2246,7 @@ void MainWindow::continueBatchIfNeeded()
     if (m_batchRunsCompleted >= m_batchRunsRequested) {
         appendLog(I18n::t(QStringLiteral("連続実行が完了しました（%1/%2回）")).arg(m_batchRunsCompleted).arg(m_batchRunsRequested));
         m_batchModeActive = false;
+        m_continuousRunMode = false;
         m_batchProgressLabel->setText(QString());
         return;
     }
@@ -1930,6 +2265,13 @@ void MainWindow::continueBatchIfNeeded()
 
 void MainWindow::waitForTargetThenContinueBatch()
 {
+    // SPEC.md 10 ⑤: 連続実行 always kills the leftover target (if any) and
+    // relaunches fresh, unlike the passive "wait for it to come back on its
+    // own" semantics below.
+    if (m_continuousRunMode) {
+        killTargetThenRelaunchForContinuousRun();
+        return;
+    }
     onRefreshTargets();
     if (tryReselectLastTarget()) {
         beginRun(/*interactive=*/false);
@@ -1946,14 +2288,71 @@ void MainWindow::waitForTargetThenContinueBatch()
     m_batchWaitTimer->start();
 }
 
+void MainWindow::killTargetThenRelaunchForContinuousRun()
+{
+    onRefreshTargets();
+    qint64 pidToKill = -1;
+    if (tryReselectLastTarget()) {
+        const int idx = m_targetCombo->currentIndex();
+        if (idx >= 0 && idx < m_windows.size())
+            pidToKill = m_windows[idx].pid;
+    } else if (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+        // Still running but no longer showing a window ①can see (e.g. its
+        // last window just closed without the process exiting) -- fall
+        // back to the pid the previous run was actually started with.
+        pidToKill = m_lastRunTargetPid;
+    }
+    if (pidToKill > 0) {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が残っているため終了します")).arg(pidToKill));
+        PlatformAutomation::terminateProcess(pidToKill);
+    }
+    m_continuousWaitPhase = ContinuousWaitPhase::WaitingForExit;
+    m_batchWaitTimer->start();
+}
+
 void MainWindow::onBatchWaitTick()
 {
+    if (m_continuousRunMode) {
+        onRefreshTargets();
+        if (m_continuousWaitPhase == ContinuousWaitPhase::WaitingForExit) {
+            // Still showing a window, or the process itself hasn't exited
+            // yet (SIGTERM is asynchronous) -- keep waiting.
+            if (tryReselectLastTarget() ||
+                (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)))
+                return;
+            appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの終了を確認しました。新しいインスタンスを"
+                                              "起動します")));
+            launchTargetAppFromConfiguredCommand();
+            m_continuousWaitPhase = ContinuousWaitPhase::WaitingForAppear;
+            return;
+        }
+        // WaitingForAppear
+        if (!tryReselectLastTarget())
+            return;
+        m_batchWaitTimer->stop();
+        m_continuousWaitPhase = ContinuousWaitPhase::None;
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
+        if (!beginRun(/*interactive=*/false))
+            setControlsEnabled(true);
+        return;
+    }
+
     onRefreshTargets();
     if (!tryReselectLastTarget())
         return;
     m_batchWaitTimer->stop();
+    if (m_launchBeforeStartPending) {
+        // SPEC.md 10 ⑤: ▶開始's "起動してから開始する" option -- this is a
+        // plain interactive single run, not a batch/連続実行 continuation.
+        m_launchBeforeStartPending = false;
+        appendLog(I18n::t(QStringLiteral("対象ツールの起動を検知しました。開始します")));
+        if (!beginRun(/*interactive=*/true))
+            setControlsEnabled(true);
+        return;
+    }
     appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
-    beginRun(/*interactive=*/false);
+    if (!beginRun(/*interactive=*/false))
+        setControlsEnabled(true);
 }
 
 void MainWindow::launchTargetAppFromConfiguredCommand()

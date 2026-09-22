@@ -11,6 +11,7 @@ class QLineEdit;
 class QPushButton;
 class QSpinBox;
 class QStackedWidget;
+class PointHighlightOverlay;
 
 // Modal dialog for creating/editing one SetupAction ("起動時セットアップ",
 // SPEC.md 6.x): a type (Click/DoubleClick/RightClick/Drag/TypeText/KeyPress/
@@ -51,6 +52,13 @@ private:
     // (see m_pointPicked's comment).
     void pickPointInto(QPoint &target, bool &pickedFlag);
     void refreshPointLabels();
+    // Shows the currently-relevant picked point(s) (none for TypeText/
+    // KeyPress/Wait, one for Click/DoubleClick/RightClick, up to two for
+    // Drag) as on-screen markers via m_highlightOverlay, for as long as
+    // this dialog stays open (SPEC.md 6.13's追加実装及び修正依頼 -- mirrors
+    // NamedRegionEditorDialog::updateHighlight()). Called after every point
+    // pick and every type-combo change.
+    void updateHighlight();
     QWidget *buildPointPage();
     QWidget *buildDragPage();
     QWidget *buildTypeTextPage();
@@ -87,4 +95,5 @@ private:
     bool m_dragToPicked = false;
     QPoint m_targetTopLeft;
     bool m_hasTarget = false;
+    PointHighlightOverlay *m_highlightOverlay = nullptr;
 };

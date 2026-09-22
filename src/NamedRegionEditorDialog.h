@@ -65,8 +65,12 @@ private:
     bool m_hasTarget = false;
     // If editing a region that already had followsTargetWindow set, its
     // original anchor is preserved unless the user's current target
-    // selection replaces it (see onAccept()).
+    // selection replaces it (see result()).
     QPoint m_existingAnchorTopLeft;
     bool m_hadExistingAnchor = false;
+    // Whether any of m_regions/m_excludeRegions were actually touched
+    // (drawn/removed) during this dialog session -- see result()'s use of
+    // this alongside m_hadExistingAnchor.
+    bool m_regionsChanged = false;
     RegionHighlightOverlay *m_highlightOverlay = nullptr;
 };

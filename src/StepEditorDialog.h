@@ -19,11 +19,20 @@ class StepEditorDialog : public QDialog
     Q_OBJECT
 
 public:
+    // `allowPopupDialogTarget` adds a third choice, "operate on a newly
+    // appeared dialog" (RegionStep::targetsPopupDialog) -- only passed true
+    // by TaskEditorDialog, since that option only makes sense for a task
+    // member (see the field's doc comment in TestConfig.h). Left false (the
+    // default) for every other caller (a top-level step, or a step-group
+    // member) so the option doesn't show there at all.
     StepEditorDialog(const RegionStep &initial, const QList<NamedRegion> &availableRegions,
-                      QWidget *parent = nullptr);
+                      QWidget *parent = nullptr, bool allowPopupDialogTarget = false);
 
     bool useWholeWindow() const;
     QString regionName() const;
+    // True if the third, popup-dialog-targeting option was picked (only
+    // ever possible when constructed with allowPopupDialogTarget=true).
+    bool targetsPopupDialog() const;
 
 private slots:
     void onModeChanged();
@@ -32,4 +41,5 @@ private:
     QRadioButton *m_wholeWindowRadio = nullptr;
     QRadioButton *m_namedRegionRadio = nullptr;
     QComboBox *m_namedRegionCombo = nullptr;
+    QRadioButton *m_popupDialogRadio = nullptr;  // null unless allowPopupDialogTarget was true
 };

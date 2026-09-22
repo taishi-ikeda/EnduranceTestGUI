@@ -245,6 +245,12 @@ QJsonObject regionStepToJson(const RegionStep &s)
     for (const RegionStep &member : s.groupMembers)
         membersArr.append(regionStepToJson(member));
     o["groupMembers"] = membersArr;
+    o["isTask"] = s.isTask;
+    QJsonArray taskMembersArr;
+    for (const RegionStep &member : s.taskMembers)
+        taskMembersArr.append(regionStepToJson(member));
+    o["taskMembers"] = taskMembersArr;
+    o["targetsPopupDialog"] = s.targetsPopupDialog;
     return o;
 }
 
@@ -286,6 +292,12 @@ RegionStep regionStepFromJson(const QJsonObject &o)
         for (const QJsonValue &v : o["groupMembers"].toArray())
             s.groupMembers.append(regionStepFromJson(v.toObject()));
     }
+    s.isTask = o["isTask"].toBool(s.isTask);
+    if (o.contains("taskMembers")) {
+        for (const QJsonValue &v : o["taskMembers"].toArray())
+            s.taskMembers.append(regionStepFromJson(v.toObject()));
+    }
+    s.targetsPopupDialog = o["targetsPopupDialog"].toBool(s.targetsPopupDialog);
     return s;
 }
 

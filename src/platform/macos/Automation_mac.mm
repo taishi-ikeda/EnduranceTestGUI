@@ -172,6 +172,17 @@ bool isProcessRunning(qint64 pid)
     return true;
 }
 
+void terminateProcess(qint64 pid)
+{
+    // Best-effort/asynchronous by design (see the header comment) -- a
+    // failure here (e.g. the pid is already gone, or we lack permission for
+    // some pid we don't actually own) isn't worth surfacing to the caller,
+    // which is going to poll isProcessRunning() afterward anyway. Not
+    // independently verified on real macOS hardware (see SPEC.md 8) --
+    // mirrors Automation_linux.cpp's terminateProcess().
+    kill((pid_t)pid, SIGTERM);
+}
+
 ProcessStats queryProcessStats(qint64 pid)
 {
     ProcessStats stats;

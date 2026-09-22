@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 
 #include "I18n.h"
+#include "PointHighlightOverlay.h"
 #include "PointPickerOverlay.h"
 
 namespace
@@ -67,6 +68,16 @@ SetupActionEditorDialog::SetupActionEditorDialog(const SetupAction &initial, con
       m_hasTarget(hasTarget)
 {
     setWindowTitle(I18n::t(QStringLiteral("起動時セットアップ操作の設定")));
+    // m_highlightOverlay's per-screen windows (shown continuously while
+    // this dialog is open, see updateHighlight() below) use
+    // Qt::WindowStaysOnTopHint so the marker stays visible above the
+    // target app being tested. Without this dialog being in that same
+    // "always on top" layer, several window managers (e.g. a bare openbox
+    // session) keep re-asserting the highlight windows above this dialog,
+    // making the dialog itself impossible to see or interact with --
+    // exactly the bug NamedRegionEditorDialog had for the same reason
+    // (SPEC.md 6.3/6.13/8).
+    setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
 
     auto *layout = new QVBoxLayout(this);
 
@@ -114,6 +125,17 @@ SetupActionEditorDialog::SetupActionEditorDialog(const SetupAction &initial, con
     m_typeCombo->setCurrentIndex(initialComboIndex >= 0 ? initialComboIndex : 0);
     m_stack->setCurrentIndex(pageForType(initial.type));
     refreshPointLabels();
+
+    // Visualize the currently-relevant picked point(s) on screen for as
+    // long as this dialog stays open (SPEC.md 6.13) -- hidden (not
+    // destroyed) when the dialog closes, whether accepted, cancelled, or
+    // closed any other way. Mirrors NamedRegionEditorDialog's identical
+    // pattern for its own RegionHighlightOverlay.
+    connect(this, &QDialog::finished, this, [this](int) {
+        if (m_highlightOverlay)
+            m_highlightOverlay->hide();
+    });
+    updateHighlight();
 
     resize(420, 260);
 }
@@ -213,6 +235,46 @@ void SetupActionEditorDialog::onTypeChanged(int index)
 {
     const SetupActionType type = static_cast<SetupActionType>(m_typeCombo->itemData(index).toInt());
     m_stack->setCurrentIndex(pageForType(type));
+    updateHighlight();
+}
+
+void SetupActionEditorDialog::updateHighlight()
+{
+    const SetupActionType type =
+        static_cast<SetupActionType>(m_typeCombo->itemData(m_typeCombo->currentIndex()).toInt());
+
+    QList<QPoint> points;
+    QList<QString> labels;
+    if (type == SetupActionType::Drag) {
+        if (m_pointPicked) {
+            points << (m_point + m_targetTopLeft);
+            labels << I18n::t(QStringLiteral("開始"));
+        }
+        if (m_dragToPicked) {
+            points << (m_dragToPoint + m_targetTopLeft);
+            labels << I18n::t(QStringLiteral("終了"));
+        }
+    } else if ((type == SetupActionType::Click || type == SetupActionType::DoubleClick ||
+                type == SetupActionType::RightClick) &&
+               m_pointPicked) {
+        points << (m_point + m_targetTopLeft);
+        labels << I18n::t(QStringLiteral("位置"));
+    }
+
+    if (points.isEmpty()) {
+        if (m_highlightOverlay)
+            m_highlightOverlay->hide();
+        return;
+    }
+    if (!m_highlightOverlay)
+        m_highlightOverlay = new PointHighlightOverlay(this);
+    m_highlightOverlay->showPoints(points, labels);
+    // See the constructor's WindowStaysOnTopHint comment: reassert this
+    // dialog above the highlight windows every time they're (re)shown, on
+    // top of the flag alone, mirroring NamedRegionEditorDialog::
+    // updateHighlight().
+    raise();
+    activateWindow();
 }
 
 void SetupActionEditorDialog::pickPointInto(QPoint &target, bool &pickedFlag)
@@ -227,6 +289,7 @@ void SetupActionEditorDialog::pickPointInto(QPoint &target, bool &pickedFlag)
         target = picked - m_targetTopLeft;
         pickedFlag = true;
         refreshPointLabels();
+        updateHighlight();
     }
 }
 

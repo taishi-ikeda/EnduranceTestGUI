@@ -206,12 +206,34 @@ private:
     // group.groupTotalCallCount actions have been performed in total
     // across the whole group.
     void performGroupAction(const RegionStep &group);
-    // Resolves a step's region: either the live target-window bounds, or
-    // the NamedRegion it references by name (see TestConfig::namedRegions).
-    // Returns false if that can't be done right now (window gone, or the
-    // referenced named region no longer exists / is empty).
+    // Handles a tick where the current top-level step is a task (SPEC.md
+    // 6.2追加実装及び修正依頼): performs exactly one action from
+    // task.taskMembers[m_currentTaskMemberIndex] (the fixed-order
+    // counterpart to performGroupAction's weighted-random pick), then
+    // advances the member index. Once every member has run exactly once,
+    // the whole task counts as a single action (m_iterationCount
+    // increments by 1 for the whole pass, not once per member) and the
+    // engine advances to the next top-level step -- see the field comment
+    // on RegionStep::isTask for why this differs from a group's counting.
+    void performTaskAction(const RegionStep &task);
+    // Resolves a step's region: the live target-window bounds, the
+    // NamedRegion it references by name (see TestConfig::namedRegions), or
+    // -- when step.targetsPopupDialog is set -- the current bounds of
+    // whichever extra top-level window the target process has open besides
+    // the main target window (see RegionStep::targetsPopupDialog). Returns
+    // false if that can't be done right now (window/popup gone or not
+    // (yet) present, or the referenced named region no longer exists /
+    // is empty).
     bool resolveStepRegion(const RegionStep &step, QList<QRect> &outIncludeRegions,
                             QList<QRect> &outExcludeRegions);
+    // True if the action about to run (performRandomAction()'s current
+    // step, or -- if it's a task -- its current taskMembers[m_currentTaskMemberIndex])
+    // has targetsPopupDialog set. Used to suppress handleUnexpectedWindows()
+    // for exactly that one tick: without this, its generic "an extra
+    // window belonging to the target appeared, dismiss it" safety net would
+    // race with (and defeat) a task member deliberately trying to operate
+    // on that same extra window.
+    bool currentActionTargetsPopupDialog() const;
     // Captures a fresh operation-region screenshot (see renderRegionScreenshot()
     // below) and overwrites m_lastCapturedScreenshot with it, but only when
     // m_config.screenshotCaptureMode's condition is actually met right now
@@ -316,6 +338,26 @@ private:
     qint64 m_iterationCount = 0;
     int m_currentStepIndex = 0;
     qint64 m_currentStepActionsDone = 0;
+    // Index into the current top-level task step's taskMembers, i.e. how
+    // many of its members have run so far in the pass currently in
+    // progress. Reset to 0 by advanceToNextStep() (both when a task step
+    // is first entered and once its one-and-only pass completes) -- see
+    // performTaskAction(), which decides when to call advanceToNextStep()
+    // by comparing this against task.taskMembers.size() directly (a task
+    // has no groupTotalCallCount-style threshold field of its own: running
+    // one means running every member exactly once, always).
+    // m_currentStepActionsDone above is unused for a task step.
+    int m_currentTaskMemberIndex = 0;
+    // Consecutive ticks in a row a task member with targetsPopupDialog set
+    // has found no extra window yet to operate on (see resolveStepRegion()/
+    // runOneAction()) -- mirrors m_unexpectedWindowStrikes's symmetric
+    // "give up and treat it as an anomaly after enough failed attempts"
+    // role, since a dialog that should have opened but never does is just
+    // as legitimate a sign of a target-app bug as a dialog that should
+    // have closed but never does. Reset to 0 in start(), in
+    // advanceToNextStep() (same lifecycle as m_currentTaskMemberIndex),
+    // and the moment such a member's region resolves successfully.
+    int m_popupDialogWaitStrikes = 0;
     qint64 m_sequenceLoopCount = 0;
     bool m_running = false;
     bool m_paused = false;

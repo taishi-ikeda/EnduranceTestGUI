@@ -72,6 +72,22 @@ QList<QRect> RegionSelectorOverlay::run(Mode mode, const QList<QRect> &existingI
 
 void RegionSelectorOverlay::finish(bool accepted)
 {
+    // Guards against finish() running twice for what the user experiences
+    // as a single confirm gesture -- e.g. a fast double right-click (each
+    // press finishes independently: mousePressEvent's right-button branch
+    // AND mouseDoubleClickEvent() below both call finish() unconditionally),
+    // or a platform event-delivery quirk where a second press/click for the
+    // same physical input gets redelivered after close() has already
+    // started hiding this overlay (this has been reported as "two dialogs
+    // appear" after confirming a rectangle -- SPEC.md追加実装及び修正依頼).
+    // Without this, a second finish() call re-emits finishedSelecting()
+    // after run()'s local QEventLoop has already (or is about to) return,
+    // which can requeue a second confirm on whatever ends up on top once
+    // this overlay closes (e.g. the same "矩形を描画..." button underneath,
+    // reopening a second overlay/dialog) or worse, a stale-object access
+    // once run()'s stack-local `overlay` has already been destroyed.
+    if (m_finished)
+        return;
     m_accepted = accepted;
     m_finished = true;
     close();

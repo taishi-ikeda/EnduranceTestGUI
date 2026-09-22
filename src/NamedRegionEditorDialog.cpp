@@ -160,6 +160,7 @@ void NamedRegionEditorDialog::onDrawRegions()
         RegionSelectorOverlay::run(RegionSelectorOverlay::Mode::Include, m_regions, m_excludeRegions);
     if (!added.isEmpty()) {
         m_regions.append(added);
+        m_regionsChanged = true;
         refreshRegionList();
     }
     updateHighlight();
@@ -170,6 +171,7 @@ void NamedRegionEditorDialog::onRemoveSelectedRegion()
     const int row = m_regionListWidget->currentRow();
     if (row >= 0 && row < m_regions.size()) {
         m_regions.removeAt(row);
+        m_regionsChanged = true;
         refreshRegionList();
         updateHighlight();
     }
@@ -183,6 +185,7 @@ void NamedRegionEditorDialog::onDrawExcludeRegions()
         RegionSelectorOverlay::run(RegionSelectorOverlay::Mode::Exclude, m_regions, m_excludeRegions);
     if (!added.isEmpty()) {
         m_excludeRegions.append(added);
+        m_regionsChanged = true;
         refreshExcludeList();
     }
     updateHighlight();
@@ -193,6 +196,7 @@ void NamedRegionEditorDialog::onRemoveSelectedExcludeRegion()
     const int row = m_excludeListWidget->currentRow();
     if (row >= 0 && row < m_excludeRegions.size()) {
         m_excludeRegions.removeAt(row);
+        m_regionsChanged = true;
         refreshExcludeList();
         updateHighlight();
     }
@@ -239,12 +243,25 @@ NamedRegion NamedRegionEditorDialog::result() const
     region.excludeRegions = m_excludeRegions;
     region.followsTargetWindow = m_followTargetCheck->isChecked();
     if (region.followsTargetWindow) {
-        // Rebase to the live target position when one is available (the
-        // checkbox is only interactively toggleable in that case anyway);
-        // otherwise this is an already-following region being re-saved
-        // with no target currently selected, so keep its existing anchor
-        // rather than losing track of it.
-        region.anchorTopLeft = m_hasTarget ? m_targetTopLeft : m_existingAnchorTopLeft;
+        // Bug (SPEC.md追加実装及び修正依頼): a follow-enabled region that
+        // gets edited and re-saved WITHOUT touching its rectangles (e.g.
+        // just renaming it, or editing an unrelated field) used to always
+        // rebase the anchor to wherever the target window happens to be
+        // *right now* -- even though the still-unchanged rectangles were
+        // captured relative to the OLD anchor. That desyncs the two: at
+        // run time resolveStepRegion() then translates the (still-old)
+        // rectangles by (current position - new anchor), landing them at
+        // the wrong place -- badly enough that RandomActionEngine's "about
+        // to click outside the target app" safety check would trip and
+        // abort the whole test. Only rebase the anchor when the rectangles
+        // this anchor applies to were actually redrawn this session, or
+        // when this wasn't already a following region (nothing to
+        // preserve). Otherwise the existing anchor is still exactly the
+        // one those unchanged rectangles were drawn against, so keep it.
+        if (m_hadExistingAnchor && !m_regionsChanged)
+            region.anchorTopLeft = m_existingAnchorTopLeft;
+        else
+            region.anchorTopLeft = m_hasTarget ? m_targetTopLeft : m_existingAnchorTopLeft;
     }
     return region;
 }

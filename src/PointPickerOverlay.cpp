@@ -55,6 +55,14 @@ bool PointPickerOverlay::run(QPoint &outPoint)
 
 void PointPickerOverlay::finish(bool accepted, const QPoint &pt)
 {
+    // See RegionSelectorOverlay::finish()'s identical guard: without it,
+    // a queued second mousePressEvent/keyPressEvent for this same overlay
+    // (e.g. a click and an Escape arriving in quick succession) could run
+    // finish() twice, re-emitting finishedPicking() after run()'s local
+    // QEventLoop/overlay has already gone away.
+    if (m_finished)
+        return;
+    m_finished = true;
     m_accepted = accepted;
     m_pickedPoint = pt;
     close();

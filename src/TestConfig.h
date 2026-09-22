@@ -106,13 +106,23 @@ struct NamedRegion
     // drawn while the target window's top-left corner was at
     // `anchorTopLeft`; RandomActionEngine::resolveStepRegion() translates
     // them by (current target top-left - anchorTopLeft) before use, so the
-    // region follows the target window if it moves -- unlike the default
-    // (false), which keeps using the same fixed screen coordinates forever
+    // region follows the target window if it moves -- unlike disabling it,
+    // which keeps using the same fixed screen coordinates forever
     // (SPEC.md 6.3/8's "既知の制約", addressed in 10). Only meaningful for
     // a region actually used against a single, currently-moving window; a
     // region reused across differently-positioned windows should leave
     // this off.
-    bool followsTargetWindow = false;
+    //
+    // Defaults to true (SPEC.md追加実装及び修正依頼): this only matters for
+    // a *freshly default-constructed* NamedRegion -- i.e. MainWindow::
+    // onAddNamedRegion()'s starting point for a brand-new region, which is
+    // what NamedRegionEditorDialog's "対象ウィンドウの移動に追従させる"
+    // checkbox's initial checked state is seeded from. A region loaded from
+    // a saved preset always gets this explicitly from the JSON (defaulting
+    // to false there if the key is absent, for old presets predating this
+    // field) via TestConfigJson::namedRegionFromJson(), so this default
+    // never affects deserialization.
+    bool followsTargetWindow = true;
     QPoint anchorTopLeft;
 
     bool isEmpty() const { return regions.isEmpty(); }
@@ -209,12 +219,64 @@ struct RegionStep
     // weights above.
     int groupWeight = 1;
 
+    // If true, this "step" is actually a task: a fixed, ordered sequence
+    // of other steps (taskMembers) that RandomActionEngine runs through in
+    // full, in order, exactly once, every time this step's turn comes up
+    // in the top-level sequence (SPEC.md 6.2追加実装及び修正依頼 --
+    // "タスクはいくつかの操作フローを一つにまとめた操作で、タスク全体を
+    // 一つの操作としてください。タスク内で操作はランダムに前後などは
+    // しない"). This is the fixed-order counterpart to isGroup above
+    // (which instead randomly picks ONE member per action, repeated
+    // groupTotalCallCount times): a task has no "total call count" --
+    // running a task always means running every member exactly once, in
+    // list order, and that whole pass counts as exactly one action for
+    // iteration-count purposes, then the top-level sequence advances to
+    // the next step. A task's own region/enable*/weight*/actionCount/
+    // useDefaultActionParams/customActionParams fields are unused; only
+    // taskMembers matters. Members must themselves be plain steps
+    // (isGroup == isTask == isWaitStep == false on each) -- same
+    // no-nesting/no-wait-member restriction as group members, and for the
+    // same reason (a wait "flow" doesn't compose the same way a discrete
+    // action does; nesting containers has no well-defined execution
+    // order). Mutually exclusive with isGroup/isWaitStep.
+    bool isTask = false;
+    QList<RegionStep> taskMembers;
+
+    // Only meaningful on a task member (an entry of some other step's
+    // taskMembers; see isTask above) -- SPEC.md 6.2追加実装及び修正依頼
+    // "タスクの実装に伴って、テスト対象のアプリの操作中に出現したダイアログの
+    // 操作をできるようにしてください". When true, this member ignores its
+    // own useWholeWindow/regionName entirely and instead operates on
+    // whichever top-level window currently belongs to the target process
+    // but is *not* the main target window (config.targetWindowId) -- i.e.
+    // a dialog/popup a *preceding* task member's action is expected to have
+    // just opened (e.g. a confirmation dialog after a right-click menu
+    // selection). The member's operation region is that window's entire
+    // current bounds (equivalent to useWholeWindow, but against the popup
+    // instead of the main window); exclude regions are not supported for
+    // it, same as useWholeWindow. If no such extra window exists yet when
+    // this member's turn comes up, RandomActionEngine retries the same
+    // member on later ticks (the dialog may just not have opened yet)
+    // rather than failing immediately, up to a bounded number of attempts
+    // -- see RandomActionEngine::m_popupDialogWaitStrikes. This is
+    // deliberately task-member-only: a task's fixed execution order is
+    // what makes "the previous member's action opened this dialog" a
+    // meaningful assumption; a group's per-action random member pick or a
+    // plain top-level step have no equivalent "the step right before this
+    // one" relationship. enableWindowOp is ignored when this is true (see
+    // RandomActionEngine::pickWeightedActionKind): window-level operations
+    // always target the main target window specifically
+    // (config.targetWindowId), never "whichever window this step
+    // resolved to", so they would silently act on the wrong window here.
+    bool targetsPopupDialog = false;
+
     bool hasAnyActionEnabled() const
     {
-        if (isWaitStep || isGroup)
-            return true;  // waiting/grouping is this step's whole purpose, not a missing setting
+        if (isWaitStep || isGroup || isTask)
+            return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
-               enableScrollDown || enableScrollHorizontal || enableShortcut || enableWindowOp;
+               enableScrollDown || enableScrollHorizontal || enableShortcut ||
+               (enableWindowOp && !targetsPopupDialog);
     }
 };
 

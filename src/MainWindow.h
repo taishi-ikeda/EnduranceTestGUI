@@ -81,6 +81,7 @@ private slots:
     void onEditDefaultParams();
 
     void onStart();
+    void onContinuousRun();
     void onStop();
     void onPauseResume();
     void onEngineFinished(const QString &reason);
@@ -190,18 +191,32 @@ private:
     // just logged and the batch is cancelled, since nobody may be watching
     // to dismiss a dialog). Returns true if the run was actually started.
     bool beginRun(bool interactive);
-    // Called from onEngineFinished(): if a batch (SPEC.md 10 ①) is still in
-    // progress, advances the counter and either starts the next run
-    // immediately (target still alive) or hands off to
-    // waitForTargetThenContinueBatch(); does nothing otherwise.
+    // Called from onEngineFinished(): if a batch (SPEC.md 10 ①) or a
+    // 連続実行 (SPEC.md 10 ⑤, m_continuousRunMode) is still in progress,
+    // advances the counter and either starts the next run immediately
+    // (target still alive -- 通常のバッチのみ; 連続実行は常にキル→再起動
+    // を経由する) or hands off to waitForTargetThenContinueBatch(); does
+    // nothing otherwise.
     void continueBatchIfNeeded();
-    // Refreshes ①'s target list; if the target is already back, starts the
-    // next batch run right away. Otherwise launches it automatically (if
-    // ①'s "自動起動コマンド" is set -- SPEC.md 10 ②) and/or starts
-    // m_batchWaitTimer polling for its manual relaunch (SPEC.md 10 ①), so
-    // batch mode works the same way whether or not auto-restart is
-    // configured.
+    // Refreshes ①'s target list, then either:
+    // - m_continuousRunMode (SPEC.md 10 ⑤): hands off to
+    //   killTargetThenRelaunchForContinuousRun(), which always terminates
+    //   any still-running target before relaunching it fresh, regardless
+    //   of whether it was already gone.
+    // - otherwise (plain batch, SPEC.md 10 ①): starts the next run right
+    //   away if the target is already back, or launches it automatically
+    //   (if ①'s "自動起動コマンド" is set -- SPEC.md 10 ②) and/or starts
+    //   m_batchWaitTimer polling for its manual relaunch, so batch mode
+    //   works the same way whether or not auto-restart is configured.
     void waitForTargetThenContinueBatch();
+    // SPEC.md 10 ⑤ (連続実行): terminates the target app if it's still
+    // running (via PlatformAutomation::terminateProcess(), using whichever
+    // pid ①'s list currently shows for it, falling back to
+    // m_lastRunTargetPid if the list doesn't have it anymore), then starts
+    // m_batchWaitTimer to poll for it to actually exit before relaunching
+    // it -- see onBatchWaitTick()'s m_continuousRunMode branch, which
+    // drives the exit-then-appear two-phase wait via m_continuousWaitPhase.
+    void killTargetThenRelaunchForContinuousRun();
     // Runs ①'s configured "自動起動コマンド" (SPEC.md 10 ②) via
     // QProcess::startDetached, splitting it into program + arguments with
     // QProcess::splitCommand() (portable across Qt5/Qt6, unlike the
@@ -231,6 +246,14 @@ private:
     QLineEdit *m_targetLaunchCommandEdit = nullptr;
     QPushButton *m_browseLaunchCommandButton = nullptr;
     QPushButton *m_launchTargetNowButton = nullptr;
+    // SPEC.md 10 ⑤: if checked, ▶開始 (onStart()) launches the target app
+    // via the "自動起動コマンド" above and waits for it to appear *before*
+    // running ②起動時セットアップ→③ステップ構成 -- instead of assuming the
+    // currently-selected ①の対象 is already the one to operate. Requires
+    // m_targetLaunchCommandEdit to be non-empty (checked in onStart()).
+    // Independent of m_continuousRunMode below (連続実行 always launches
+    // regardless of this checkbox's state).
+    QCheckBox *m_launchBeforeStartCheck = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;
@@ -371,6 +394,13 @@ private:
 
     // Controls
     QPushButton *m_startButton = nullptr;
+    // SPEC.md 10 ⑤: independent of ▶開始/連続実行回数 above -- pressing
+    // this always terminates the target app first (if it's still running)
+    // and launches a fresh instance, runs ②起動時セットアップ→③ステップ構成
+    // once against it, then repeats (kill leftover -> relaunch -> run)
+    // m_batchRunCountSpin's configured number of times. See onContinuousRun()/
+    // killTargetThenRelaunchForContinuousRun()/m_continuousRunMode.
+    QPushButton *m_continuousRunButton = nullptr;
     QPushButton *m_stopButton = nullptr;
     QPushButton *m_pauseResumeButton = nullptr;
     QLabel *m_statusLabel = nullptr;
@@ -393,7 +423,36 @@ private:
     // batch runs when it isn't already back the instant one finishes --
     // whether the user relaunches it by hand or m_targetLaunchCommandEdit's
     // command was used to relaunch it automatically (SPEC.md 10 ①②).
+    // Also reused by 連続実行 (m_continuousRunMode) and by ▶開始's
+    // "対象ツールの起動から開始する" option (m_launchBeforeStartPending) --
+    // see onBatchWaitTick() for how it dispatches between the three.
     QTimer *m_batchWaitTimer = nullptr;
+    // SPEC.md 10 ⑤ (連続実行, m_continuousRunButton): true while the
+    // current batch loop is running in "always kill+relaunch" mode rather
+    // than the plain passive-relaunch batch semantics above. Checked by
+    // continueBatchIfNeeded()/waitForTargetThenContinueBatch()/
+    // onBatchWaitTick() to branch into killTargetThenRelaunchForContinuousRun()
+    // instead of the original wait-for-manual-or-auto-relaunch flow.
+    bool m_continuousRunMode = false;
+    // Which half of 連続実行's per-cycle "wait for the old instance to
+    // exit, then wait for the new one to appear" sequence m_batchWaitTimer
+    // is currently polling for -- only meaningful while m_continuousRunMode
+    // is true and m_batchWaitTimer is active.
+    enum class ContinuousWaitPhase { None, WaitingForExit, WaitingForAppear };
+    ContinuousWaitPhase m_continuousWaitPhase = ContinuousWaitPhase::None;
+    // True from onStart() (when its "対象ツールの起動から開始する" checkbox
+    // is checked) until the launched target is detected and the run
+    // actually begins -- tells onBatchWaitTick() that the run about to
+    // start is a plain interactive ▶開始 (not a 連続実行/batch
+    // continuation), so it should call beginRun(interactive == true).
+    bool m_launchBeforeStartPending = false;
+    // The targetPid a run was last actually started with (set in
+    // beginRun(), alongside config.targetPid). Used by
+    // killTargetThenRelaunchForContinuousRun() as a fallback identifier for
+    // the process to terminate when ①'s live window list no longer carries
+    // it (e.g. it already crashed and disappeared from the list, but the
+    // process is somehow still alive).
+    qint64 m_lastRunTargetPid = -1;
 
     // Log
     QPlainTextEdit *m_logView = nullptr;

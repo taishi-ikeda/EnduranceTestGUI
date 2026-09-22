@@ -169,12 +169,23 @@ void MainWindow::buildUi()
     // narrow (SPEC.md 6.9).
     auto *controlsRow = new QHBoxLayout;
     m_startButton = new QPushButton(I18n::t(QStringLiteral("▶ 開始")), central);
+    // SPEC.md 10 ⑤: 独立した「連続実行」ボタン -- 押すと対象アプリが起動中
+    // かどうかに関わらず必ず終了→再起動してから②③を実行し、それを
+    // 連続実行回数（m_batchRunCountSpinを共用）だけ繰り返す。▶開始＋
+    // 連続実行回数>1（従来のバッチ）とは異なり、常にキル→再起動する点が
+    // 違う（see onContinuousRun()/killTargetThenRelaunchForContinuousRun()）。
+    m_continuousRunButton = new QPushButton(I18n::t(QStringLiteral("⟳ 連続実行")), central);
+    m_continuousRunButton->setToolTip(
+        I18n::t(QStringLiteral("対象アプリが起動中でも必ず一度終了してから新しく起動し、起動時セットアップと"
+                                "ステップ構成の実行を行います。実行後に対象アプリが残っていれば終了し、"
+                                "連続実行回数の分だけ繰り返します。①の自動起動コマンドの設定が必要です。")));
     m_stopButton = new QPushButton(I18n::t(QStringLiteral("■ 停止")), central);
     m_stopButton->setEnabled(false);
     m_pauseResumeButton = new QPushButton(I18n::t(QStringLiteral("‖ 一時停止")), central);
     m_pauseResumeButton->setEnabled(false);
     m_statusLabel = new QLabel(I18n::t(QStringLiteral("待機中")), central);
     controlsRow->addWidget(m_startButton);
+    controlsRow->addWidget(m_continuousRunButton);
     controlsRow->addWidget(m_stopButton);
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_statusLabel);
@@ -188,8 +199,9 @@ void MainWindow::buildUi()
     m_batchRunCountSpin->setRange(1, 100000);
     m_batchRunCountSpin->setValue(1);
     m_batchRunCountSpin->setToolTip(
-        I18n::t(QStringLiteral("1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
-                                "自動的に次を開始し、指定回数繰り返します。")));
+        I18n::t(QStringLiteral("▶開始: 1より大きい値にすると、1回終わるたびに（対象アプリの再起動を待って）"
+                                "自動的に次を開始し、指定回数繰り返します。\n"
+                                "⟳連続実行: 常にこの回数だけ、対象アプリの終了→再起動→実行を繰り返します。")));
     controlsRow->addWidget(m_batchRunCountSpin);
     m_batchProgressLabel = new QLabel(central);
     controlsRow->addWidget(m_batchProgressLabel);
@@ -218,6 +230,7 @@ void MainWindow::buildUi()
     connect(m_showStatisticsButton, &QPushButton::clicked, this, &MainWindow::onShowStatistics);
 
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::onStart);
+    connect(m_continuousRunButton, &QPushButton::clicked, this, &MainWindow::onContinuousRun);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
     connect(m_pauseResumeButton, &QPushButton::clicked, this, &MainWindow::onPauseResume);
 
@@ -403,6 +416,16 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     targetLayout->addLayout(launchCommandRow);
     m_launchTargetNowButton = new QPushButton(I18n::t(QStringLiteral("今すぐ起動")), m_targetGroup);
     targetLayout->addWidget(m_launchTargetNowButton);
+
+    // SPEC.md 10 ⑤: ▶開始時に、この起動コマンドで対象アプリをまず起動して
+    // から②③を実行するオプション。連続実行（m_continuousRunButton）は常に
+    // 起動コマンドを使うので、これはあくまで▶開始（単発実行）用。
+    m_launchBeforeStartCheck =
+        new QCheckBox(I18n::t(QStringLiteral("開始時にこのコマンドで対象ツールを起動してから開始する")), m_targetGroup);
+    m_launchBeforeStartCheck->setToolTip(
+        I18n::t(QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
+                                "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。")));
+    targetLayout->addWidget(m_launchBeforeStartCheck);
 
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
@@ -1669,6 +1692,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_loadPresetAction->setEnabled(enabled);
     m_batchRunCountSpin->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
+    m_continuousRunButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
     if (enabled) {
@@ -1723,6 +1747,11 @@ bool MainWindow::beginRun(bool interactive)
         }
         return false;
     }
+
+    // SPEC.md 10 ⑤: remembered so killTargetThenRelaunchForContinuousRun()
+    // still has a pid to terminate even if the target has already vanished
+    // from ①'s live window list by the time it's needed.
+    m_lastRunTargetPid = config.targetPid;
 
     // SPEC.md 6.x: "連続自動実行では初回のみ実行する" -- TestConfig::
     // setupActions itself always means "run these now" (see its own
@@ -1812,8 +1841,54 @@ void MainWindow::onStart()
     m_batchRunsRequested = qMax(1, m_batchRunCountSpin->value());
     m_batchRunsCompleted = 0;
     m_batchModeActive = m_batchRunsRequested > 1;
+    m_continuousRunMode = false;
     m_batchProgressLabel->setText(QString());
+
+    // SPEC.md 10 ⑤: launch the target first, then wait for it to appear,
+    // before actually beginning the run -- rather than assuming whichever
+    // window ①currently has selected is already the one to operate.
+    if (m_launchBeforeStartCheck->isChecked()) {
+        if (m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("設定エラー")),
+                I18n::t(QStringLiteral("「開始時にこのコマンドで対象ツールを起動してから開始する」を有効にする"
+                                        "場合は、①に対象アプリの自動起動コマンドを設定してください。")));
+            return;
+        }
+        setControlsEnabled(false);
+        m_stopButton->setEnabled(true);
+        m_launchBeforeStartPending = true;
+        appendLog(I18n::t(QStringLiteral("対象ツールを起動しています...起動を確認してから開始します")));
+        launchTargetAppFromConfiguredCommand();
+        m_batchWaitTimer->start();
+        return;
+    }
+
     beginRun(/*interactive=*/true);
+}
+
+void MainWindow::onContinuousRun()
+{
+    // SPEC.md 10 ⑤: independent of ▶開始 -- always kills any leftover
+    // target instance and launches a fresh one before every cycle,
+    // regardless of whether one was already running, then repeats that for
+    // m_batchRunCountSpin's configured number of times.
+    if (m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("設定エラー")),
+            I18n::t(QStringLiteral("連続実行を使うには、①に対象アプリの自動起動コマンドを設定してください。")));
+        return;
+    }
+    m_batchRunsRequested = qMax(1, m_batchRunCountSpin->value());
+    m_batchRunsCompleted = 0;
+    m_batchModeActive = true;
+    m_continuousRunMode = true;
+    m_batchProgressLabel->setText(
+        I18n::t(QStringLiteral("連続実行: 1回目の準備中...")));
+    setControlsEnabled(false);
+    m_stopButton->setEnabled(true);
+    appendLog(I18n::t(QStringLiteral("連続実行を開始します（対象アプリが残っている場合は終了してから起動します）")));
+    killTargetThenRelaunchForContinuousRun();
 }
 
 void MainWindow::onStop()
@@ -1823,14 +1898,20 @@ void MainWindow::onStop()
     // otherwise onEngineFinished()'s continueBatchIfNeeded() would just
     // start the next one right back up.
     const bool wasBatching = m_batchModeActive;
+    const bool wasContinuous = m_continuousRunMode;
     m_batchModeActive = false;
+    m_continuousRunMode = false;
+    m_continuousWaitPhase = ContinuousWaitPhase::None;
+    m_launchBeforeStartPending = false;
 
     if (m_batchWaitTimer->isActive()) {
-        // Between batch runs: the target app crashed/exited and we're
-        // polling for it to come back (SPEC.md 10 ①). Nothing is actually
-        // running for m_engine to stop, so undo the waiting state directly.
+        // Between batch/連続実行 runs, or waiting for ▶開始's "起動してから
+        // 開始する" launch to appear: nothing is actually running for
+        // m_engine to stop, so undo the waiting state directly.
         m_batchWaitTimer->stop();
-        appendLog(I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
+        appendLog(wasContinuous
+                      ? I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの終了/再起動待ち中でした）"))
+                      : I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
         m_batchProgressLabel->setText(QString());
         setControlsEnabled(true);
         return;
@@ -1912,6 +1993,7 @@ void MainWindow::continueBatchIfNeeded()
     if (m_batchRunsCompleted >= m_batchRunsRequested) {
         appendLog(I18n::t(QStringLiteral("連続実行が完了しました（%1/%2回）")).arg(m_batchRunsCompleted).arg(m_batchRunsRequested));
         m_batchModeActive = false;
+        m_continuousRunMode = false;
         m_batchProgressLabel->setText(QString());
         return;
     }
@@ -1930,6 +2012,13 @@ void MainWindow::continueBatchIfNeeded()
 
 void MainWindow::waitForTargetThenContinueBatch()
 {
+    // SPEC.md 10 ⑤: 連続実行 always kills the leftover target (if any) and
+    // relaunches fresh, unlike the passive "wait for it to come back on its
+    // own" semantics below.
+    if (m_continuousRunMode) {
+        killTargetThenRelaunchForContinuousRun();
+        return;
+    }
     onRefreshTargets();
     if (tryReselectLastTarget()) {
         beginRun(/*interactive=*/false);
@@ -1946,14 +2035,71 @@ void MainWindow::waitForTargetThenContinueBatch()
     m_batchWaitTimer->start();
 }
 
+void MainWindow::killTargetThenRelaunchForContinuousRun()
+{
+    onRefreshTargets();
+    qint64 pidToKill = -1;
+    if (tryReselectLastTarget()) {
+        const int idx = m_targetCombo->currentIndex();
+        if (idx >= 0 && idx < m_windows.size())
+            pidToKill = m_windows[idx].pid;
+    } else if (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+        // Still running but no longer showing a window ①can see (e.g. its
+        // last window just closed without the process exiting) -- fall
+        // back to the pid the previous run was actually started with.
+        pidToKill = m_lastRunTargetPid;
+    }
+    if (pidToKill > 0) {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が残っているため終了します")).arg(pidToKill));
+        PlatformAutomation::terminateProcess(pidToKill);
+    }
+    m_continuousWaitPhase = ContinuousWaitPhase::WaitingForExit;
+    m_batchWaitTimer->start();
+}
+
 void MainWindow::onBatchWaitTick()
 {
+    if (m_continuousRunMode) {
+        onRefreshTargets();
+        if (m_continuousWaitPhase == ContinuousWaitPhase::WaitingForExit) {
+            // Still showing a window, or the process itself hasn't exited
+            // yet (SIGTERM is asynchronous) -- keep waiting.
+            if (tryReselectLastTarget() ||
+                (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)))
+                return;
+            appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの終了を確認しました。新しいインスタンスを"
+                                              "起動します")));
+            launchTargetAppFromConfiguredCommand();
+            m_continuousWaitPhase = ContinuousWaitPhase::WaitingForAppear;
+            return;
+        }
+        // WaitingForAppear
+        if (!tryReselectLastTarget())
+            return;
+        m_batchWaitTimer->stop();
+        m_continuousWaitPhase = ContinuousWaitPhase::None;
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
+        if (!beginRun(/*interactive=*/false))
+            setControlsEnabled(true);
+        return;
+    }
+
     onRefreshTargets();
     if (!tryReselectLastTarget())
         return;
     m_batchWaitTimer->stop();
+    if (m_launchBeforeStartPending) {
+        // SPEC.md 10 ⑤: ▶開始's "起動してから開始する" option -- this is a
+        // plain interactive single run, not a batch/連続実行 continuation.
+        m_launchBeforeStartPending = false;
+        appendLog(I18n::t(QStringLiteral("対象ツールの起動を検知しました。開始します")));
+        if (!beginRun(/*interactive=*/true))
+            setControlsEnabled(true);
+        return;
+    }
     appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
-    beginRun(/*interactive=*/false);
+    if (!beginRun(/*interactive=*/false))
+        setControlsEnabled(true);
 }
 
 void MainWindow::launchTargetAppFromConfiguredCommand()

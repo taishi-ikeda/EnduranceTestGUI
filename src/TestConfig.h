@@ -219,10 +219,33 @@ struct RegionStep
     // weights above.
     int groupWeight = 1;
 
+    // If true, this "step" is actually a task: a fixed, ordered sequence
+    // of other steps (taskMembers) that RandomActionEngine runs through in
+    // full, in order, exactly once, every time this step's turn comes up
+    // in the top-level sequence (SPEC.md 6.2追加実装及び修正依頼 --
+    // "タスクはいくつかの操作フローを一つにまとめた操作で、タスク全体を
+    // 一つの操作としてください。タスク内で操作はランダムに前後などは
+    // しない"). This is the fixed-order counterpart to isGroup above
+    // (which instead randomly picks ONE member per action, repeated
+    // groupTotalCallCount times): a task has no "total call count" --
+    // running a task always means running every member exactly once, in
+    // list order, and that whole pass counts as exactly one action for
+    // iteration-count purposes, then the top-level sequence advances to
+    // the next step. A task's own region/enable*/weight*/actionCount/
+    // useDefaultActionParams/customActionParams fields are unused; only
+    // taskMembers matters. Members must themselves be plain steps
+    // (isGroup == isTask == isWaitStep == false on each) -- same
+    // no-nesting/no-wait-member restriction as group members, and for the
+    // same reason (a wait "flow" doesn't compose the same way a discrete
+    // action does; nesting containers has no well-defined execution
+    // order). Mutually exclusive with isGroup/isWaitStep.
+    bool isTask = false;
+    QList<RegionStep> taskMembers;
+
     bool hasAnyActionEnabled() const
     {
-        if (isWaitStep || isGroup)
-            return true;  // waiting/grouping is this step's whole purpose, not a missing setting
+        if (isWaitStep || isGroup || isTask)
+            return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
                enableScrollDown || enableScrollHorizontal || enableShortcut || enableWindowOp;
     }

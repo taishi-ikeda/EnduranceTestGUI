@@ -162,6 +162,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_iterationCount = 0;
     m_currentStepIndex = 0;
     m_currentStepActionsDone = 0;
+    m_currentTaskMemberIndex = 0;
     m_sequenceLoopCount = 0;
     m_pausedElapsedMs = 0;
     m_elapsed.restart();
@@ -753,6 +754,7 @@ void RandomActionEngine::scheduleNext()
 void RandomActionEngine::advanceToNextStep()
 {
     m_currentStepActionsDone = 0;
+    m_currentTaskMemberIndex = 0;
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
     if (m_currentStepIndex == 0) {
         ++m_sequenceLoopCount;
@@ -928,6 +930,11 @@ void RandomActionEngine::performRandomAction()
         return;
     }
 
+    if (step.isTask) {
+        performTaskAction(step);
+        return;
+    }
+
     QString desc;
     ActionKind kind;
     const ActionOutcome outcome =
@@ -986,6 +993,54 @@ void RandomActionEngine::performGroupAction(const RegionStep &group)
 
     if (m_currentStepActionsDone >= group.groupTotalCallCount)
         advanceToNextStep();
+
+    scheduleNext();
+}
+
+void RandomActionEngine::performTaskAction(const RegionStep &task)
+{
+    if (task.taskMembers.isEmpty()) {
+        doStop(I18n::t(QStringLiteral("ステップ %1（タスク）にステップが登録されていません")).arg(m_currentStepIndex + 1));
+        return;
+    }
+
+    const RegionStep &member = task.taskMembers[m_currentTaskMemberIndex];
+    const QString label = I18n::t(QStringLiteral("ステップ %1（タスク内操作 %2/%3）"))
+                               .arg(m_currentStepIndex + 1)
+                               .arg(m_currentTaskMemberIndex + 1)
+                               .arg(task.taskMembers.size());
+
+    QString desc;
+    ActionKind kind;
+    const ActionOutcome outcome = runOneAction(member, label, desc, kind);
+    if (outcome == ActionOutcome::StoppedEngine)
+        return;
+    if (outcome == ActionOutcome::SkippedNoCount) {
+        // Retry the same member next tick rather than skipping ahead --
+        // matches a normal step's own behavior when an action is skipped
+        // (see performRandomAction()), and keeps a task's fixed order
+        // intact (an entry that's momentarily unpickable still gets its
+        // turn once it becomes pickable again, instead of being silently
+        // dropped from this pass).
+        scheduleNext();
+        return;
+    }
+
+    ++m_actionKindCounts[kind];
+    recordRecentAction(desc);
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+    // Deliberately not incrementing m_iterationCount / emitting
+    // iterationCountChanged() per member -- see RegionStep::isTask: the
+    // whole task counts as exactly one action, credited only once the
+    // full pass below completes.
+
+    ++m_currentTaskMemberIndex;
+    if (m_currentTaskMemberIndex >= task.taskMembers.size()) {
+        ++m_iterationCount;
+        emit iterationCountChanged(m_iterationCount);
+        advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
+    }
 
     scheduleNext();
 }

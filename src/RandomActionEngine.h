@@ -206,6 +206,16 @@ private:
     // group.groupTotalCallCount actions have been performed in total
     // across the whole group.
     void performGroupAction(const RegionStep &group);
+    // Handles a tick where the current top-level step is a task (SPEC.md
+    // 6.2追加実装及び修正依頼): performs exactly one action from
+    // task.taskMembers[m_currentTaskMemberIndex] (the fixed-order
+    // counterpart to performGroupAction's weighted-random pick), then
+    // advances the member index. Once every member has run exactly once,
+    // the whole task counts as a single action (m_iterationCount
+    // increments by 1 for the whole pass, not once per member) and the
+    // engine advances to the next top-level step -- see the field comment
+    // on RegionStep::isTask for why this differs from a group's counting.
+    void performTaskAction(const RegionStep &task);
     // Resolves a step's region: either the live target-window bounds, or
     // the NamedRegion it references by name (see TestConfig::namedRegions).
     // Returns false if that can't be done right now (window gone, or the
@@ -316,6 +326,16 @@ private:
     qint64 m_iterationCount = 0;
     int m_currentStepIndex = 0;
     qint64 m_currentStepActionsDone = 0;
+    // Index into the current top-level task step's taskMembers, i.e. how
+    // many of its members have run so far in the pass currently in
+    // progress. Reset to 0 by advanceToNextStep() (both when a task step
+    // is first entered and once its one-and-only pass completes) -- see
+    // performTaskAction(), which decides when to call advanceToNextStep()
+    // by comparing this against task.taskMembers.size() directly (a task
+    // has no groupTotalCallCount-style threshold field of its own: running
+    // one means running every member exactly once, always).
+    // m_currentStepActionsDone above is unused for a task step.
+    int m_currentTaskMemberIndex = 0;
     qint64 m_sequenceLoopCount = 0;
     bool m_running = false;
     bool m_paused = false;

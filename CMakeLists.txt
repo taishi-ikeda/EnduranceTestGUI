@@ -64,6 +64,7 @@ set(SOURCES
     src/DefaultActionParamsDialog.cpp
     src/ActionKindEditor.cpp
     src/StepGroupEditorDialog.cpp
+    src/TaskEditorDialog.cpp
     src/TestConfigJson.cpp
     src/TestStatistics.cpp
     src/StatisticsDialog.cpp
@@ -87,6 +88,7 @@ set(HEADERS
     src/DefaultActionParamsDialog.h
     src/ActionKindEditor.h
     src/StepGroupEditorDialog.h
+    src/TaskEditorDialog.h
     src/TestConfig.h
     src/TestConfigJson.h
     src/TestStatistics.h

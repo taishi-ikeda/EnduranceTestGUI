@@ -50,6 +50,7 @@
 #include "StepEditorDialog.h"
 #include "StepGroupEditorDialog.h"
 #include "StopPanel.h"
+#include "TaskEditorDialog.h"
 #include "TestConfigJson.h"
 #include "platform/GlobalHotkey.h"
 #include "platform/InputRecorder.h"
@@ -721,6 +722,18 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     groupButtonsRow->addWidget(m_ungroupStepButton);
     stepsLayout->addLayout(groupButtonsRow);
 
+    // SPEC.md 6.2追加実装及び修正依頼: select 2+ plain steps and combine
+    // them into a task that always runs every member exactly once, in the
+    // order shown, as a single atomic action each time its turn comes up
+    // (unlike a group's random per-action member pick above). "タスク解除"
+    // reverses this, same as "グループ解除".
+    auto *taskButtonsRow = new QHBoxLayout;
+    m_taskifyStepsButton = new QPushButton(I18n::t(QStringLiteral("タスク化")), m_stepsGroup);
+    m_untaskifyStepButton = new QPushButton(I18n::t(QStringLiteral("タスク解除")), m_stepsGroup);
+    taskButtonsRow->addWidget(m_taskifyStepsButton);
+    taskButtonsRow->addWidget(m_untaskifyStepButton);
+    stepsLayout->addLayout(taskButtonsRow);
+
     connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
             &MainWindow::onStepSelectionChanged);
     connect(m_stepListWidget, &QListWidget::itemSelectionChanged, this,
@@ -734,6 +747,8 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_clearStepsButton, &QPushButton::clicked, this, &MainWindow::onClearSteps);
     connect(m_groupStepsButton, &QPushButton::clicked, this, &MainWindow::onGroupSelectedSteps);
     connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
+    connect(m_taskifyStepsButton, &QPushButton::clicked, this, &MainWindow::onTaskifySelectedSteps);
+    connect(m_untaskifyStepButton, &QPushButton::clicked, this, &MainWindow::onUntaskifySelectedStep);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
     return wrapper;
@@ -894,6 +909,16 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
             .arg(crashBadge);
     }
 
+    if (step.isTask) {
+        const QString runningPrefix =
+            index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
+        return I18n::t(QStringLiteral("%1ステップ%2: タスク（%3個の操作を順番に実行）%4"))
+            .arg(runningPrefix)
+            .arg(index + 1)
+            .arg(step.taskMembers.size())
+            .arg(crashBadge);
+    }
+
     QStringList actions;
     if (step.enableClick)
         actions << I18n::t(QStringLiteral("クリック"));
@@ -1012,6 +1037,12 @@ QStringList MainWindow::stepsReferencing(const QString &regionName) const
                 if (!member.useWholeWindow && member.regionName == regionName)
                     result << I18n::t(QStringLiteral("ステップ%1（グループ内メンバー%2）")).arg(i + 1).arg(j + 1);
             }
+        } else if (step.isTask) {
+            for (int j = 0; j < step.taskMembers.size(); ++j) {
+                const RegionStep &member = step.taskMembers[j];
+                if (!member.useWholeWindow && member.regionName == regionName)
+                    result << I18n::t(QStringLiteral("ステップ%1（タスク内操作%2）")).arg(i + 1).arg(j + 1);
+            }
         } else if (!step.useWholeWindow && step.regionName == regionName) {
             result << I18n::t(QStringLiteral("ステップ%1")).arg(i + 1);
         }
@@ -1025,6 +1056,8 @@ void MainWindow::renameRegionReferences(QList<RegionStep> &steps, const QString 
     for (RegionStep &step : steps) {
         if (step.isGroup)
             renameRegionReferences(step.groupMembers, oldName, newName);
+        else if (step.isTask)
+            renameRegionReferences(step.taskMembers, oldName, newName);
         else if (!step.useWholeWindow && step.regionName == oldName)
             step.regionName = newName;
     }
@@ -1356,6 +1389,23 @@ void MainWindow::loadActionParamsEditorForSelection()
         return;
     }
 
+    if (m_steps[row].isTask) {
+        // A task's members each have their own region/action-kind/
+        // ActionParams settings, edited in TaskEditorDialog (via ②'s
+        // "編集..." button) rather than here -- see RegionStep::isTask.
+        m_actionParamsContextLabel->setText(
+            I18n::t(QStringLiteral("ステップ %1 はタスクです。「編集...」から操作を設定してください")).arg(row + 1));
+        m_stepUseDefaultParamsRadio->blockSignals(true);
+        m_stepUseDefaultParamsRadio->setChecked(true);
+        m_stepUseDefaultParamsRadio->blockSignals(false);
+        m_stepUseDefaultParamsRadio->setEnabled(false);
+        m_stepUseCustomParamsRadio->setEnabled(false);
+        m_actionParamsEditor->setParams(m_defaultActionParams);
+        m_stepKindGroup->setEnabled(false);
+        m_lastEditedStepRow = -1;
+        return;
+    }
+
     // A *copy*, not a reference into m_steps[row]: ActionKindEditor::changed()
     // (fired by setKinds() below as it programmatically sets each widget) is
     // connected to flushActionParamsEditor(), which writes straight back
@@ -1503,6 +1553,17 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    if (m_steps[row].isTask) {
+        TaskEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams, m_defaultActionKinds,
+                                 this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        m_steps[row] = dialog.result();
+        refreshStepList();
+        m_stepListWidget->setCurrentRow(row);
+        return;
+    }
+
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -1585,11 +1646,12 @@ void MainWindow::onGroupSelectedSteps()
     if (rows.size() < 2)
         return;
     for (int row : rows) {
-        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup ||
+            m_steps[row].isTask) {
             QMessageBox::warning(
                 this, I18n::t(QStringLiteral("グループ化できません")),
-                I18n::t(QStringLiteral("待機ステップやグループ自体は、他のステップと一緒にグループ化できません"
-                                "（グループの入れ子は未対応です）。")));
+                I18n::t(QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にグループ化"
+                                "できません（コンテナの入れ子は未対応です）。")));
             return;
         }
     }
@@ -1645,11 +1707,81 @@ void MainWindow::onUngroupSelectedStep()
     loadActionParamsEditorForSelection();
 }
 
+void MainWindow::onTaskifySelectedSteps()
+{
+    QList<int> rows;
+    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
+        rows.append(m_stepListWidget->row(item));
+    std::sort(rows.begin(), rows.end());
+    if (rows.size() < 2)
+        return;
+    for (int row : rows) {
+        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup ||
+            m_steps[row].isTask) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("タスク化できません")),
+                I18n::t(QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にタスク化"
+                                "できません（コンテナの入れ子は未対応です）。")));
+            return;
+        }
+    }
+
+    flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
+
+    RegionStep task;
+    task.isTask = true;
+    for (int row : rows) {
+        RegionStep member = m_steps[row];
+        // Reset fields that only make sense at the top level (see
+        // onGroupSelectedSteps()'s identical rationale) -- groupWeight is
+        // irrelevant for a task member (order, not weight, decides
+        // execution), so it's left at its default rather than reset.
+        member.isGroup = false;
+        member.groupMembers.clear();
+        member.isTask = false;
+        member.taskMembers.clear();
+        task.taskMembers.append(member);
+    }
+
+    const int insertAt = rows.first();
+    for (int i = rows.size() - 1; i >= 0; --i)  // remove highest index first so earlier ones stay valid
+        m_steps.removeAt(rows[i]);
+    m_steps.insert(insertAt, task);
+
+    refreshStepList();
+    m_stepListWidget->setCurrentRow(insertAt);
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
+}
+
+void MainWindow::onUntaskifySelectedStep()
+{
+    const int row = m_stepListWidget->currentRow();
+    if (row < 0 || row >= m_steps.size() || !m_steps[row].isTask)
+        return;
+
+    flushActionParamsEditor();
+    m_lastEditedStepRow = -1;
+    m_suppressStepSelectionHandling = true;
+    const QList<RegionStep> members = m_steps[row].taskMembers;
+    m_steps.removeAt(row);
+    for (int i = 0; i < members.size(); ++i)
+        m_steps.insert(row + i, members[i]);
+
+    refreshStepList();
+    if (!members.isEmpty())
+        m_stepListWidget->setCurrentRow(row);
+    m_suppressStepSelectionHandling = false;
+    loadActionParamsEditorForSelection();
+}
+
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                             QString &errorMessage) const
 {
-    if (step.isWaitStep || step.isGroup)
-        return true;  // nothing here to validate (a group's members are validated individually)
+    if (step.isWaitStep || step.isGroup || step.isTask)
+        return true;  // nothing here to validate (a group's/task's members are validated individually)
     if (!step.hasAnyActionEnabled()) {
         errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
             "パネルで操作種別を1つ以上有効にしてください。"))
@@ -1731,6 +1863,21 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
             }
             continue;
         }
+        if (step.isTask) {
+            if (step.taskMembers.isEmpty()) {
+                errorMessage =
+                    I18n::t(QStringLiteral("ステップ%1（タスク）に操作が登録されていません。")).arg(i + 1);
+                return config;
+            }
+            for (int j = 0; j < step.taskMembers.size(); ++j) {
+                if (!validateStepActionConfig(
+                        step.taskMembers[j],
+                        I18n::t(QStringLiteral("ステップ%1（タスク内操作%2）")).arg(i + 1).arg(j + 1),
+                        errorMessage))
+                    return config;
+            }
+            continue;
+        }
         if (!validateStepActionConfig(step, I18n::t(QStringLiteral("ステップ%1")).arg(i + 1), errorMessage))
             return config;
     }
@@ -1774,7 +1921,8 @@ void MainWindow::setControlsEnabled(bool enabled)
     const int selectedStepRow = m_stepListWidget->currentRow();
     const bool kindGroupApplicable = selectedStepRow >= 0 && selectedStepRow < m_steps.size() &&
                                       !m_steps[selectedStepRow].isWaitStep &&
-                                      !m_steps[selectedStepRow].isGroup;
+                                      !m_steps[selectedStepRow].isGroup &&
+                                      !m_steps[selectedStepRow].isTask;
     m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
@@ -1798,14 +1946,19 @@ void MainWindow::updateGroupButtonsEnabled()
     int plainCount = 0;
     for (QListWidgetItem *item : selected) {
         const int row = m_stepListWidget->row(item);
-        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup)
+        if (row >= 0 && row < m_steps.size() && !m_steps[row].isWaitStep && !m_steps[row].isGroup &&
+            !m_steps[row].isTask)
             ++plainCount;
     }
     m_groupStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
                                     plainCount == selected.size());
+    m_taskifyStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
+                                      plainCount == selected.size());
     const int row = m_stepListWidget->currentRow();
     m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
                                      row < m_steps.size() && m_steps[row].isGroup);
+    m_untaskifyStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
+                                       row < m_steps.size() && m_steps[row].isTask);
 }
 
 bool MainWindow::beginRun(bool interactive)

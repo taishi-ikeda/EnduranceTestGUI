@@ -1,6 +1,12 @@
 #include "platform/InputRecorder.h"
 
 #import <ApplicationServices/ApplicationServices.h>
+// TISCopyCurrentKeyboardLayoutInputSource/TISGetInputSourceProperty/
+// kTISPropertyUnicodeKeyLayoutData (Text Input Sources) and the deprecated
+// LMGetKbdType() used by qtKeyFromCGKeyCode() below are declared here, not
+// in ApplicationServices -- same header Automation_mac.mm already needs for
+// its own virtual-keycode handling.
+#import <Carbon/Carbon.h>
 
 // Not independently verified on real macOS hardware (see SPEC.md 8章, same
 // caveat as the rest of this app's macOS backend). Mirrors

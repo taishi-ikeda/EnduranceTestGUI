@@ -39,6 +39,15 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
       m_hadExistingAnchor(initial.followsTargetWindow)
 {
     setWindowTitle(I18n::t(QStringLiteral("操作領域の設定")));
+    // RegionHighlightOverlay's per-screen windows (shown continuously while
+    // this dialog is open, see updateHighlight() below) use
+    // Qt::WindowStaysOnTopHint so the highlight stays visible above the
+    // target app being tested. Without this dialog being in that same
+    // "always on top" layer, several window managers (e.g. a bare openbox
+    // session) keep re-asserting the highlight windows above this dialog
+    // regardless of raise()/activateWindow() calls, making the dialog
+    // itself impossible to see or interact with (SPEC.md 6.3/8).
+    setWindowFlags(windowFlags() | Qt::WindowStaysOnTopHint);
 
     auto *layout = new QVBoxLayout(this);
 
@@ -129,6 +138,13 @@ void NamedRegionEditorDialog::updateHighlight()
     if (!m_highlightOverlay)
         m_highlightOverlay = new RegionHighlightOverlay(this);
     m_highlightOverlay->showRegion(m_nameEdit->text(), m_regions, m_excludeRegions);
+    // RegionHighlightOverlay's windows are always-on-top (so the highlight
+    // shows above the target app being tested) -- without reasserting this
+    // dialog above them every time they're (re)shown, some window managers
+    // leave the dialog itself visually hidden behind them instead of on
+    // top, effectively making it unusable (SPEC.md 6.3/8).
+    raise();
+    activateWindow();
 }
 
 void NamedRegionEditorDialog::onDrawRegions()

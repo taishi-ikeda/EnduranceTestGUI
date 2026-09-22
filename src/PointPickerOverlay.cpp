@@ -10,17 +10,23 @@
 #include <QScreen>
 
 using OverlayGeometry::globalPosOf;
+using OverlayGeometry::grabVirtualDesktopSnapshot;
 using OverlayGeometry::virtualDesktopGeometry;
 
 PointPickerOverlay::PointPickerOverlay(QWidget *parent)
     : QWidget(parent)
+    // Must happen before this (still invisible) widget is shown -- see
+    // grabVirtualDesktopSnapshot()'s comment.
+    , m_backgroundSnapshot(grabVirtualDesktopSnapshot())
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     // Same rationale as RegionSelectorOverlay: keep this the active modal
     // surface instead of fighting a still-running modal dialog underneath
     // (e.g. SetupActionEditorDialog) while it's up.
     setWindowModality(Qt::ApplicationModal);
-    setAttribute(Qt::WA_TranslucentBackground);
+    // Deliberately NOT Qt::WA_TranslucentBackground -- see
+    // RegionSelectorOverlay's constructor for why (paintEvent() draws
+    // m_backgroundSnapshot as an opaque background instead).
     setAttribute(Qt::WA_DeleteOnClose, false);
     setCursor(Qt::CrossCursor);
     setGeometry(virtualDesktopGeometry());
@@ -30,8 +36,7 @@ bool PointPickerOverlay::run(QPoint &outPoint)
 {
     PointPickerOverlay overlay;
     // Deliberately NOT showFullScreen() -- see RegionSelectorOverlay::run()
-    // for why (native fullscreen hides the target window on macOS and
-    // breaks translucency).
+    // for why (native fullscreen hides the target window on macOS).
     overlay.show();
     overlay.setGeometry(virtualDesktopGeometry());
     overlay.activateWindow();
@@ -61,6 +66,7 @@ void PointPickerOverlay::paintEvent(QPaintEvent * /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
+    p.drawPixmap(0, 0, m_backgroundSnapshot);
     p.fillRect(rect(), QColor(0, 0, 0, 70));
 
     p.setPen(Qt::white);

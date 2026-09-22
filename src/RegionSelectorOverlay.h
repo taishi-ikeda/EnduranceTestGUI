@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QPixmap>
 #include <QPoint>
 #include <QRect>
 #include <QWidget>
@@ -45,6 +46,12 @@ private:
     QList<QRect> m_existingIncludes;
     QList<QRect> m_existingExcludes;
     QList<QRect> m_newRects;
+    // Screenshot of the virtual desktop taken right before this overlay is
+    // shown, painted as its own background (see OverlayGeometry::
+    // grabVirtualDesktopSnapshot()) instead of relying on
+    // Qt::WA_TranslucentBackground, which several Linux window managers
+    // render as solid black when no compositor is running (SPEC.md 6.3/8).
+    QPixmap m_backgroundSnapshot;
 
     bool m_dragging = false;
     QPoint m_dragStart;

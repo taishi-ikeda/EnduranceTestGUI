@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QPixmap>
 #include <QPoint>
 #include <QWidget>
 
@@ -36,4 +37,9 @@ private:
 
     bool m_accepted = false;
     QPoint m_pickedPoint;
+    // Screenshot of the virtual desktop taken right before this overlay is
+    // shown, painted as its own background instead of relying on
+    // Qt::WA_TranslucentBackground -- see RegionSelectorOverlay's identical
+    // field and OverlayGeometry::grabVirtualDesktopSnapshot() for why.
+    QPixmap m_backgroundSnapshot;
 };

@@ -1,10 +1,14 @@
 #include "RegionHighlightOverlay.h"
+#include "OverlayGeometry.h"
 
 #include <QFont>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QPixmap>
 #include <QScreen>
 #include <QWidget>
+
+using OverlayGeometry::settleDesktopBeforeSnapshot;
 
 // One borderless, click-through, always-on-top window per QScreen, sized
 // and positioned to exactly match that screen -- see the class comment in
@@ -20,7 +24,18 @@ public:
         // purely via the WA_TransparentForMouseEvents widget *attribute*
         // below, not an extra window flag.
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
-        setAttribute(Qt::WA_TranslucentBackground);
+        // Deliberately NOT Qt::WA_TranslucentBackground: without a
+        // compositor running (common on minimal/tiling Linux window
+        // managers), a window with this attribute renders as solid black
+        // instead of blending against what's behind it -- since this
+        // window covers an entire screen, that made the whole screen go
+        // black the moment a NamedRegionEditorDialog opened (SPEC.md
+        // 6.3/8), even hiding the dialog itself underneath. paintEvent()
+        // instead paints a real screenshot of the screen (m_background,
+        // grabbed in setContent() below) as an opaque background, and
+        // draws the highlight rectangles on top of that -- see
+        // OverlayGeometry::grabVirtualDesktopSnapshot()'s comment for the
+        // same technique used by RegionSelectorOverlay/PointPickerOverlay.
         setAttribute(Qt::WA_ShowWithoutActivating);
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
@@ -32,6 +47,23 @@ public:
         m_name = name;
         m_includeRegions = includeRegions;
         m_excludeRegions = excludeRegions;
+        // Only re-grab the screen if this window isn't already showing on
+        // top of it: once it's visible, grabbing would just capture our
+        // own window (whatever we last painted) instead of the real
+        // desktop content underneath. isVisible() is false the first time
+        // this is called and again after every hide() (RegionHighlightOverlay::
+        // hide(), e.g. while RegionSelectorOverlay is up, or once the owning
+        // dialog closes) -- so a fresh snapshot is grabbed each time this
+        // highlight reappears, not just once ever.
+        if (!isVisible()) {
+            // See settleDesktopBeforeSnapshot()'s comment: this window is
+            // typically re-shown right after RegionSelectorOverlay (or this
+            // same overlay's previous hide()) has just closed/hidden, and
+            // grabbing immediately can otherwise capture that leftover
+            // content instead of the real desktop.
+            settleDesktopBeforeSnapshot();
+            m_background = screen->grabWindow(0);
+        }
         // Order matters on macOS: RegionSelectorOverlay's working pattern
         // is show() *then* setGeometry().
         show();
@@ -50,6 +82,8 @@ protected:
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing, true);
+
+        p.drawPixmap(0, 0, m_background);
 
         auto drawRectList = [&](const QList<QRect> &rects, const QColor &fill, const QColor &border) {
             for (const QRect &r : rects) {
@@ -84,6 +118,7 @@ private:
     QString m_name;
     QList<QRect> m_includeRegions;
     QList<QRect> m_excludeRegions;
+    QPixmap m_background;
 };
 
 RegionHighlightOverlay::RegionHighlightOverlay(QObject *parent) : QObject(parent) {}

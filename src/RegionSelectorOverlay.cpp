@@ -11,6 +11,7 @@
 #include <QScreen>
 
 using OverlayGeometry::globalPosOf;
+using OverlayGeometry::grabVirtualDesktopSnapshot;
 using OverlayGeometry::virtualDesktopGeometry;
 
 RegionSelectorOverlay::RegionSelectorOverlay(Mode mode, const QList<QRect> &existingIncludes,
@@ -20,6 +21,9 @@ RegionSelectorOverlay::RegionSelectorOverlay(Mode mode, const QList<QRect> &exis
     , m_mode(mode)
     , m_existingIncludes(existingIncludes)
     , m_existingExcludes(existingExcludes)
+    // Must happen before this (still invisible) widget is shown -- see
+    // grabVirtualDesktopSnapshot()'s comment.
+    , m_backgroundSnapshot(grabVirtualDesktopSnapshot())
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     // This overlay is typically launched from inside a modal QDialog
@@ -31,7 +35,11 @@ RegionSelectorOverlay::RegionSelectorOverlay(Mode mode, const QList<QRect> &exis
     // the still-active modal session underneath (which was left the app
     // unresponsive after the overlay closed).
     setWindowModality(Qt::ApplicationModal);
-    setAttribute(Qt::WA_TranslucentBackground);
+    // Deliberately NOT Qt::WA_TranslucentBackground: this window paints
+    // m_backgroundSnapshot as an opaque background instead (see paintEvent()
+    // and grabVirtualDesktopSnapshot()'s comment for why -- real
+    // window-level translucency renders as solid black on several Linux
+    // window managers with no compositor running).
     setAttribute(Qt::WA_DeleteOnClose, false);
     setCursor(Qt::CrossCursor);
     setMouseTracking(true);
@@ -43,15 +51,13 @@ QList<QRect> RegionSelectorOverlay::run(Mode mode, const QList<QRect> &existingI
 {
     RegionSelectorOverlay overlay(mode, existingIncludes, existingExcludes);
     // Deliberately NOT showFullScreen(): on macOS that enters native
-    // fullscreen (a separate Space), which hides every other
-    // window -- including the target app the user needs to see to draw
-    // regions over -- and tends to render as an opaque black screen since
-    // translucent backgrounds aren't well supported in that mode. A plain
-    // show() at the explicit virtual-desktop geometry set in the
-    // constructor covers the same area as a borderless always-on-top
-    // window without leaving the normal desktop/Space, so windows
-    // underneath (the target app) stay visible through the semi
-    // transparent overlay.
+    // fullscreen (a separate Space), which hides every other window --
+    // including the target app the user needs to see to draw regions
+    // over. A plain show() at the explicit virtual-desktop geometry set in
+    // the constructor covers the same area as a borderless always-on-top
+    // window without leaving the normal desktop/Space, so the background
+    // snapshot painted in paintEvent() (captured in the constructor, before
+    // this show()) still matches what the user actually sees underneath.
     overlay.show();
     overlay.setGeometry(virtualDesktopGeometry());
     overlay.activateWindow();
@@ -77,6 +83,7 @@ void RegionSelectorOverlay::paintEvent(QPaintEvent * /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
+    p.drawPixmap(0, 0, m_backgroundSnapshot);
     p.fillRect(rect(), QColor(0, 0, 0, 70));
 
     const QPoint origin = geometry().topLeft();

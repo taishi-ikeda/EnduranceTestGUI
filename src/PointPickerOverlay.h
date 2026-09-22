@@ -35,6 +35,7 @@ private:
     explicit PointPickerOverlay(QWidget *parent = nullptr);
     void finish(bool accepted, const QPoint &pt);
 
+    bool m_finished = false;
     bool m_accepted = false;
     QPoint m_pickedPoint;
     // Screenshot of the virtual desktop taken right before this overlay is

@@ -106,13 +106,23 @@ struct NamedRegion
     // drawn while the target window's top-left corner was at
     // `anchorTopLeft`; RandomActionEngine::resolveStepRegion() translates
     // them by (current target top-left - anchorTopLeft) before use, so the
-    // region follows the target window if it moves -- unlike the default
-    // (false), which keeps using the same fixed screen coordinates forever
+    // region follows the target window if it moves -- unlike disabling it,
+    // which keeps using the same fixed screen coordinates forever
     // (SPEC.md 6.3/8's "既知の制約", addressed in 10). Only meaningful for
     // a region actually used against a single, currently-moving window; a
     // region reused across differently-positioned windows should leave
     // this off.
-    bool followsTargetWindow = false;
+    //
+    // Defaults to true (SPEC.md追加実装及び修正依頼): this only matters for
+    // a *freshly default-constructed* NamedRegion -- i.e. MainWindow::
+    // onAddNamedRegion()'s starting point for a brand-new region, which is
+    // what NamedRegionEditorDialog's "対象ウィンドウの移動に追従させる"
+    // checkbox's initial checked state is seeded from. A region loaded from
+    // a saved preset always gets this explicitly from the JSON (defaulting
+    // to false there if the key is absent, for old presets predating this
+    // field) via TestConfigJson::namedRegionFromJson(), so this default
+    // never affects deserialization.
+    bool followsTargetWindow = true;
     QPoint anchorTopLeft;
 
     bool isEmpty() const { return regions.isEmpty(); }

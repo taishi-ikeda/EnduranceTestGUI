@@ -338,7 +338,7 @@
     <p>Choose the window you want to test from the "Target" dropdown. If it doesn't appear in the list, click "Update" to re-scan. Once selected, whether EnduranceTestGUI has permission to operate that app is shown in green (granted) or red (not granted); if not granted, "Open Permission Settings" opens the relevant OS settings screen.</p>
     <div class="callout tip">
       <div class="title">About operation regions</div>
-      The "Operation Regions" list lets you register named rectangular areas of the screen. Clicking "Add..." opens a semi-transparent overlay you can drag rectangles onto (multiple allowed; areas to exclude can be specified separately too). When creating a step, choosing one of these registered regions instead of "the entire target GUI area" limits random actions to just that part of the screen.
+      The "Operation Regions" list lets you register named rectangular areas of the screen. Clicking "Add..." opens a semi-transparent overlay you can drag rectangles onto (multiple allowed; areas to exclude can be specified separately too). When creating a step, choosing one of these registered regions instead of "the entire target GUI area" limits random actions to just that part of the screen. Enabling "Follow target window movement" (on by default for newly created regions) keeps the region moving together with the target window if it's repositioned while the test runs. Re-editing an already-following region without redrawing its rectangles keeps its original reference position, too.
     </div>
   </section>
 

@@ -155,11 +155,14 @@ QString TaskEditorDialog::describeMember(const RegionStep &member, int index) co
     if (member.enableWindowOp)
         actions << I18n::t(QStringLiteral("ウィンドウ操作"));
 
-    const QString regionDesc = member.useWholeWindow
-                                    ? I18n::t(QStringLiteral("対象GUIの全領域"))
-                                    : (member.regionName.isEmpty()
-                                           ? I18n::t(QStringLiteral("(未選択)"))
-                                           : I18n::t(QStringLiteral("操作領域「%1」")).arg(member.regionName));
+    const QString regionDesc =
+        member.targetsPopupDialog
+            ? I18n::t(QStringLiteral("新しく出現したダイアログ（自動検出）"))
+            : (member.useWholeWindow
+                   ? I18n::t(QStringLiteral("対象GUIの全領域"))
+                   : (member.regionName.isEmpty()
+                          ? I18n::t(QStringLiteral("(未選択)"))
+                          : I18n::t(QStringLiteral("操作領域「%1」")).arg(member.regionName)));
 
     return I18n::t(QStringLiteral("%1: %2 | 操作: %3"))
         .arg(index + 1)
@@ -240,10 +243,10 @@ void TaskEditorDialog::onMemberSelectionChanged()
 
 void TaskEditorDialog::onAddMember()
 {
-    StepEditorDialog dialog(RegionStep(), m_namedRegions, this);
+    StepEditorDialog dialog(RegionStep(), m_namedRegions, this, /*allowPopupDialogTarget=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
-    if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
+    if (!dialog.useWholeWindow() && !dialog.targetsPopupDialog() && dialog.regionName().isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
                               I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
@@ -255,8 +258,9 @@ void TaskEditorDialog::onAddMember()
     member.groupMembers.clear();
     member.isTask = false;
     member.taskMembers.clear();
-    member.useWholeWindow = dialog.useWholeWindow();
-    member.regionName = dialog.regionName();
+    member.targetsPopupDialog = dialog.targetsPopupDialog();
+    member.useWholeWindow = !member.targetsPopupDialog && dialog.useWholeWindow();
+    member.regionName = member.targetsPopupDialog ? QString() : dialog.regionName();
     m_members.append(member);
     refreshMemberList();
     m_memberListWidget->setCurrentRow(m_members.size() - 1);
@@ -268,17 +272,18 @@ void TaskEditorDialog::onEditSelectedMember()
     if (row < 0 || row >= m_members.size())
         return;
 
-    StepEditorDialog dialog(m_members[row], m_namedRegions, this);
+    StepEditorDialog dialog(m_members[row], m_namedRegions, this, /*allowPopupDialogTarget=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
-    if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
+    if (!dialog.useWholeWindow() && !dialog.targetsPopupDialog() && dialog.regionName().isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
                               I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
 
-    m_members[row].useWholeWindow = dialog.useWholeWindow();
-    m_members[row].regionName = dialog.regionName();
+    m_members[row].targetsPopupDialog = dialog.targetsPopupDialog();
+    m_members[row].useWholeWindow = !m_members[row].targetsPopupDialog && dialog.useWholeWindow();
+    m_members[row].regionName = m_members[row].targetsPopupDialog ? QString() : dialog.regionName();
     refreshMemberList();
     m_memberListWidget->setCurrentRow(row);
 }

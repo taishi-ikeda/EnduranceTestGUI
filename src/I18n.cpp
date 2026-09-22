@@ -690,6 +690,23 @@ const QHash<QString, QString> &translationTable()
                         "できません（コンテナの入れ子は未対応です）。"),
          QStringLiteral("Wait steps, groups, and tasks themselves cannot be combined with other "
                         "steps into a task (nesting containers is not supported).")},
+
+        // v0.62: タスクメンバーの「新しく出現したダイアログを対象にする」機能
+        {QStringLiteral("新しく出現したウィンドウ（ダイアログ等）を対象にする（自動検出）"),
+         QStringLiteral("Target a newly appeared window (dialog, etc.) (auto-detected)")},
+        {QStringLiteral("※このタスク内で直前までに実行した操作が開いたダイアログ等、対象アプリの"
+                        "メインウィンドウ以外に新しく出現したウィンドウ全体を操作領域にします。"
+                        "実行時にそのようなウィンドウが見つからない場合は、見つかるまで待機します。"),
+         QStringLiteral("Uses the entire area of whatever window newly appeared besides the target "
+                        "app's main window as the operation region -- e.g. a dialog opened by an "
+                        "earlier action in this task. If no such window is found yet when this runs, "
+                        "it waits until one appears.")},
+        {QStringLiteral("新しく出現したダイアログ（自動検出）"), QStringLiteral("Newly appeared dialog (auto-detected)")},
+        {QStringLiteral("新しく出現したダイアログ"), QStringLiteral("Newly appeared dialog")},
+        {QStringLiteral("%1が対象とする新しいウィンドウ（ダイアログ等）が現れないため、"
+                        "安全のためテストを停止しました"),
+         QStringLiteral("%1's target window (a dialog, etc.) never appeared, so the test was stopped "
+                        "for safety")},
     };
     return table;
 }

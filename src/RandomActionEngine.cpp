@@ -163,6 +163,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_currentStepIndex = 0;
     m_currentStepActionsDone = 0;
     m_currentTaskMemberIndex = 0;
+    m_popupDialogWaitStrikes = 0;
     m_sequenceLoopCount = 0;
     m_pausedElapsedMs = 0;
     m_elapsed.restart();
@@ -478,6 +479,33 @@ void RandomActionEngine::sampleResourceUsage()
 bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> &outIncludeRegions,
                                             QList<QRect> &outExcludeRegions)
 {
+    if (step.targetsPopupDialog) {
+        // SPEC.md 6.2追加実装及び修正依頼: operate on whichever top-level
+        // window the target process currently has open besides the main
+        // one -- presumably a dialog a preceding task member's action just
+        // opened. If more than one extra window exists, the first one
+        // listWindowIdsForPid() happens to return is used (a known
+        // limitation -- see SPEC.md 8 -- since there is no reliable
+        // cross-platform "most recently opened" ordering available).
+        const QList<quint32> windowIds = PlatformAutomation::listWindowIdsForPid(m_config.targetPid);
+        quint32 popupWindowId = 0;
+        for (quint32 id : windowIds) {
+            if (id != m_config.targetWindowId) {
+                popupWindowId = id;
+                break;
+            }
+        }
+        if (popupWindowId == 0)
+            return false;  // the expected dialog hasn't appeared (yet) -- see runOneAction()
+
+        QRect bounds;
+        if (!PlatformAutomation::queryWindowBounds(popupWindowId, m_config.targetPid, bounds))
+            return false;
+        outIncludeRegions = {bounds};
+        outExcludeRegions.clear();
+        return true;
+    }
+
     if (step.useWholeWindow) {
         QRect bounds;
         if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid,
@@ -727,7 +755,12 @@ RandomActionEngine::ActionKind RandomActionEngine::pickWeightedActionKind(const 
         entries << Entry{ActionKind::ScrollHorizontal, qMax(1, step.scrollHorizontalWeight)};
     if (step.enableShortcut)
         entries << Entry{ActionKind::Shortcut, qMax(1, step.shortcutWeight)};
-    if (step.enableWindowOp)
+    // Window-level operations always act on the main target window
+    // (m_config.targetWindowId), never on whatever this step's region
+    // resolved to -- meaningless (and liable to act on the wrong window)
+    // for a member that targets a popup dialog instead. See
+    // RegionStep::targetsPopupDialog.
+    if (step.enableWindowOp && !step.targetsPopupDialog)
         entries << Entry{ActionKind::WindowOp, qMax(1, step.windowOpWeight)};
 
     int total = 0;
@@ -755,6 +788,7 @@ void RandomActionEngine::advanceToNextStep()
 {
     m_currentStepActionsDone = 0;
     m_currentTaskMemberIndex = 0;
+    m_popupDialogWaitStrikes = 0;
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
     if (m_currentStepIndex == 0) {
         ++m_sequenceLoopCount;
@@ -835,7 +869,28 @@ namespace
 // go away on its own (see SPEC.md 10 -- this is exactly the "~490 wasted
 // clicks" scenario found during v0.40's manual testing).
 constexpr int kMaxUnexpectedWindowStrikes = 5;
+
+// Symmetric counterpart for a task member with targetsPopupDialog set
+// (RegionStep::targetsPopupDialog, SPEC.md 6.2追加実装及び修正依頼): after
+// this many consecutive ticks with no extra window found yet to operate
+// on, give up and stop the run rather than retry forever -- a dialog that
+// never appears at all is just as worth surfacing as one that never
+// closes. Higher than kMaxUnexpectedWindowStrikes above since a dialog can
+// legitimately take a moment to render (icons/layout), whereas that retry
+// loop is actively working to dismiss something already on screen.
+constexpr int kMaxPopupDialogWaitStrikes = 50;
 }  // namespace
+
+bool RandomActionEngine::currentActionTargetsPopupDialog() const
+{
+    if (m_inSetupPhase || m_currentStepIndex < 0 || m_currentStepIndex >= m_config.steps.size())
+        return false;
+    const RegionStep &step = m_config.steps[m_currentStepIndex];
+    if (!step.isTask || m_currentTaskMemberIndex < 0 ||
+        m_currentTaskMemberIndex >= step.taskMembers.size())
+        return false;
+    return step.taskMembers[m_currentTaskMemberIndex].targetsPopupDialog;
+}
 
 bool RandomActionEngine::handleUnexpectedWindows()
 {
@@ -898,7 +953,7 @@ void RandomActionEngine::performRandomAction()
                /*isAnomaly=*/true, /*targetCrashed=*/true);
         return;
     }
-    if (handleUnexpectedWindows())
+    if (!currentActionTargetsPopupDialog() && handleUnexpectedWindows())
         return;
 
     if (m_inSetupPhase) {
@@ -1069,15 +1124,39 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     QList<QRect> includeRegions;
     QList<QRect> excludeRegions;
     if (!resolveStepRegion(step, includeRegions, excludeRegions) || includeRegions.isEmpty()) {
+        if (step.targetsPopupDialog) {
+            // The dialog this member expects to operate on may simply not
+            // have opened yet (its preceding task member's action might
+            // still be in flight, or the target app might just be slow to
+            // show it) -- retry rather than fail immediately, but only up
+            // to kMaxPopupDialogWaitStrikes attempts, mirroring
+            // handleUnexpectedWindows()'s symmetric give-up-and-report
+            // behavior: a dialog that never shows up at all is just as
+            // legitimate a sign of a target-app bug as one that never
+            // closes.
+            ++m_popupDialogWaitStrikes;
+            if (m_popupDialogWaitStrikes >= kMaxPopupDialogWaitStrikes) {
+                doStop(I18n::t(QStringLiteral("%1が対象とする新しいウィンドウ（ダイアログ等）が現れないため、"
+                                      "安全のためテストを停止しました"))
+                           .arg(stepLabel),
+                       /*isAnomaly=*/true);
+                return ActionOutcome::StoppedEngine;
+            }
+            return ActionOutcome::SkippedNoCount;
+        }
         doStop(I18n::t(QStringLiteral("%1の対象領域が見つからないため停止しました（対象ウィンドウが"
                               "消失した、または参照している操作領域が削除された可能性があります）"))
                    .arg(stepLabel),
                /*isAnomaly=*/true);
         return ActionOutcome::StoppedEngine;
     }
+    if (step.targetsPopupDialog)
+        m_popupDialogWaitStrikes = 0;
 
     const QString regionName =
-        step.useWholeWindow ? I18n::t(QStringLiteral("対象GUIの全領域")) : step.regionName;
+        step.targetsPopupDialog ? I18n::t(QStringLiteral("新しく出現したダイアログ"))
+        : step.useWholeWindow   ? I18n::t(QStringLiteral("対象GUIの全領域"))
+                                 : step.regionName;
     maybeCaptureRegionScreenshot(stepLabel, regionName, includeRegions, excludeRegions);
 
     if (m_config.keepTargetActive)

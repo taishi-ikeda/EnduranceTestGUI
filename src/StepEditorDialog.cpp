@@ -9,7 +9,7 @@
 #include <QVBoxLayout>
 
 StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedRegion> &availableRegions,
-                                    QWidget *parent)
+                                    QWidget *parent, bool allowPopupDialogTarget)
     : QDialog(parent)
 {
     setWindowTitle(I18n::t(QStringLiteral("ステップの操作領域を選択")));
@@ -41,13 +41,28 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
         m_namedRegionCombo->addItem(I18n::t(QStringLiteral("（①対象選択パネルで操作領域を追加してください）")));
     }
 
+    if (allowPopupDialogTarget) {
+        m_popupDialogRadio = new QRadioButton(
+            I18n::t(QStringLiteral("新しく出現したウィンドウ（ダイアログ等）を対象にする（自動検出）")), this);
+        layout->addWidget(m_popupDialogRadio);
+        auto *popupNoteLabel = new QLabel(
+            I18n::t(QStringLiteral("※このタスク内で直前までに実行した操作が開いたダイアログ等、対象アプリの"
+                            "メインウィンドウ以外に新しく出現したウィンドウ全体を操作領域にします。"
+                            "実行時にそのようなウィンドウが見つからない場合は、見つかるまで待機します。")),
+            this);
+        popupNoteLabel->setWordWrap(true);
+        layout->addWidget(popupNoteLabel);
+    }
+
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttonBox);
 
     // Populate from `initial`.
-    if (initial.useWholeWindow || availableRegions.isEmpty()) {
+    if (m_popupDialogRadio && initial.targetsPopupDialog) {
+        m_popupDialogRadio->setChecked(true);
+    } else if (initial.useWholeWindow || availableRegions.isEmpty()) {
         m_wholeWindowRadio->setChecked(true);
     } else {
         m_namedRegionRadio->setChecked(true);
@@ -56,7 +71,7 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
     }
 
     onModeChanged();
-    resize(420, 200);
+    resize(420, allowPopupDialogTarget ? 280 : 200);
 }
 
 void StepEditorDialog::onModeChanged()
@@ -73,4 +88,9 @@ bool StepEditorDialog::useWholeWindow() const
 QString StepEditorDialog::regionName() const
 {
     return m_namedRegionRadio->isChecked() ? m_namedRegionCombo->currentText() : QString();
+}
+
+bool StepEditorDialog::targetsPopupDialog() const
+{
+    return m_popupDialogRadio && m_popupDialogRadio->isChecked();
 }

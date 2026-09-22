@@ -368,6 +368,7 @@
     </figure>
     <p><span class="step-num">2</span>The step is added to the list and automatically selected. Its action types aren't decided yet at this point — that's configured next, in "③ Action Parameters".</p>
     <p>Steps can be reordered within the list with "Move Up"/"Move Down", or multi-selected and combined into a single group with "Group" (members within a group are picked at random according to their weight). Multi-selecting and using "Task" combines steps the same way, but unlike a group, a task always runs every combined step exactly once, in the order they were added, and the whole run counts as a single "run count" — use this when you have a sequence of actions that must not be randomly reordered. For either a group or a task, selecting it and pressing "Ungroup"/"Untask" splits it back into its original individual steps. "Add Wait..." lets you insert a "wait step" that does nothing for a specified number of milliseconds.</p>
+    <p>The region-selection dialog shown when adding or editing a task's actions also offers "Target a newly appeared window (dialog, etc.) (auto-detected)". An action using this option operates on whichever window newly appeared besides the target app's main window — e.g. a confirmation dialog opened by a preceding action's context-menu selection — instead of any of the usual named/whole-window regions. If no such window has appeared yet when it's this action's turn to run, it automatically waits until one does.</p>
   </section>
 
   <section id="params">

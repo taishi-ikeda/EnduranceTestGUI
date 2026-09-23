@@ -313,6 +313,11 @@ private:
     void onSaveWindowSize();
     void onRestoreWindowSize();
     void refreshSavedWindowSizeLabel();
+    // SPEC.md 10追加実装及び修正依頼 (ウィンドウ位置の保存/復元): captures/
+    // applies m_savedWindowPos against whichever target ① has selected.
+    void onSaveWindowPos();
+    void onRestoreWindowPos();
+    void refreshSavedWindowPosLabel();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -364,6 +369,18 @@ private:
     QLabel *m_savedWindowSizeLabel = nullptr;
     QPushButton *m_saveWindowSizeButton = nullptr;
     QPushButton *m_restoreWindowSizeButton = nullptr;
+
+    // SPEC.md 10追加実装及び修正依頼「テスト対象ツールの現在のウインドウ位置を
+    // 保存する機能と、保存したウィンドウ位置に合わせてテスト対象ツールの
+    // ウィンドウ位置を変更する機能をつけてください」: same single-value
+    // capture/restore design as the window size feature above, using
+    // PlatformAutomation::moveWindow(). Persisted in preset JSON as
+    // hasSavedWindowPos/savedWindowPosX/savedWindowPosY.
+    bool m_hasSavedWindowPos = false;
+    QPoint m_savedWindowPos;
+    QLabel *m_savedWindowPosLabel = nullptr;
+    QPushButton *m_saveWindowPosButton = nullptr;
+    QPushButton *m_restoreWindowPosButton = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;

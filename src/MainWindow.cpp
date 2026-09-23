@@ -480,6 +480,23 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_restoreWindowSizeButton, &QPushButton::clicked, this, &MainWindow::onRestoreWindowSize);
     refreshSavedWindowSizeLabel();
 
+    // SPEC.md 10追加実装及び修正依頼: 対象ツールのウィンドウ位置を保存/復元する。
+    m_savedWindowPosLabel = new QLabel(m_targetGroup);
+    m_savedWindowPosLabel->setWordWrap(true);
+    targetLayout->addWidget(m_savedWindowPosLabel);
+    auto *windowPosRow = new QHBoxLayout;
+    m_saveWindowPosButton =
+        new QPushButton(I18n::t(QStringLiteral("現在のウィンドウ位置を保存")), m_targetGroup);
+    m_restoreWindowPosButton =
+        new QPushButton(I18n::t(QStringLiteral("保存した位置に変更")), m_targetGroup);
+    windowPosRow->addWidget(m_saveWindowPosButton);
+    windowPosRow->addWidget(m_restoreWindowPosButton);
+    targetLayout->addLayout(windowPosRow);
+
+    connect(m_saveWindowPosButton, &QPushButton::clicked, this, &MainWindow::onSaveWindowPos);
+    connect(m_restoreWindowPosButton, &QPushButton::clicked, this, &MainWindow::onRestoreWindowPos);
+    refreshSavedWindowPosLabel();
+
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
@@ -1244,6 +1261,58 @@ void MainWindow::refreshSavedWindowSizeLabel()
                 .arg(m_savedWindowSize.height()));
     } else {
         m_savedWindowSizeLabel->setText(I18n::t(QStringLiteral("保存したウィンドウサイズ: (未保存)")));
+    }
+}
+
+void MainWindow::onSaveWindowPos()
+{
+    QRect bounds;
+    if (!currentTargetBounds(bounds)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウを取得できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してください。")));
+        return;
+    }
+    m_savedWindowPos = bounds.topLeft();
+    m_hasSavedWindowPos = true;
+    refreshSavedWindowPosLabel();
+    appendLog(I18n::t(QStringLiteral("ウィンドウ位置を保存しました: x%1 y%2"))
+                  .arg(m_savedWindowPos.x())
+                  .arg(m_savedWindowPos.y()));
+}
+
+void MainWindow::onRestoreWindowPos()
+{
+    if (!m_hasSavedWindowPos) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存された位置がありません")),
+                              I18n::t(QStringLiteral("先に「現在のウィンドウ位置を保存」で位置を保存してください。")));
+        return;
+    }
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウを取得できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してください。")));
+        return;
+    }
+    const WindowInfo &target = m_windows[idx];
+    if (!PlatformAutomation::moveWindow(target.pid, target.windowId, m_savedWindowPos)) {
+        appendLog(I18n::t(QStringLiteral("ウィンドウ位置の変更に失敗しました。")));
+        return;
+    }
+    appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
+                  .arg(m_savedWindowPos.x())
+                  .arg(m_savedWindowPos.y()));
+}
+
+void MainWindow::refreshSavedWindowPosLabel()
+{
+    if (!m_savedWindowPosLabel)
+        return;
+    if (m_hasSavedWindowPos) {
+        m_savedWindowPosLabel->setText(I18n::t(QStringLiteral("保存したウィンドウ位置: x%1 y%2"))
+                                            .arg(m_savedWindowPos.x())
+                                            .arg(m_savedWindowPos.y()));
+    } else {
+        m_savedWindowPosLabel->setText(I18n::t(QStringLiteral("保存したウィンドウ位置: (未保存)")));
     }
 }
 
@@ -2976,6 +3045,9 @@ QJsonObject MainWindow::buildPresetJson() const
     root["hasSavedWindowSize"] = m_hasSavedWindowSize;
     root["savedWindowWidth"] = m_savedWindowSize.width();
     root["savedWindowHeight"] = m_savedWindowSize.height();
+    root["hasSavedWindowPos"] = m_hasSavedWindowPos;
+    root["savedWindowPosX"] = m_savedWindowPos.x();
+    root["savedWindowPosY"] = m_savedWindowPos.y();
 
     QJsonArray regionsArr;
     for (const NamedRegion &r : m_namedRegions)
@@ -3127,6 +3199,9 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_savedWindowSize =
         QSize(root["savedWindowWidth"].toInt(0), root["savedWindowHeight"].toInt(0));
     refreshSavedWindowSizeLabel();
+    m_hasSavedWindowPos = root["hasSavedWindowPos"].toBool(false);
+    m_savedWindowPos = QPoint(root["savedWindowPosX"].toInt(0), root["savedWindowPosY"].toInt(0));
+    refreshSavedWindowPosLabel();
 
     const QString hint = root["targetAppNameHint"].toString();
     if (!hint.isEmpty()) {

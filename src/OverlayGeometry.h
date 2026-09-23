@@ -80,7 +80,33 @@ inline QPixmap grabVirtualDesktopSnapshot()
 {
     settleDesktopBeforeSnapshot();
     const QRect virtualGeom = virtualDesktopGeometry();
-    QPixmap snapshot(virtualGeom.size());
+    // Composite at the primary screen's device pixel ratio, not the
+    // implicit default of 1.0 -- SPEC.md追加実装及び修正依頼 ("矩形を描画する
+    // モードで選択した位置と実際に操作する操作領域がずれないように"): on a
+    // HiDPI/scaled display (dpr > 1), a QPixmap left at the default ratio
+    // here is, once devicePixelRatio() is accounted for, treated by Qt as
+    // covering *dpr times* virtualGeom's logical size. Drawing it into the
+    // overlay widget with drawPixmap(0, 0, pixmap) in paintEvent() then
+    // paints it too large relative to the widget's own logical coordinate
+    // space (the same space QMouseEvent::globalPosition() reports drag
+    // points in) -- what the user sees drifts away from the real screen
+    // toward the edges, matching the reported "選択した位置と実画面での位置
+    // が少しズレている" symptom. Each per-screen grabWindow(0) pixmap below
+    // already self-describes its own correct ratio and is composited
+    // correctly regardless (QPainter::drawPixmap(QPoint, QPixmap) honors
+    // the source pixmap's own ratio) -- only the *destination* pixmap's own
+    // ratio was left unset before. Not reproducible in this project's own
+    // dpr=1 Linux/Xvfb test environment (verified byte-for-byte aligned
+    // there both before and after this change -- see SPEC.md for the
+    // reproduction steps used), so treat this as a code-reviewed, not
+    // visually-verified-on-HiDPI, fix. Mixed-dpr multi-monitor setups (each
+    // screen at a different ratio) remain an approximation: one ratio is
+    // used for the whole composite, matching the primary screen.
+    qreal dpr = 1.0;
+    if (QScreen *primaryScreen = QGuiApplication::primaryScreen())
+        dpr = primaryScreen->devicePixelRatio();
+    QPixmap snapshot(virtualGeom.size() * dpr);
+    snapshot.setDevicePixelRatio(dpr);
     snapshot.fill(Qt::black);
     QPainter painter(&snapshot);
     for (QScreen *screen : QGuiApplication::screens()) {

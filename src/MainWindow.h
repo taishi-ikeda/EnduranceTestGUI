@@ -68,6 +68,7 @@ private slots:
     void onRemoveSelectedSetupAction();
     void onMoveSetupActionUp();
     void onMoveSetupActionDown();
+    void onClearSetupActions();
 
     // SPEC.md 6.13追加実装及び修正依頼: records the user's own mouse/
     // keyboard operations (system-wide, including the target app's own
@@ -290,6 +291,11 @@ private:
     QPushButton *m_removeSetupActionButton = nullptr;
     QPushButton *m_moveSetupActionUpButton = nullptr;
     QPushButton *m_moveSetupActionDownButton = nullptr;
+    // SPEC.md 6.13追加実装及び修正依頼「起動時セットアップに全消去のボタンを
+    // 追加してください」: mirrors ②ステップ構成の「すべて削除」
+    // (m_clearStepsButton/onClearSteps()) exactly -- clears m_setupActions
+    // immediately, no confirmation prompt (same as that button).
+    QPushButton *m_clearSetupActionsButton = nullptr;
     // SPEC.md 6.13追加実装及び修正依頼「記録」ボタン: appends to
     // m_setupActions in real time while InputRecorder is observing (see
     // onRecordSetupActions()/onSetupActionRecorded()). m_inputRecorder is

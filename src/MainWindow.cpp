@@ -466,8 +466,10 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     auto *setupActionsOrderRow = new QHBoxLayout;
     m_moveSetupActionUpButton = new QPushButton(I18n::t(QStringLiteral("↑ 上へ")), m_setupActionsGroup);
     m_moveSetupActionDownButton = new QPushButton(I18n::t(QStringLiteral("↓ 下へ")), m_setupActionsGroup);
+    m_clearSetupActionsButton = new QPushButton(I18n::t(QStringLiteral("全消去")), m_setupActionsGroup);
     setupActionsOrderRow->addWidget(m_moveSetupActionUpButton);
     setupActionsOrderRow->addWidget(m_moveSetupActionDownButton);
+    setupActionsOrderRow->addWidget(m_clearSetupActionsButton);
     setupActionsLayout->addLayout(setupActionsOrderRow);
     // SPEC.md 6.13追加実装及び修正依頼: records real mouse/keyboard
     // operations (system-wide, including the target app's own dialogs)
@@ -494,6 +496,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onRemoveSelectedSetupAction);
     connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
     connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
+    connect(m_clearSetupActionsButton, &QPushButton::clicked, this, &MainWindow::onClearSetupActions);
     connect(m_recordSetupButton, &QPushButton::clicked, this, &MainWindow::onRecordSetupActions);
 
     layout->addWidget(m_setupActionsGroup);
@@ -1239,6 +1242,12 @@ void MainWindow::onMoveSetupActionDown()
         refreshSetupActionList();
         m_setupActionListWidget->setCurrentRow(row + 1);
     }
+}
+
+void MainWindow::onClearSetupActions()
+{
+    m_setupActions.clear();
+    refreshSetupActionList();
 }
 
 void MainWindow::onRecordSetupActions()

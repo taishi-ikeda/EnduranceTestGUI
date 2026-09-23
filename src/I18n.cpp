@@ -707,6 +707,9 @@ const QHash<QString, QString> &translationTable()
                         "安全のためテストを停止しました"),
          QStringLiteral("%1's target window (a dialog, etc.) never appeared, so the test was stopped "
                         "for safety")},
+
+        // v0.64: 起動時セットアップに「全消去」ボタン
+        {QStringLiteral("全消去"), QStringLiteral("Clear All")},
     };
     return table;
 }

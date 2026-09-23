@@ -756,6 +756,45 @@ AtspiAccessible *findOpenMenuRecursive(AtspiAccessible *node, int depth, int &bu
     return nullptr;
 }
 
+// Experimental: best-effort search of the AT-SPI accessibility tree for an
+// actionable widget (has an Action interface) with this exact accessible
+// name -- used by clickButtonByName() below. Same bounded-traversal
+// rationale as findOpenMenuRecursive() above; not scoped to any particular
+// window/dialog (SPEC.md "既知の制約"). Returns a new reference the caller
+// must g_object_unref, or nullptr if none found.
+AtspiAccessible *findNamedActionableRecursive(AtspiAccessible *node, const QString &name, int depth,
+                                               int &budget)
+{
+    if (!node || depth > 15 || budget <= 0)
+        return nullptr;
+    --budget;
+
+    gchar *nodeName = atspi_accessible_get_name(node, nullptr);
+    const bool nameMatches = nodeName && name == QString::fromUtf8(nodeName);
+    if (nodeName)
+        g_free(nodeName);
+    if (nameMatches) {
+        AtspiAction *action = atspi_accessible_get_action_iface(node);
+        if (action) {
+            g_object_unref(action);
+            g_object_ref(node);
+            return node;
+        }
+    }
+
+    const gint childCount = atspi_accessible_get_child_count(node, nullptr);
+    for (gint i = 0; i < childCount && budget > 0; ++i) {
+        AtspiAccessible *child = atspi_accessible_get_child_at_index(node, i, nullptr);
+        if (!child)
+            continue;
+        AtspiAccessible *found = findNamedActionableRecursive(child, name, depth + 1, budget);
+        g_object_unref(child);
+        if (found)
+            return found;
+    }
+    return nullptr;
+}
+
 AtspiAccessible *findOpenMenu()
 {
     if (!atspiUsable())
@@ -851,6 +890,34 @@ bool clickContextMenuItemAt(int index, qint64 /*expectedOwnerPid*/)
     return clicked;
 }
 
+bool clickButtonByName(const QString &buttonName, qint64 /*expectedOwnerPid*/)
+{
+    if (!atspiUsable())
+        return false;
+    static bool inited = false;
+    if (!inited) {
+        atspi_init();
+        inited = true;
+    }
+    AtspiAccessible *desktop = atspi_get_desktop(0);
+    if (!desktop)
+        return false;
+    int budget = 4000;
+    AtspiAccessible *node = findNamedActionableRecursive(desktop, buttonName, 0, budget);
+    g_object_unref(desktop);
+    if (!node)
+        return false;
+
+    bool clicked = false;
+    AtspiAction *action = atspi_accessible_get_action_iface(node);
+    if (action) {
+        clicked = atspi_action_do_action(action, 0, nullptr);
+        g_object_unref(action);
+    }
+    g_object_unref(node);
+    return clicked;
+}
+
 QString accessibleNameAtPoint(const QPoint &pt)
 {
     if (!atspiUsable())
@@ -905,6 +972,11 @@ bool clickContextMenuItem(const QString & /*itemName*/, qint64 /*expectedOwnerPi
 bool clickContextMenuItemAt(int /*index*/, qint64 /*expectedOwnerPid*/)
 {
     return false;
+}
+
+bool clickButtonByName(const QString & /*buttonName*/, qint64 /*expectedOwnerPid*/)
+{
+    return false;  // AT-SPI not available at build time; see CMakeLists.txt.
 }
 
 QString accessibleNameAtPoint(const QPoint & /*pt*/)

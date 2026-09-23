@@ -36,11 +36,14 @@ private slots:
     void onAddContextMenuIndex();
     void onRemoveSelectedContextMenuIndex();
     void onContextMenuModeChanged();
+    void onAddDialogButton();
+    void onRemoveSelectedDialogButton();
 
 private:
     void refreshShortcutList();
     void refreshContextMenuList();
     void refreshContextMenuIndexList();
+    void refreshDialogButtonList();
 
     QSpinBox *m_dragMinSpin = nullptr;
     QSpinBox *m_dragMaxSpin = nullptr;
@@ -86,4 +89,10 @@ private:
     QPushButton *m_addContextMenuIndexButton = nullptr;
     QPushButton *m_removeContextMenuIndexButton = nullptr;
     QList<int> m_contextMenuIndices;
+
+    QListWidget *m_dialogButtonListWidget = nullptr;
+    QLineEdit *m_newDialogButtonEdit = nullptr;
+    QPushButton *m_addDialogButtonButton = nullptr;
+    QPushButton *m_removeDialogButtonButton = nullptr;
+    QStringList m_dialogButtonNames;
 };

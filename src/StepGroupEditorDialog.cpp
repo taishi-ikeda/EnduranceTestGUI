@@ -172,6 +172,8 @@ QString StepGroupEditorDialog::describeMember(const RegionStep &member, int inde
         actions << I18n::t(QStringLiteral("ショートカット"));
     if (member.enableWindowOp)
         actions << I18n::t(QStringLiteral("ウィンドウ操作"));
+    if (member.enableDialogButtonPress)
+        actions << I18n::t(QStringLiteral("ダイアログのボタンを押す"));
 
     const QString regionDesc = member.useWholeWindow
                                     ? I18n::t(QStringLiteral("対象GUIの全領域"))

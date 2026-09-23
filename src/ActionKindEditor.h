@@ -67,6 +67,8 @@ private:
     QSpinBox *m_shortcutWeightSpin = nullptr;
     QCheckBox *m_windowOpCheck = nullptr;
     QSpinBox *m_windowOpWeightSpin = nullptr;
+    QCheckBox *m_dialogButtonPressCheck = nullptr;
+    QSpinBox *m_dialogButtonPressWeightSpin = nullptr;
     QSpinBox *m_actionCountSpin = nullptr;
     QWidget *m_countRowWidget = nullptr;  // wraps the "操作回数" row so it can be hidden as a unit
 };

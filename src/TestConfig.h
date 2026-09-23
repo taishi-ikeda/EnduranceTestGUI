@@ -89,6 +89,13 @@ struct ActionParams
     ContextMenuSelectionMode contextMenuSelectionMode = ContextMenuSelectionMode::ByName;
     QStringList contextMenuItemNames;  // ByName candidates
     QList<int> contextMenuIndices;     // ByIndex candidates, 1-based
+
+    // Candidate button/widget names for RegionStep::enableDialogButtonPress
+    // (SPEC.md 6.2追加実装及び修正依頼) -- one is picked at random among
+    // whichever of these are actually found (by accessible name) in the
+    // popup dialog when this action kind fires. Same accessibility-tree
+    // caveats as enableContextMenuSelection above.
+    QStringList dialogButtonNames;
 };
 
 // A named, reusable operation region: one or more rectangles (absolute
@@ -169,6 +176,20 @@ struct RegionStep
     bool enableScrollHorizontal = false;
     bool enableShortcut = false;
     bool enableWindowOp = false;  // move/resize/minimize/maximize the target window itself
+    // SPEC.md 6.2追加実装及び修正依頼「タスク内で出てきたダイアログのボタンを
+    // 押したり特定の操作をできるようにしてほしい」: only meaningful (ever
+    // selected -- see hasAnyActionEnabled()/pickWeightedActionKind()) when
+    // targetsPopupDialog is true. Instead of picking a random point
+    // somewhere within this step's whole region the way every other action
+    // kind does, this looks up a button (or other actionable widget) by
+    // accessible name -- one of ActionParams::dialogButtonNames, the exact
+    // same "list several candidates, pick whichever are actually present"
+    // convention enableContextMenuSelection's ByName mode already uses,
+    // since a dialog's exact button set/wording can vary by state (e.g. an
+    // "すべて上書き" button only appearing sometimes) -- and clicks it
+    // directly via PlatformAutomation::clickButtonByName(), wherever it
+    // happens to be positioned in the dialog.
+    bool enableDialogButtonPress = false;
 
     // Relative frequency of each enabled action kind within this step
     // (default 1 each = uniform random, matching the original behavior).
@@ -182,6 +203,7 @@ struct RegionStep
     int scrollDownWeight = 1;
     int scrollHorizontalWeight = 1;
     int shortcutWeight = 1;
+    int dialogButtonPressWeight = 1;
     int windowOpWeight = 1;
 
     qint64 actionCount = 50;  // number of actions to perform in this step before moving on
@@ -276,7 +298,8 @@ struct RegionStep
             return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
                enableScrollDown || enableScrollHorizontal || enableShortcut ||
-               (enableWindowOp && !targetsPopupDialog);
+               (enableWindowOp && !targetsPopupDialog) ||
+               (enableDialogButtonPress && targetsPopupDialog);
     }
 };
 

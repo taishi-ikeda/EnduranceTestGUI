@@ -564,6 +564,124 @@ bool clickContextMenuItemAt(int index, qint64 expectedOwnerPid)
     return clicked;
 }
 
+// SPEC.md 6.2追加実装及び修正依頼: same "assume the frontmost window owned
+// by expectedOwnerPid is the one we want" technique as findOpenMenuElement()
+// above, but walking up to the nearest AXWindow ancestor (covers both plain
+// windows and dialogs -- macOS gives a dialog sheet/panel the same AXWindow
+// role, distinguished only by a subrole this doesn't need to check) instead
+// of AXMenu.
+static AXUIElementRef copyAncestorWithRole(AXUIElementRef start, CFStringRef wantedRole)
+{
+    AXUIElementRef current = start;
+    CFRetain(current);
+    for (int hops = 0; hops < 20 && current; ++hops) {
+        CFStringRef role = nullptr;
+        if (AXUIElementCopyAttributeValue(current, kAXRoleAttribute, (CFTypeRef *)&role) ==
+                kAXErrorSuccess &&
+            role) {
+            const bool matches = CFEqual(role, wantedRole);
+            CFRelease(role);
+            if (matches)
+                return current;  // caller releases
+        }
+        AXUIElementRef parent = nullptr;
+        const AXError err =
+            AXUIElementCopyAttributeValue(current, kAXParentAttribute, (CFTypeRef *)&parent);
+        CFRelease(current);
+        current = (err == kAXErrorSuccess) ? parent : nullptr;
+    }
+    return nullptr;
+}
+
+static AXUIElementRef findFrontmostDialogElement(qint64 expectedOwnerPid)
+{
+    CFArrayRef cfWindows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+    if (!cfWindows)
+        return nullptr;
+
+    NSArray *windows = (__bridge NSArray *)cfWindows;
+    AXUIElementRef dialog = nullptr;
+    if (windows.count > 0) {
+        NSDictionary *top = windows[0];
+        NSNumber *pidNum = top[(id)kCGWindowOwnerPID];
+        if (pidNum && pidNum.longLongValue == expectedOwnerPid) {
+            NSDictionary *boundsDict = top[(id)kCGWindowBounds];
+            CGRect bounds;
+            if (boundsDict && CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)boundsDict, &bounds)) {
+                const CGPoint probe = CGPointMake(bounds.origin.x + bounds.size.width * 0.5,
+                                                   bounds.origin.y + MIN(20.0, bounds.size.height * 0.5));
+                AXUIElementRef systemWide = AXUIElementCreateSystemWide();
+                AXUIElementRef element = nullptr;
+                const AXError err =
+                    AXUIElementCopyElementAtPosition(systemWide, (float)probe.x, (float)probe.y, &element);
+                CFRelease(systemWide);
+                if (err == kAXErrorSuccess && element) {
+                    dialog = copyAncestorWithRole(element, kAXWindowRole);
+                    CFRelease(element);
+                }
+            }
+        }
+    }
+    CFRelease(cfWindows);
+    return dialog;
+}
+
+// Bounded recursive search of `root`'s subtree for a descendant whose
+// kAXTitleAttribute matches `name` -- used by clickButtonByName() below.
+// Same traversal-budget rationale as the Linux AT-SPI counterpart.
+static AXUIElementRef findNamedElementRecursive(AXUIElementRef node, const QString &name, int depth,
+                                                 int &budget)
+{
+    if (!node || depth > 15 || budget <= 0)
+        return nullptr;
+    --budget;
+
+    CFStringRef title = nullptr;
+    if (AXUIElementCopyAttributeValue(node, kAXTitleAttribute, (CFTypeRef *)&title) == kAXErrorSuccess &&
+        title) {
+        const bool matches = QString::fromCFString(title) == name;
+        CFRelease(title);
+        if (matches) {
+            CFRetain(node);
+            return node;
+        }
+    }
+
+    CFArrayRef children = nullptr;
+    if (AXUIElementCopyAttributeValue(node, kAXChildrenAttribute, (CFTypeRef *)&children) ==
+            kAXErrorSuccess &&
+        children) {
+        const CFIndex count = CFArrayGetCount(children);
+        for (CFIndex i = 0; i < count && budget > 0; ++i) {
+            AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+            AXUIElementRef found = findNamedElementRecursive(child, name, depth + 1, budget);
+            if (found) {
+                CFRelease(children);
+                return found;
+            }
+        }
+        CFRelease(children);
+    }
+    return nullptr;
+}
+
+bool clickButtonByName(const QString &buttonName, qint64 expectedOwnerPid)
+{
+    AXUIElementRef dialog = findFrontmostDialogElement(expectedOwnerPid);
+    if (!dialog)
+        return false;
+
+    int budget = 4000;
+    AXUIElementRef found = findNamedElementRecursive(dialog, buttonName, 0, budget);
+    CFRelease(dialog);
+    if (!found)
+        return false;
+
+    const bool clicked = (AXUIElementPerformAction(found, kAXPressAction) == kAXErrorSuccess);
+    CFRelease(found);
+    return clicked;
+}
+
 void dismissContextMenu()
 {
     CGEventRef down = CGEventCreateKeyboardEvent(nullptr, kVK_Escape, true);

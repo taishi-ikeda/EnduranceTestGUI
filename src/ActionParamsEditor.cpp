@@ -220,6 +220,35 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     connect(m_removeContextMenuIndexButton, &QPushButton::clicked, this,
             &ActionParamsEditor::onRemoveSelectedContextMenuIndex);
 
+    // SPEC.md 6.2追加実装及び修正依頼: candidates for ②の「ダイアログの
+    // ボタンを押す」action kind (only meaningful for a task member that
+    // targets a newly-appeared dialog) -- same "list several candidates,
+    // pick whichever are actually present" idiom as the context-menu
+    // item-name list above.
+    auto *dialogButtonLabel = new QLabel(
+        I18n::t(QStringLiteral("ダイアログのボタン名（この中で実際に見つかったものからランダムに1つ選んで"
+                                "押す。1つも見つからなければこの操作をスキップ):")),
+        this);
+    dialogButtonLabel->setWordWrap(true);
+    layout->addWidget(dialogButtonLabel);
+    m_dialogButtonListWidget = new QListWidget(this);
+    m_dialogButtonListWidget->setMaximumHeight(80);
+    layout->addWidget(m_dialogButtonListWidget);
+    auto *dialogButtonRow = new QHBoxLayout;
+    m_newDialogButtonEdit = new QLineEdit(this);
+    m_newDialogButtonEdit->setPlaceholderText(I18n::t(QStringLiteral("OK")));
+    m_addDialogButtonButton = new QPushButton(I18n::t(QStringLiteral("追加")), this);
+    m_removeDialogButtonButton = new QPushButton(I18n::t(QStringLiteral("選択を削除")), this);
+    dialogButtonRow->addWidget(m_newDialogButtonEdit, 1);
+    dialogButtonRow->addWidget(m_addDialogButtonButton);
+    dialogButtonRow->addWidget(m_removeDialogButtonButton);
+    layout->addLayout(dialogButtonRow);
+
+    connect(m_addDialogButtonButton, &QPushButton::clicked, this,
+            &ActionParamsEditor::onAddDialogButton);
+    connect(m_removeDialogButtonButton, &QPushButton::clicked, this,
+            &ActionParamsEditor::onRemoveSelectedDialogButton);
+
     layout->addStretch();
 
     onContextMenuModeChanged();
@@ -265,6 +294,9 @@ void ActionParamsEditor::setParams(const ActionParams &p)
     m_contextMenuIndices = p.contextMenuIndices;
     refreshContextMenuIndexList();
     onContextMenuModeChanged();
+
+    m_dialogButtonNames = p.dialogButtonNames;
+    refreshDialogButtonList();
 }
 
 ActionParams ActionParamsEditor::params() const
@@ -297,6 +329,7 @@ ActionParams ActionParamsEditor::params() const
                                       : ContextMenuSelectionMode::ByIndex;
     p.contextMenuItemNames = m_contextMenuItems;
     p.contextMenuIndices = m_contextMenuIndices;
+    p.dialogButtonNames = m_dialogButtonNames;
     return p;
 }
 
@@ -393,4 +426,30 @@ void ActionParamsEditor::onContextMenuModeChanged()
     m_newContextMenuIndexSpin->setEnabled(enabled && !byName);
     m_addContextMenuIndexButton->setEnabled(enabled && !byName);
     m_removeContextMenuIndexButton->setEnabled(enabled && !byName);
+}
+
+void ActionParamsEditor::onAddDialogButton()
+{
+    const QString text = m_newDialogButtonEdit->text().trimmed();
+    if (text.isEmpty())
+        return;
+    m_dialogButtonNames.append(text);
+    m_newDialogButtonEdit->clear();
+    refreshDialogButtonList();
+}
+
+void ActionParamsEditor::onRemoveSelectedDialogButton()
+{
+    const int row = m_dialogButtonListWidget->currentRow();
+    if (row >= 0 && row < m_dialogButtonNames.size()) {
+        m_dialogButtonNames.removeAt(row);
+        refreshDialogButtonList();
+    }
+}
+
+void ActionParamsEditor::refreshDialogButtonList()
+{
+    m_dialogButtonListWidget->clear();
+    for (const QString &s : m_dialogButtonNames)
+        m_dialogButtonListWidget->addItem(s);
 }

@@ -152,6 +152,7 @@ QJsonObject actionParamsToJson(const ActionParams &p)
     o["contextMenuSelectionMode"] = contextMenuModeToString(p.contextMenuSelectionMode);
     o["contextMenuItemNames"] = stringListToJson(p.contextMenuItemNames);
     o["contextMenuIndices"] = intListToJson(p.contextMenuIndices);
+    o["dialogButtonNames"] = stringListToJson(p.dialogButtonNames);
     return o;
 }
 
@@ -186,6 +187,8 @@ ActionParams actionParamsFromJson(const QJsonObject &o)
         p.contextMenuItemNames = stringListFromJson(o["contextMenuItemNames"].toArray());
     if (o.contains("contextMenuIndices"))
         p.contextMenuIndices = intListFromJson(o["contextMenuIndices"].toArray());
+    if (o.contains("dialogButtonNames"))
+        p.dialogButtonNames = stringListFromJson(o["dialogButtonNames"].toArray());
     return p;
 }
 
@@ -230,6 +233,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["enableScrollHorizontal"] = s.enableScrollHorizontal;
     o["enableShortcut"] = s.enableShortcut;
     o["enableWindowOp"] = s.enableWindowOp;
+    o["enableDialogButtonPress"] = s.enableDialogButtonPress;
     o["clickWeight"] = s.clickWeight;
     o["doubleClickWeight"] = s.doubleClickWeight;
     o["dragWeight"] = s.dragWeight;
@@ -239,6 +243,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["scrollHorizontalWeight"] = s.scrollHorizontalWeight;
     o["shortcutWeight"] = s.shortcutWeight;
     o["windowOpWeight"] = s.windowOpWeight;
+    o["dialogButtonPressWeight"] = s.dialogButtonPressWeight;
     o["actionCount"] = double(s.actionCount);
     o["useDefaultActionParams"] = s.useDefaultActionParams;
     o["customActionParams"] = actionParamsToJson(s.customActionParams);
@@ -276,6 +281,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.enableScrollHorizontal = o["enableScrollHorizontal"].toBool(s.enableScrollHorizontal);
     s.enableShortcut = o["enableShortcut"].toBool(s.enableShortcut);
     s.enableWindowOp = o["enableWindowOp"].toBool(s.enableWindowOp);
+    s.enableDialogButtonPress = o["enableDialogButtonPress"].toBool(s.enableDialogButtonPress);
     s.clickWeight = o["clickWeight"].toInt(s.clickWeight);
     s.doubleClickWeight = o["doubleClickWeight"].toInt(s.doubleClickWeight);
     s.dragWeight = o["dragWeight"].toInt(s.dragWeight);
@@ -285,6 +291,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.scrollHorizontalWeight = o["scrollHorizontalWeight"].toInt(s.scrollHorizontalWeight);
     s.shortcutWeight = o["shortcutWeight"].toInt(s.shortcutWeight);
     s.windowOpWeight = o["windowOpWeight"].toInt(s.windowOpWeight);
+    s.dialogButtonPressWeight = o["dialogButtonPressWeight"].toInt(s.dialogButtonPressWeight);
     s.actionCount = qint64(o["actionCount"].toDouble(double(s.actionCount)));
     s.useDefaultActionParams = o["useDefaultActionParams"].toBool(s.useDefaultActionParams);
     if (o.contains("customActionParams"))

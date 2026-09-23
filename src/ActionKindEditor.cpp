@@ -102,6 +102,19 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     windowOpRow->addWidget(m_windowOpWeightSpin);
     layout->addLayout(windowOpRow);
 
+    auto *dialogButtonPressRow = new QHBoxLayout;
+    m_dialogButtonPressCheck = new QCheckBox(I18n::t(QStringLiteral("ダイアログのボタンを押す")), this);
+    m_dialogButtonPressCheck->setToolTip(
+        I18n::t(QStringLiteral("このステップ（タスク内のメンバー）が「新しく出現したダイアログ（自動検出）」"
+                                "を操作対象にしている場合のみ有効です。③操作パラメータの「ダイアログの"
+                                "ボタン名」で指定した名前のボタンを探して押します。")));
+    dialogButtonPressRow->addWidget(m_dialogButtonPressCheck);
+    dialogButtonPressRow->addStretch();
+    m_dialogButtonPressWeightSpin = new QSpinBox(this);
+    m_dialogButtonPressWeightSpin->setRange(1, 100);
+    dialogButtonPressRow->addWidget(m_dialogButtonPressWeightSpin);
+    layout->addLayout(dialogButtonPressRow);
+
     m_countRowWidget = new QWidget(this);
     auto *countRow = new QHBoxLayout(m_countRowWidget);
     countRow->setContentsMargins(0, 0, 0, 0);
@@ -115,7 +128,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
                                         m_doubleClickCheck, m_dragCheck,        m_keyCheck,
                                         m_scrollUpCheck,    m_scrollDownCheck,  m_scrollHorizontalCheck,
-                                        m_shortcutCheck,    m_windowOpCheck};
+                                        m_shortcutCheck,    m_windowOpCheck,    m_dialogButtonPressCheck};
     for (QCheckBox *check : checks)
         connect(check, &QCheckBox::toggled, this, &ActionKindEditor::changed);
 
@@ -123,7 +136,8 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
                                       m_dragWeightSpin,        m_keyWeightSpin,
                                       m_scrollUpWeightSpin,    m_scrollDownWeightSpin,
                                       m_scrollHorizontalWeightSpin, m_shortcutWeightSpin,
-                                      m_windowOpWeightSpin,    m_actionCountSpin};
+                                      m_windowOpWeightSpin,    m_dialogButtonPressWeightSpin,
+                                      m_actionCountSpin};
     for (QSpinBox *spin : spins)
         connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ActionKindEditor::changed);
 }
@@ -150,6 +164,8 @@ void ActionKindEditor::setKinds(const RegionStep &step)
     m_shortcutWeightSpin->setValue(step.shortcutWeight);
     m_windowOpCheck->setChecked(step.enableWindowOp);
     m_windowOpWeightSpin->setValue(step.windowOpWeight);
+    m_dialogButtonPressCheck->setChecked(step.enableDialogButtonPress);
+    m_dialogButtonPressWeightSpin->setValue(step.dialogButtonPressWeight);
     m_actionCountSpin->setValue(int(step.actionCount));
 }
 
@@ -175,6 +191,8 @@ void ActionKindEditor::applyKindsTo(RegionStep &step) const
     step.shortcutWeight = m_shortcutWeightSpin->value();
     step.enableWindowOp = m_windowOpCheck->isChecked();
     step.windowOpWeight = m_windowOpWeightSpin->value();
+    step.enableDialogButtonPress = m_dialogButtonPressCheck->isChecked();
+    step.dialogButtonPressWeight = m_dialogButtonPressWeightSpin->value();
     step.actionCount = m_actionCountSpin->value();
 }
 

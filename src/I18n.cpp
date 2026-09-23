@@ -775,6 +775,26 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Target tool launch detected. Waiting %1 more seconds for it to settle...")},
         {QStringLiteral("連続実行を中断しました（起動待ち時間の経過待ち中でした）"),
          QStringLiteral("Continuous run interrupted (was waiting out the extra launch delay)")},
+
+        // v0.70: タスク内ダイアログ操作を「ダイアログのボタンを押す」に拡張
+        {QStringLiteral("ダイアログのボタンを押す"), QStringLiteral("Press dialog button")},
+        {QStringLiteral("このステップ（タスク内のメンバー）が「新しく出現したダイアログ（自動検出）」"
+                        "を操作対象にしている場合のみ有効です。③操作パラメータの「ダイアログの"
+                        "ボタン名」で指定した名前のボタンを探して押します。"),
+         QStringLiteral("Only takes effect when this step (a task member) targets \"Newly appeared "
+                        "dialog (auto-detected)\". Looks for and presses a button named one of "
+                        "\"Dialog button names\" in ③ Action Parameters.")},
+        {QStringLiteral("ダイアログのボタン名（この中で実際に見つかったものからランダムに1つ選んで"
+                        "押す。1つも見つからなければこの操作をスキップ):"),
+         QStringLiteral("Dialog button names (randomly picks one of these that's actually found and "
+                        "presses it; skips this action if none are found):")},
+        {QStringLiteral("ダイアログのボタン名が設定されていません"),
+         QStringLiteral("No dialog button names are configured")},
+        {QStringLiteral("指定したボタンが見つからなかったため、この操作をスキップしました"),
+         QStringLiteral("None of the specified buttons were found, so this action was skipped")},
+        {QStringLiteral("ダイアログのボタン「%1」を押す"), QStringLiteral("Press dialog button \"%1\"")},
+        {QStringLiteral("対象アプリがアクティブでないため、安全のためテストを停止しました"),
+         QStringLiteral("The target app isn't active, so the test was stopped for safety")},
     };
     return table;
 }

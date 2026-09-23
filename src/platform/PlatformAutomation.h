@@ -199,6 +199,19 @@ bool clickContextMenuItemAt(int index, qint64 expectedOwnerPid);
 // Dismisses an open popup/context menu (sends Escape).
 void dismissContextMenu();
 
+// SPEC.md 6.2追加実装及び修正依頼「タスク内で操作途中で出てくるダイアログの
+// ボタンを押したり特定の操作をできるようにしてほしい」: searches for a
+// button (or any other actionable widget) with this exact accessible name
+// and activates it, using the same accessibility backend as the
+// context-menu functions above. On macOS the frontmost window owned by
+// `expectedOwnerPid` is searched (same "assume frontmost == the dialog
+// that just appeared" technique as findOpenMenuElement()); on Linux the
+// search is desktop-wide and not pid-scoped, same caveat as
+// listOpenContextMenuItems() above -- the caller's own active-process
+// check (RandomActionEngine, right before calling this) is the guard.
+// Returns false if no matching, activatable widget could be found.
+bool clickButtonByName(const QString &buttonName, qint64 expectedOwnerPid);
+
 // --- Diagnostics (SPEC.md 6.7/6.8/10) -----------------------------------
 // Best-effort hints for reproducing/diagnosing a bug found during an
 // endurance-test run, gathered the same way the context-menu introspection

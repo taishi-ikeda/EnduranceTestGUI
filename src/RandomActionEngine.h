@@ -163,7 +163,8 @@ private:
         ScrollDown,
         ScrollHorizontal,
         Shortcut,
-        WindowOp
+        WindowOp,
+        DialogButtonPress
     };
 
     // Result of runOneAction() below.

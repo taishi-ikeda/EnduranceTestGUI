@@ -268,6 +268,7 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
     case ActionKind::ScrollHorizontal: return I18n::t(QStringLiteral("スクロール(横)"));
     case ActionKind::Shortcut: return I18n::t(QStringLiteral("ショートカット"));
     case ActionKind::WindowOp: return I18n::t(QStringLiteral("ウィンドウ操作"));
+    case ActionKind::DialogButtonPress: return I18n::t(QStringLiteral("ダイアログのボタンを押す"));
     }
     return QString();
 }
@@ -769,6 +770,11 @@ RandomActionEngine::ActionKind RandomActionEngine::pickWeightedActionKind(const 
     // RegionStep::targetsPopupDialog.
     if (step.enableWindowOp && !step.targetsPopupDialog)
         entries << Entry{ActionKind::WindowOp, qMax(1, step.windowOpWeight)};
+    // Opposite restriction: only meaningful *with* a resolved popup dialog
+    // to search for the named button in -- see RegionStep::
+    // enableDialogButtonPress's own comment.
+    if (step.enableDialogButtonPress && step.targetsPopupDialog)
+        entries << Entry{ActionKind::DialogButtonPress, qMax(1, step.dialogButtonPressWeight)};
 
     int total = 0;
     for (const Entry &e : entries)
@@ -1204,6 +1210,17 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
+    } else if (kind == ActionKind::DialogButtonPress) {
+        // Same rationale as Key/Shortcut above: this doesn't click a
+        // specific point (PlatformAutomation::clickButtonByName() searches
+        // by accessible name, not screen coordinates), so the only
+        // meaningful safety check is that the target is still the
+        // frontmost/active process.
+        if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため、安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return ActionOutcome::StoppedEngine;
+        }
     } else {  // WindowOp: identity is checked directly by pid+windowId below
     }
 
@@ -1421,6 +1438,36 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             PlatformAutomation::maximizeWindow(m_config.targetPid, m_config.targetWindowId);
             desc = I18n::t(QStringLiteral("ウィンドウを最大化"));
         }
+        break;
+    }
+    case ActionKind::DialogButtonPress: {
+        if (params.dialogButtonNames.isEmpty()) {
+            emit logMessage(I18n::t(QStringLiteral("ダイアログのボタン名が設定されていません")));
+            return ActionOutcome::SkippedNoCount;
+        }
+        // Same "try each candidate, use whichever is actually present"
+        // convention as handlePossibleContextMenu()'s ByName mode: rather
+        // than pre-filtering by introspecting the dialog's contents first
+        // (an extra round trip PlatformAutomation doesn't expose), just
+        // try a randomly-ordered walk of the candidates and stop at the
+        // first one clickButtonByName() actually finds and activates.
+        QStringList candidates = params.dialogButtonNames;
+        for (int i = candidates.size() - 1; i > 0; --i) {
+            const int j = int(m_rng.bounded(quint32(i + 1)));
+            candidates.swapItemsAt(i, j);
+        }
+        QString clickedName;
+        for (const QString &name : candidates) {
+            if (PlatformAutomation::clickButtonByName(name, m_config.targetPid)) {
+                clickedName = name;
+                break;
+            }
+        }
+        if (clickedName.isEmpty()) {
+            emit logMessage(I18n::t(QStringLiteral("指定したボタンが見つからなかったため、この操作をスキップしました")));
+            return ActionOutcome::SkippedNoCount;
+        }
+        desc = I18n::t(QStringLiteral("ダイアログのボタン「%1」を押す")).arg(clickedName);
         break;
     }
     }

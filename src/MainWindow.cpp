@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <cstdio>
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -2086,6 +2087,7 @@ bool MainWindow::beginRun(bool interactive)
         } else {
             appendLog(I18n::t(QStringLiteral("連続実行: 権限が確認できなかったため中断しました")));
             m_batchModeActive = false;
+            checkHeadlessCompletion();
         }
         return false;
     }
@@ -2101,6 +2103,7 @@ bool MainWindow::beginRun(bool interactive)
         else {
             appendLog(I18n::t(QStringLiteral("連続実行: 設定エラーのため中断しました: %1")).arg(errorMessage));
             m_batchModeActive = false;
+            checkHeadlessCompletion();
         }
         return false;
     }
@@ -2139,6 +2142,7 @@ bool MainWindow::beginRun(bool interactive)
             } else {
                 appendLog(I18n::t(QStringLiteral("連続実行: 安全確認に失敗したため中断しました")));
                 m_batchModeActive = false;
+                checkHeadlessCompletion();
             }
             return false;
         }
@@ -2273,6 +2277,36 @@ void MainWindow::onStart()
     }
 
     beginRun(/*interactive=*/true);
+}
+
+bool MainWindow::runHeadless(const QString &presetPath, int repeatCount)
+{
+    m_headlessMode = true;
+
+    QString errorMessage;
+    if (!loadPresetFromPath(presetPath, errorMessage)) {
+        std::fprintf(stderr, "%s\n", errorMessage.toUtf8().constData());
+        return false;
+    }
+    if (m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+        std::fprintf(stderr, "%s\n",
+                     I18n::t(QStringLiteral("連続実行を使うには、①に対象アプリの自動起動コマンドを設定して"
+                                             "ください。プリセットJSONにtargetLaunchCommandが含まれているか"
+                                             "確認してください。"))
+                         .toUtf8()
+                         .constData());
+        return false;
+    }
+    m_batchRunCountSpin->setValue(qMax(1, repeatCount));
+
+    // From here on this is exactly "⟳ 連続実行" (onContinuousRun()) -- every
+    // repeat gets a genuinely fresh instance (kill any leftover, launch,
+    // wait, run), the same guarantee a human clicking that button gets, and
+    // the only one that makes sense for an unattended headless invocation
+    // (plain batch mode's "reuse whatever's still alive" behavior has
+    // nothing to fall back to here without a human to relaunch by hand).
+    onContinuousRun();
+    return true;
 }
 
 void MainWindow::onContinuousRun()
@@ -2424,6 +2458,7 @@ void MainWindow::continueBatchIfNeeded()
         m_batchModeActive = false;
         m_continuousRunMode = false;
         m_batchProgressLabel->setText(QString());
+        checkHeadlessCompletion();
         return;
     }
     appendLog(I18n::t(QStringLiteral("連続実行: %1/%2回が終了しました。次の実行の準備をします..."))
@@ -2437,6 +2472,13 @@ void MainWindow::continueBatchIfNeeded()
     setControlsEnabled(false);
     m_stopButton->setEnabled(true);
     waitForTargetThenContinueBatch();
+}
+
+void MainWindow::checkHeadlessCompletion()
+{
+    if (!m_headlessMode || m_batchModeActive)
+        return;
+    QCoreApplication::exit(m_headlessAnomalyOccurred ? 1 : 0);
 }
 
 void MainWindow::waitForTargetThenContinueBatch()
@@ -2582,6 +2624,14 @@ void MainWindow::appendLog(const QString &message)
         m_fullLogFile.write("\n");
         m_fullLogFile.flush();
     }
+    // SPEC.md 10追加実装及び修正依頼 (CLI/ヘッドレス実行モード): this window
+    // is never shown() in headless mode, so m_logView above is invisible --
+    // mirror every line to stdout instead, the only place left to look.
+    if (m_headlessMode) {
+        std::fputs(line.toUtf8().constData(), stdout);
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+    }
 }
 
 void MainWindow::onIterationCountChanged(qint64 count)
@@ -2643,6 +2693,8 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
     m_hasLastSummary = true;
     m_saveSummaryButton->setEnabled(true);
     m_saveSummaryButton->setToolTip(QString());
+    if (summary.anomaly)
+        m_headlessAnomalyOccurred = true;
     // Also written straight into the log (SPEC.md 10) so it's visible right
     // away without a separate save step, and is included in "ログを保存...".
     for (const QString &line : RandomActionEngine::formatSummaryText(summary).split(QLatin1Char('\n')))
@@ -2905,17 +2957,23 @@ void MainWindow::onLoadPreset()
     if (path.isEmpty())
         return;
 
+    QString errorMessage;
+    if (!loadPresetFromPath(path, errorMessage))
+        QMessageBox::warning(this, I18n::t(QStringLiteral("読み込みエラー")), errorMessage);
+}
+
+bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
+{
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("読み込みエラー")), I18n::t(QStringLiteral("ファイルを開けませんでした。")));
-        return;
+        errorMessage = I18n::t(QStringLiteral("ファイルを開けませんでした。"));
+        return false;
     }
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("読み込みエラー")),
-                              I18n::t(QStringLiteral("JSONとして解釈できませんでした: %1")).arg(parseError.errorString()));
-        return;
+        errorMessage = I18n::t(QStringLiteral("JSONとして解釈できませんでした: %1")).arg(parseError.errorString());
+        return false;
     }
     const QJsonObject root = doc.object();
 
@@ -2994,6 +3052,7 @@ void MainWindow::onLoadPreset()
                               .arg(path, hint));
 
     updateStatisticsDisplay();
+    return true;
 }
 
 void MainWindow::updateStatisticsDisplay()

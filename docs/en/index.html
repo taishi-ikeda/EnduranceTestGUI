@@ -415,6 +415,7 @@
       <li>An action was about to land on something other than the target app (a fail-closed safety stop)</li>
       <li>The target app stops responding (hang detection, Linux only)</li>
     </ul>
+    <p><strong>Running from a terminal without opening the GUI (CLI/headless mode):</strong> Given a preset JSON saved with "Save test settings...", running <code>EnduranceTestGUI --run &lt;preset.json&gt; [--repeat N]</code> in a terminal runs the same test with no window shown at all. It behaves exactly like the "⟳ Continuous run" button: it terminates the target app, launches it fresh with the launch command (which must be saved in the preset), and repeats that cycle <code>--repeat</code> times (default 1). All progress, action logs, and the run summary are printed to stdout, and the process exits automatically once every repeat has finished (or once an error makes continuing impossible). The exit code is 1 if any run was anomalous (e.g. a crash) and 0 otherwise, so a shell script or CI pipeline can check success directly.</p>
   </section>
 
   <section id="crash">

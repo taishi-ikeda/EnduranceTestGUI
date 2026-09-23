@@ -55,6 +55,23 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
+    // SPEC.md 10追加実装及び修正依頼「GUIを立ち上げなくてもターミナル実行で
+    // 保存した手順を引数として与えることでテストを実行できるようにして
+    // ください。その際連続実行の回数も引数として設定できるように」: entry
+    // point for main.cpp's `--run <preset.json> [--repeat N]` CLI mode.
+    // Loads the preset, sets the batch run count, and starts the exact same
+    // kill-then-relaunch cycle "⟳ 連続実行" (onContinuousRun()) uses --
+    // this window is never shown() in this mode (see main.cpp). Prints
+    // progress to stdout/stderr via appendLog()'s m_headlessMode mirror
+    // (there is no visible log pane to look at); the whole process exits
+    // once every run has completed (checkHeadlessCompletion(), reached via
+    // the same paths a normal batch run already uses to notice it's done or
+    // aborted). Returns false (without starting the Qt event loop -- the
+    // caller should exit(1) itself) if the preset can't be loaded, or if no
+    // launch command is configured (required so each repeat gets a fresh
+    // instance -- same requirement "⟳ 連続実行" already has).
+    bool runHeadless(const QString &presetPath, int repeatCount);
+
 private slots:
     void onRefreshTargets();
     void refreshPermissionLabel();
@@ -195,6 +212,13 @@ private:
     // in onRunSummaryReady(), so a bug report's config file is produced the
     // same way a manually-saved preset is.
     QJsonObject buildPresetJson() const;
+    // The actual "given a path, load and apply it" logic behind onLoadPreset()
+    // (which wraps this with a QFileDialog + an overwrite-confirmation
+    // prompt) -- factored out so runHeadless() can load a preset given
+    // directly on the command line without going through either. Returns
+    // false (errorMessage filled in) on a missing/unreadable/malformed
+    // file; never shows any UI itself.
+    bool loadPresetFromPath(const QString &path, QString &errorMessage);
 
     // Recomputes m_currentConfigFingerprint from the current ①②③ setup and
     // refreshes m_statisticsSummaryLabel and every ②list row's crash badge
@@ -229,6 +253,17 @@ private:
     // を経由する) or hands off to waitForTargetThenContinueBatch(); does
     // nothing otherwise.
     void continueBatchIfNeeded();
+    // SPEC.md 10追加実装及び修正依頼 (CLI/ヘッドレス実行モード): called from
+    // every place m_batchModeActive can transition from true to false
+    // (continueBatchIfNeeded()'s "all repeats done" branch, and beginRun()'s
+    // three non-interactive failure paths) -- a no-op unless m_headlessMode
+    // is set and the batch has genuinely ended, in which case it exits the
+    // whole process (QCoreApplication::exit()) instead of just re-enabling
+    // ①②③ the way the interactive GUI does, since there's no window for a
+    // human to look at or press "▶開始" again from. Exit code reflects
+    // whether any run in this headless invocation was anomalous
+    // (m_headlessAnomalyOccurred), for use in a shell script/CI pipeline.
+    void checkHeadlessCompletion();
     // Refreshes ①'s target list, then either:
     // - m_continuousRunMode (SPEC.md 10 ⑤): hands off to
     //   killTargetThenRelaunchForContinuousRun(), which always terminates
@@ -507,6 +542,13 @@ private:
     int m_batchRunsRequested = 1;
     int m_batchRunsCompleted = 0;
     bool m_batchModeActive = false;
+    // SPEC.md 10追加実装及び修正依頼 (CLI/ヘッドレス実行モード): set once by
+    // runHeadless(), never cleared -- see its own header comment and
+    // checkHeadlessCompletion(). m_headlessAnomalyOccurred is OR'd in by
+    // onRunSummaryReady() from every run's RunSummary::anomaly across the
+    // whole invocation, and decides the process's final exit code.
+    bool m_headlessMode = false;
+    bool m_headlessAnomalyOccurred = false;
     // Polls (via onBatchWaitTick()) for the target app to reappear between
     // batch runs when it isn't already back the instant one finishes --
     // whether the user relaunches it by hand or m_targetLaunchCommandEdit's

@@ -507,6 +507,7 @@ private:
     //   cost, hence default on).
     QCheckBox *m_recordingCheck = nullptr;
     QCheckBox *m_crashDumpCollectionCheck = nullptr;
+    QCheckBox *m_autoSlowdownCheck = nullptr;
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;

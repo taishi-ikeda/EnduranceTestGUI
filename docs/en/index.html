@@ -395,6 +395,7 @@
       <tr><td>When to capture operation-region screenshots</td><td>Choose from: once before the run starts / every time the step changes / at fixed intervals. Captured images can be saved afterward via "Save Operation-Region Image..."</td></tr>
       <tr><td>Save a recording of the recent screen on abnormal stop</td><td>Off by default. When enabled, keeps a rolling buffer of the screen at 0.5-second intervals (roughly the last 10 seconds) and automatically saves it as numbered PNGs on a crash</td></tr>
       <tr><td>Collect OS crash dumps/diagnostic logs on abnormal stop</td><td>On by default. Makes a best-effort search for the target app's crash report/core dump and records the path in the log if found</td></tr>
+      <tr><td>Automatically slow down when the target app is slow to respond</td><td>Off by default (Linux only). If the same responsiveness check used for hang detection (polled every 8s) fails just once, the action interval is temporarily lengthened 5x (until it either recovers or is confirmed as a hang) to reduce load on the target app, and reverts automatically once it responds again. The hang-stop condition itself (two consecutive failures) is unchanged by this option</td></tr>
     </table>
   </section>
 

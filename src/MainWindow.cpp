@@ -706,6 +706,15 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                         "見つからなくても実行には影響しません。")));
     timingForm->addRow(QString(), m_crashDumpCollectionCheck);
 
+    m_autoSlowdownCheck =
+        new QCheckBox(I18n::t(QStringLiteral("対象アプリの応答が遅い時は操作間隔を自動的に延ばす")), m_timingGroup);
+    m_autoSlowdownCheck->setChecked(false);
+    m_autoSlowdownCheck->setToolTip(
+        I18n::t(QStringLiteral("応答確認（WM_PING）が一度失敗すると、ハングと判定されるまでの間、"
+                        "操作間隔を一時的に延ばして対象アプリの負荷を減らします。"
+                        "応答が戻れば自動的に元の間隔に戻ります。")));
+    timingForm->addRow(QString(), m_autoSlowdownCheck);
+
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
     auto *namedRegionAndTimingRow = new QHBoxLayout;
@@ -1981,6 +1990,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.screenshotCaptureIntervalActions = m_screenshotIntervalSpin->value();
     config.enableScreenRecording = m_recordingCheck->isChecked();
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
+    config.autoSlowdownEnabled = m_autoSlowdownCheck->isChecked();
 
     ok = true;
     return config;
@@ -2921,6 +2931,7 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["screenshotCaptureIntervalActions"] = m_screenshotIntervalSpin->value();
     timing["enableScreenRecording"] = m_recordingCheck->isChecked();
     timing["enableCrashDumpCollection"] = m_crashDumpCollectionCheck->isChecked();
+    timing["autoSlowdownEnabled"] = m_autoSlowdownCheck->isChecked();
     root["timing"] = timing;
     return root;
 }
@@ -3021,6 +3032,7 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_recordingCheck->setChecked(timing["enableScreenRecording"].toBool(m_recordingCheck->isChecked()));
     m_crashDumpCollectionCheck->setChecked(
         timing["enableCrashDumpCollection"].toBool(m_crashDumpCollectionCheck->isChecked()));
+    m_autoSlowdownCheck->setChecked(timing["autoSlowdownEnabled"].toBool(m_autoSlowdownCheck->isChecked()));
 
     m_lastEditedStepRow = -1;
     refreshNamedRegionList();

@@ -795,6 +795,22 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ダイアログのボタン「%1」を押す"), QStringLiteral("Press dialog button \"%1\"")},
         {QStringLiteral("対象アプリがアクティブでないため、安全のためテストを停止しました"),
          QStringLiteral("The target app isn't active, so the test was stopped for safety")},
+
+        // v0.71: 対象アプリの応答が遅い時に操作間隔を自動的に延ばすオプション
+        {QStringLiteral("対象アプリの応答が遅い時は操作間隔を自動的に延ばす"),
+         QStringLiteral("Automatically slow down when the target app is slow to respond")},
+        {QStringLiteral("応答確認（WM_PING）が一度失敗すると、ハングと判定されるまでの間、"
+                        "操作間隔を一時的に延ばして対象アプリの負荷を減らします。"
+                        "応答が戻れば自動的に元の間隔に戻ります。"),
+         QStringLiteral("If a responsiveness check (WM_PING) fails once, this temporarily lengthens "
+                        "the action interval (until it either recovers or is confirmed as a hang) "
+                        "to reduce load on the target app. Reverts automatically once it responds "
+                        "again.")},
+        {QStringLiteral("対象アプリの応答が遅いため、操作間隔を自動的に延ばします"),
+         QStringLiteral("The target app is slow to respond, so the action interval is being "
+                        "automatically lengthened")},
+        {QStringLiteral("対象アプリの応答が回復したため、操作間隔を元に戻します"),
+         QStringLiteral("The target app has recovered, so the action interval is being reverted")},
     };
     return table;
 }

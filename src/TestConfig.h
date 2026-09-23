@@ -417,6 +417,20 @@ struct TestConfig
 
     bool keepTargetActive = true;
 
+    // If true, RandomActionEngine temporarily multiplies the action
+    // interval (see kAutoSlowdownIntervalMultiplier) whenever the target's
+    // WM_PING responsiveness check (checkTargetResponsiveness(), the same
+    // probe used for hang detection below) misses once, on the theory that
+    // a target which is merely slow -- not actually hung -- benefits from
+    // fewer/less-frequent actions landing on it while it catches up. This
+    // is independent from, and does not change, the existing hang-stop
+    // threshold (two consecutive misses still stops the run as an anomaly
+    // regardless of this option). Reverts to the normal interval as soon as
+    // a ping succeeds again. Off by default: most targets never need it,
+    // and it changes run timing, so it's opt-in like the other diagnostics
+    // toggles above.
+    bool autoSlowdownEnabled = false;
+
     // Controls when RandomActionEngine captures its internal operation-
     // region screenshot (SPEC.md 6.2/10): once right before the first
     // action of a run, every time the current top-level step changes, or

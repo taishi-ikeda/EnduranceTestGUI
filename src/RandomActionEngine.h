@@ -351,6 +351,11 @@ private:
     // false "hang detected" stop on every single run (SPEC.md 8/10).
     bool m_everRespondedToPing = false;
     int m_neverRespondedStrikes = 0;
+    // See TestConfig::autoSlowdownEnabled. Set when a WM_PING miss is seen
+    // while that option is on (checkTargetResponsiveness()) and cleared as
+    // soon as a ping succeeds again; scheduleNext() multiplies the action
+    // interval by kAutoSlowdownIntervalMultiplier while this is true.
+    bool m_slowdownActive = false;
     QElapsedTimer m_elapsed;
     qint64 m_pausedElapsedMs = 0;  // wall-clock time already consumed before the current pause/run segment
     qint64 m_iterationCount = 0;

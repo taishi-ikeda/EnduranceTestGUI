@@ -121,6 +121,12 @@ constexpr int kRecentActionHistorySize = 15;
 // should fail fast rather than stall the run for a long time.
 constexpr int kMaxSetupSafetyRetries = 20;
 constexpr int kSetupSafetyRetryDelayMs = 300;
+// TestConfig::autoSlowdownEnabled: how much longer to make the action
+// interval while a single WM_PING miss suggests the target is slow but not
+// (yet) hung -- see m_slowdownActive/checkTargetResponsiveness()/
+// scheduleNext(). Large enough to meaningfully reduce the load a busy
+// target sees between now and the next hang-check probe (8s, m_hangCheckTimer).
+constexpr int kAutoSlowdownIntervalMultiplier = 5;
 }  // namespace
 
 void RandomActionEngine::recordRecentAction(const QString &desc)
@@ -174,6 +180,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_consecutiveUnresponsive = 0;
     m_everRespondedToPing = false;
     m_neverRespondedStrikes = 0;
+    m_slowdownActive = false;
     m_capturedThisRun = false;
     m_lastScreenshotStepIndex = -1;
     m_lastScreenshotIterationCount = -1;
@@ -449,11 +456,21 @@ void RandomActionEngine::checkTargetResponsiveness()
         if (m_consecutiveUnresponsive >= 2) {
             doStop(I18n::t(QStringLiteral("対象アプリが応答していない（ハング）ことを検知したため停止しました")),
                    /*isAnomaly=*/true);
+        } else if (m_config.autoSlowdownEnabled && !m_slowdownActive) {
+            // One miss, not (yet) a confirmed hang -- treat it as "slow"
+            // and give the target breathing room until it recovers or the
+            // second miss above escalates this into a real hang-stop.
+            m_slowdownActive = true;
+            emit logMessage(I18n::t(QStringLiteral("対象アプリの応答が遅いため、操作間隔を自動的に延ばします")));
         }
     } else {
         m_everRespondedToPing = true;
         m_neverRespondedStrikes = 0;
         m_consecutiveUnresponsive = 0;
+        if (m_slowdownActive) {
+            m_slowdownActive = false;
+            emit logMessage(I18n::t(QStringLiteral("対象アプリの応答が回復したため、操作間隔を元に戻します")));
+        }
     }
 }
 
@@ -793,7 +810,9 @@ void RandomActionEngine::scheduleNext()
 {
     const int lo = qMin(m_config.minIntervalMs, m_config.maxIntervalMs);
     const int hi = qMax(m_config.minIntervalMs, m_config.maxIntervalMs);
-    const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+    int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+    if (m_slowdownActive)
+        interval *= kAutoSlowdownIntervalMultiplier;
     m_timer.start(qMax(1, interval));
 }
 

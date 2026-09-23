@@ -318,6 +318,12 @@ private:
     void onSaveWindowPos();
     void onRestoreWindowPos();
     void refreshSavedWindowPosLabel();
+    // SPEC.md 10追加実装及び修正依頼 (連続実行時に保存済みジオメトリを適用): if
+    // m_applySavedGeometryOnRelaunchCheck is checked, applies whichever of
+    // m_savedWindowSize/m_savedWindowPos are currently saved to the target ①
+    // has selected. Called from startRunAfterLaunchWait(); a no-op if the
+    // checkbox is unchecked or nothing has been saved yet.
+    void applySavedWindowGeometryIfEnabled();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -381,6 +387,17 @@ private:
     QLabel *m_savedWindowPosLabel = nullptr;
     QPushButton *m_saveWindowPosButton = nullptr;
     QPushButton *m_restoreWindowPosButton = nullptr;
+
+    // SPEC.md 10追加実装及び修正依頼「連続実行を実行する時に、テスト対象ツールの
+    // ウィンドウ位置やウィンドウサイズを保存したものに合わせて変更するオプションを
+    // つけてください」: when checked, applySavedWindowGeometryIfEnabled() (called
+    // from startRunAfterLaunchWait(), the same shared point m_launchWaitSecondsSpin
+    // uses -- covers 連続実行's kill+relaunch cycle, plain バッチ実行の自動/手動
+    // 再起動待ち, and ▶開始's "起動してから開始する" option alike) re-applies
+    // whichever of m_savedWindowSize/m_savedWindowPos are currently saved to the
+    // just-(re)detected target, each independently (only size saved -> only size
+    // applied, etc.). Off by default; a no-op whenever nothing has been saved yet.
+    QCheckBox *m_applySavedGeometryOnRelaunchCheck = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;

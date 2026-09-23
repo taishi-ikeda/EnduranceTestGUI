@@ -841,6 +841,19 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ウィンドウ位置の変更に失敗しました。"), QStringLiteral("Failed to change the window position.")},
         {QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"),
          QStringLiteral("Changed to the saved window position: (%1, %2)")},
+
+        // v0.74: 連続実行時に保存済みのウィンドウ位置・サイズへ変更するオプション
+        {QStringLiteral("連続実行時に保存済みのウィンドウ位置・サイズへ変更する"),
+         QStringLiteral("Apply the saved window position/size on each continuous-run relaunch")},
+        {QStringLiteral("対象アプリが（再）起動して検知されるたびに、上で保存済みのウィンドウ"
+                        "サイズ・位置があればそれぞれ適用してから実行を始めます"
+                        "（連続実行のキル→再起動サイクル、①バッチ実行の自動/手動再起動待ち、"
+                        "▶開始の「起動してから開始する」オプションのいずれにも適用されます）。"),
+         QStringLiteral("Every time the target app is (re)launched and detected, this applies "
+                        "whichever of the saved window size/position above are set before the run "
+                        "starts (applies alike to 連続実行's kill-then-relaunch cycle, ①'s batch "
+                        "auto/manual relaunch wait, and ▶ Start's \"launch before starting\" "
+                        "option).")},
     };
     return table;
 }

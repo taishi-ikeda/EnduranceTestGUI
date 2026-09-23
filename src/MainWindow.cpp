@@ -497,6 +497,18 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_restoreWindowPosButton, &QPushButton::clicked, this, &MainWindow::onRestoreWindowPos);
     refreshSavedWindowPosLabel();
 
+    // SPEC.md 10追加実装及び修正依頼: 連続実行時に保存済みのウィンドウ位置・
+    // サイズへ変更するオプション。
+    m_applySavedGeometryOnRelaunchCheck = new QCheckBox(
+        I18n::t(QStringLiteral("連続実行時に保存済みのウィンドウ位置・サイズへ変更する")), m_targetGroup);
+    m_applySavedGeometryOnRelaunchCheck->setChecked(false);
+    m_applySavedGeometryOnRelaunchCheck->setToolTip(
+        I18n::t(QStringLiteral("対象アプリが（再）起動して検知されるたびに、上で保存済みのウィンドウ"
+                        "サイズ・位置があればそれぞれ適用してから実行を始めます"
+                        "（連続実行のキル→再起動サイクル、①バッチ実行の自動/手動再起動待ち、"
+                        "▶開始の「起動してから開始する」オプションのいずれにも適用されます）。")));
+    targetLayout->addWidget(m_applySavedGeometryOnRelaunchCheck);
+
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
@@ -2730,8 +2742,35 @@ void MainWindow::onBatchWaitTick()
     startRunAfterLaunchWait(/*interactive=*/false);
 }
 
+void MainWindow::applySavedWindowGeometryIfEnabled()
+{
+    if (!m_applySavedGeometryOnRelaunchCheck->isChecked())
+        return;
+    if (!m_hasSavedWindowSize && !m_hasSavedWindowPos)
+        return;
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size())
+        return;
+    const WindowInfo &target = m_windows[idx];
+    if (m_hasSavedWindowSize) {
+        if (PlatformAutomation::resizeWindow(target.pid, target.windowId, m_savedWindowSize)) {
+            appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
+                          .arg(m_savedWindowSize.width())
+                          .arg(m_savedWindowSize.height()));
+        }
+    }
+    if (m_hasSavedWindowPos) {
+        if (PlatformAutomation::moveWindow(target.pid, target.windowId, m_savedWindowPos)) {
+            appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
+                          .arg(m_savedWindowPos.x())
+                          .arg(m_savedWindowPos.y()));
+        }
+    }
+}
+
 void MainWindow::startRunAfterLaunchWait(bool interactive)
 {
+    applySavedWindowGeometryIfEnabled();
     const int waitSec = m_launchWaitSecondsSpin->value();
     if (waitSec <= 0) {
         if (!beginRun(interactive))
@@ -3048,6 +3087,7 @@ QJsonObject MainWindow::buildPresetJson() const
     root["hasSavedWindowPos"] = m_hasSavedWindowPos;
     root["savedWindowPosX"] = m_savedWindowPos.x();
     root["savedWindowPosY"] = m_savedWindowPos.y();
+    root["applySavedGeometryOnRelaunch"] = m_applySavedGeometryOnRelaunchCheck->isChecked();
 
     QJsonArray regionsArr;
     for (const NamedRegion &r : m_namedRegions)
@@ -3202,6 +3242,8 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_hasSavedWindowPos = root["hasSavedWindowPos"].toBool(false);
     m_savedWindowPos = QPoint(root["savedWindowPosX"].toInt(0), root["savedWindowPosY"].toInt(0));
     refreshSavedWindowPosLabel();
+    m_applySavedGeometryOnRelaunchCheck->setChecked(
+        root["applySavedGeometryOnRelaunch"].toBool(m_applySavedGeometryOnRelaunchCheck->isChecked()));
 
     const QString hint = root["targetAppNameHint"].toString();
     if (!hint.isEmpty()) {

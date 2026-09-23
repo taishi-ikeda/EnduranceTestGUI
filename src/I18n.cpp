@@ -811,6 +811,22 @@ const QHash<QString, QString> &translationTable()
                         "automatically lengthened")},
         {QStringLiteral("対象アプリの応答が回復したため、操作間隔を元に戻します"),
          QStringLiteral("The target app has recovered, so the action interval is being reverted")},
+
+        // v0.72: 対象ツールのウィンドウサイズ保存・復元機能
+        {QStringLiteral("現在のウィンドウサイズを保存"), QStringLiteral("Save current window size")},
+        {QStringLiteral("保存したサイズに変更"), QStringLiteral("Restore saved size")},
+        {QStringLiteral("保存したウィンドウサイズ: 幅%1 高さ%2"),
+         QStringLiteral("Saved window size: %1 x %2")},
+        {QStringLiteral("保存したウィンドウサイズ: (未保存)"), QStringLiteral("Saved window size: (none)")},
+        {QStringLiteral("対象ウィンドウを取得できません"), QStringLiteral("Can't get the target window")},
+        {QStringLiteral("ウィンドウサイズを保存しました: 幅%1 高さ%2"),
+         QStringLiteral("Saved window size: %1 x %2")},
+        {QStringLiteral("保存されたサイズがありません"), QStringLiteral("No saved size")},
+        {QStringLiteral("先に「現在のウィンドウサイズを保存」でサイズを保存してください。"),
+         QStringLiteral("Use \"Save current window size\" first to save a size.")},
+        {QStringLiteral("ウィンドウサイズの変更に失敗しました。"), QStringLiteral("Failed to change the window size.")},
+        {QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"),
+         QStringLiteral("Changed to the saved window size: %1 x %2")},
     };
     return table;
 }

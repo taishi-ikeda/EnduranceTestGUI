@@ -463,6 +463,23 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     launchWaitRow->addStretch(1);
     targetLayout->addLayout(launchWaitRow);
 
+    // SPEC.md 10追加実装及び修正依頼: 対象ツールのウィンドウサイズを保存/復元する。
+    m_savedWindowSizeLabel = new QLabel(m_targetGroup);
+    m_savedWindowSizeLabel->setWordWrap(true);
+    targetLayout->addWidget(m_savedWindowSizeLabel);
+    auto *windowSizeRow = new QHBoxLayout;
+    m_saveWindowSizeButton =
+        new QPushButton(I18n::t(QStringLiteral("現在のウィンドウサイズを保存")), m_targetGroup);
+    m_restoreWindowSizeButton =
+        new QPushButton(I18n::t(QStringLiteral("保存したサイズに変更")), m_targetGroup);
+    windowSizeRow->addWidget(m_saveWindowSizeButton);
+    windowSizeRow->addWidget(m_restoreWindowSizeButton);
+    targetLayout->addLayout(windowSizeRow);
+
+    connect(m_saveWindowSizeButton, &QPushButton::clicked, this, &MainWindow::onSaveWindowSize);
+    connect(m_restoreWindowSizeButton, &QPushButton::clicked, this, &MainWindow::onRestoreWindowSize);
+    refreshSavedWindowSizeLabel();
+
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
@@ -1166,6 +1183,68 @@ bool MainWindow::currentTargetTopLeft(QPoint &outTopLeft) const
         return false;
     outTopLeft = bounds.topLeft();
     return true;
+}
+
+bool MainWindow::currentTargetBounds(QRect &outBounds) const
+{
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size())
+        return false;
+    const WindowInfo &target = m_windows[idx];
+    return PlatformAutomation::queryWindowBounds(target.windowId, target.pid, outBounds);
+}
+
+void MainWindow::onSaveWindowSize()
+{
+    QRect bounds;
+    if (!currentTargetBounds(bounds)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウを取得できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してください。")));
+        return;
+    }
+    m_savedWindowSize = bounds.size();
+    m_hasSavedWindowSize = true;
+    refreshSavedWindowSizeLabel();
+    appendLog(I18n::t(QStringLiteral("ウィンドウサイズを保存しました: 幅%1 高さ%2"))
+                  .arg(m_savedWindowSize.width())
+                  .arg(m_savedWindowSize.height()));
+}
+
+void MainWindow::onRestoreWindowSize()
+{
+    if (!m_hasSavedWindowSize) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存されたサイズがありません")),
+                              I18n::t(QStringLiteral("先に「現在のウィンドウサイズを保存」でサイズを保存してください。")));
+        return;
+    }
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウを取得できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してください。")));
+        return;
+    }
+    const WindowInfo &target = m_windows[idx];
+    if (!PlatformAutomation::resizeWindow(target.pid, target.windowId, m_savedWindowSize)) {
+        appendLog(I18n::t(QStringLiteral("ウィンドウサイズの変更に失敗しました。")));
+        return;
+    }
+    appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
+                  .arg(m_savedWindowSize.width())
+                  .arg(m_savedWindowSize.height()));
+}
+
+void MainWindow::refreshSavedWindowSizeLabel()
+{
+    if (!m_savedWindowSizeLabel)
+        return;
+    if (m_hasSavedWindowSize) {
+        m_savedWindowSizeLabel->setText(
+            I18n::t(QStringLiteral("保存したウィンドウサイズ: 幅%1 高さ%2"))
+                .arg(m_savedWindowSize.width())
+                .arg(m_savedWindowSize.height()));
+    } else {
+        m_savedWindowSizeLabel->setText(I18n::t(QStringLiteral("保存したウィンドウサイズ: (未保存)")));
+    }
 }
 
 void MainWindow::onAddNamedRegion()
@@ -2894,6 +2973,9 @@ QJsonObject MainWindow::buildPresetJson() const
     // preset built for unattended batch runs (①) stays fully self-contained.
     root["targetLaunchCommand"] = m_targetLaunchCommandEdit->text();
     root["launchWaitSeconds"] = m_launchWaitSecondsSpin->value();
+    root["hasSavedWindowSize"] = m_hasSavedWindowSize;
+    root["savedWindowWidth"] = m_savedWindowSize.width();
+    root["savedWindowHeight"] = m_savedWindowSize.height();
 
     QJsonArray regionsArr;
     for (const NamedRegion &r : m_namedRegions)
@@ -3041,6 +3123,10 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     loadActionParamsEditorForSelection();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());
     m_launchWaitSecondsSpin->setValue(root["launchWaitSeconds"].toInt(m_launchWaitSecondsSpin->value()));
+    m_hasSavedWindowSize = root["hasSavedWindowSize"].toBool(false);
+    m_savedWindowSize =
+        QSize(root["savedWindowWidth"].toInt(0), root["savedWindowHeight"].toInt(0));
+    refreshSavedWindowSizeLabel();
 
     const QString hint = root["targetAppNameHint"].toString();
     if (!hint.isEmpty()) {

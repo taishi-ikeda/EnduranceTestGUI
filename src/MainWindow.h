@@ -165,6 +165,11 @@ private:
     // region's "follow target window" option (SPEC.md 6.3/10). Returns
     // false (outTopLeft left unset) if no target is currently selectable.
     bool currentTargetTopLeft(QPoint &outTopLeft) const;
+    // Live bounds of whatever target is currently selected in m_targetCombo,
+    // if any -- used by the saved window size/position feature below
+    // (SPEC.md 10 追加実装及び修正依頼). Returns false (outBounds left
+    // unset) if no target is currently selectable.
+    bool currentTargetBounds(QRect &outBounds) const;
     QString describeNamedRegion(const NamedRegion &region) const;
     // "領域1", "領域2", ... -- the first of these not already used by an
     // existing named region, so a new region always starts with a usable
@@ -303,6 +308,11 @@ private:
     // before beginRun()'s safety self-test runs against it.
     void startRunAfterLaunchWait(bool interactive);
     void onLaunchWaitElapsed();
+    // SPEC.md 10追加実装及び修正依頼 (ウィンドウサイズの保存/復元): captures/
+    // applies m_savedWindowSize against whichever target ① has selected.
+    void onSaveWindowSize();
+    void onRestoreWindowSize();
+    void refreshSavedWindowSizeLabel();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -340,6 +350,20 @@ private:
     // default) preserves the previous "start the instant it's detected"
     // behavior. Persisted in preset JSON as timing.launchWaitSeconds.
     QSpinBox *m_launchWaitSecondsSpin = nullptr;
+
+    // SPEC.md 10追加実装及び修正依頼「テスト対象ツールの全体のウィンドウサイズを
+    // 保存する機能と、保存したウィンドウサイズに合わせてテスト対象ツールの
+    // ウィンドウサイズを変更する機能をつけてください」: a single captured
+    // size (not a list -- one saved value is all the request asks for),
+    // captured on demand from whichever target ① currently has selected and
+    // re-appliable to it (or, after a relaunch, to whatever window is
+    // selected at the time) via PlatformAutomation::resizeWindow(). Persisted
+    // in preset JSON as hasSavedWindowSize/savedWindowWidth/savedWindowHeight.
+    bool m_hasSavedWindowSize = false;
+    QSize m_savedWindowSize;
+    QLabel *m_savedWindowSizeLabel = nullptr;
+    QPushButton *m_saveWindowSizeButton = nullptr;
+    QPushButton *m_restoreWindowSizeButton = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;

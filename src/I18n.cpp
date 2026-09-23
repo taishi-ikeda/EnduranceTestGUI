@@ -854,6 +854,17 @@ const QHash<QString, QString> &translationTable()
                         "starts (applies alike to 連続実行's kill-then-relaunch cycle, ①'s batch "
                         "auto/manual relaunch wait, and ▶ Start's \"launch before starting\" "
                         "option).")},
+
+        // v0.75: macOSの画面収録権限の表示・案内（操作領域選択オーバーレイが
+        // 他アプリを表示できなくなる不具合の原因調査・対応）
+        {QStringLiteral("✓ 画面収録の権限は許可されています"),
+         QStringLiteral("✓ Screen Recording permission is granted")},
+        {QStringLiteral("✗ 画面収録の権限がありません（操作領域を選択する画面が黒くなり、"
+                        "他のアプリが見えなくなります。下のボタンから設定を開いてください）"),
+         QStringLiteral("✗ Screen Recording permission is missing (the operation-region "
+                        "selection screen will appear black, making other apps look invisible. "
+                        "Open Settings using the button below)")},
+        {QStringLiteral("画面収録の権限設定を開く"), QStringLiteral("Open Screen Recording Settings")},
     };
     return table;
 }

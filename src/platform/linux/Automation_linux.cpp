@@ -214,6 +214,17 @@ void openAccessibilitySettings()
     // No OS-level permission gate on X11; nothing to open.
 }
 
+bool isScreenRecordingTrusted()
+{
+    // No OS-level permission gate on X11's screen-grab APIs.
+    return true;
+}
+
+void openScreenRecordingSettings()
+{
+    // No OS-level permission gate on X11; nothing to open.
+}
+
 QList<WindowInfo> listWindows()
 {
     return collectWindows();

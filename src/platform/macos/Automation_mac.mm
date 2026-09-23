@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 #include <libproc.h>
 #include <sys/proc.h>
@@ -27,6 +28,22 @@ void openAccessibilitySettings()
 {
     NSString *urlString =
         @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    NSURL *url = [NSURL URLWithString:urlString];
+    [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
+bool isScreenRecordingTrusted()
+{
+    // Preflight-only: unlike CGRequestScreenCaptureAccess(), this never
+    // triggers the OS permission prompt, so it's safe to call from a
+    // passive/periodic UI refresh (see the header comment).
+    return CGPreflightScreenCaptureAccess();
+}
+
+void openScreenRecordingSettings()
+{
+    NSString *urlString =
+        @"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
     NSURL *url = [NSURL URLWithString:urlString];
     [[NSWorkspace sharedWorkspace] openURL:url];
 }

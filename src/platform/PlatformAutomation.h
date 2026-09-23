@@ -47,6 +47,22 @@ namespace PlatformAutomation
 bool isAccessibilityTrusted(bool promptIfNeeded);
 void openAccessibilitySettings();
 
+// Permission needed for QScreen::grabWindow() to actually capture other
+// applications' on-screen content into the pixmap it returns (macOS: Screen
+// Recording, required since macOS 10.15 Catalina; Linux/X11: no such
+// restriction, always true here). Without it, grabWindow() does not fail or
+// return a null pixmap -- it silently returns a blank/black image instead,
+// which is what OverlayGeometry::grabVirtualDesktopSnapshot() paints as the
+// "see-through" background for RegionSelectorOverlay/PointPickerOverlay
+// (SPEC.md 6.3/6.13). The visible symptom is the overlay appearing to make
+// every other window vanish behind a black screen, even though nothing is
+// actually hidden -- only the snapshot used to fake transparency failed
+// (SPEC.md 10 追加実装及び修正依頼). Check-only (never prompts) so it's
+// safe to call from a passive UI refresh, matching isAccessibilityTrusted(false)'s
+// usage in refreshPermissionLabel().
+bool isScreenRecordingTrusted();
+void openScreenRecordingSettings();
+
 // Enumerates on-screen, normal top-level windows owned by other running
 // processes/applications. Excludes this process's own windows.
 QList<WindowInfo> listWindows();

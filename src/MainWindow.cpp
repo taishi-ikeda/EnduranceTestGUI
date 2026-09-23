@@ -412,6 +412,15 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_openSettingsButton = new QPushButton(I18n::t(QStringLiteral("権限設定を開く")), m_targetGroup);
     targetLayout->addWidget(m_openSettingsButton);
 
+    // SPEC.md 10追加実装及び修正依頼: macOSの画面収録権限（操作領域選択オーバーレイの
+    // 背景表示に必要。無いと他アプリが写らず黒く見える -- 詳細はrefreshPermissionLabel()参照）。
+    m_screenRecordingPermissionLabel = new QLabel(m_targetGroup);
+    m_screenRecordingPermissionLabel->setWordWrap(true);
+    targetLayout->addWidget(m_screenRecordingPermissionLabel);
+    m_openScreenRecordingSettingsButton =
+        new QPushButton(I18n::t(QStringLiteral("画面収録の権限設定を開く")), m_targetGroup);
+    targetLayout->addWidget(m_openScreenRecordingSettingsButton);
+
     // SPEC.md 10 ②: an optional command to (re)launch the target app, used
     // by ①の連続自動実行 (batch mode) when it finds the target gone between
     // runs, and by "今すぐ起動" below for a manual one-off relaunch anytime.
@@ -512,6 +521,8 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
             &MainWindow::onOpenAccessibilitySettings);
+    connect(m_openScreenRecordingSettingsButton, &QPushButton::clicked, this,
+            &MainWindow::onOpenScreenRecordingSettings);
     connect(m_browseLaunchCommandButton, &QPushButton::clicked, this, [this]() {
         const QString path = QFileDialog::getOpenFileName(
             this, I18n::t(QStringLiteral("対象アプリの実行ファイルを選択")));
@@ -969,6 +980,17 @@ void MainWindow::refreshPermissionLabel()
                                     ? I18n::t(QStringLiteral("✓ 入力送信の権限は許可されています"))
                                     : I18n::t(QStringLiteral("✗ 権限が必要です（下のボタンから設定を開いてください）")));
     m_permissionLabel->setStyleSheet(trusted ? "color: green;" : "color: red;");
+
+    // SPEC.md 10追加実装及び修正依頼: always true on Linux (no such
+    // permission exists there), so this label is harmlessly green outside
+    // macOS -- see PlatformAutomation::isScreenRecordingTrusted().
+    const bool screenRecordingTrusted = PlatformAutomation::isScreenRecordingTrusted();
+    m_screenRecordingPermissionLabel->setText(
+        screenRecordingTrusted
+            ? I18n::t(QStringLiteral("✓ 画面収録の権限は許可されています"))
+            : I18n::t(QStringLiteral("✗ 画面収録の権限がありません（操作領域を選択する画面が黒くなり、"
+                                      "他のアプリが見えなくなります。下のボタンから設定を開いてください）")));
+    m_screenRecordingPermissionLabel->setStyleSheet(screenRecordingTrusted ? "color: green;" : "color: red;");
 }
 
 QString MainWindow::describeStep(const RegionStep &step, int index) const
@@ -3065,6 +3087,11 @@ void MainWindow::onGlobalEmergencyStop()
 void MainWindow::onOpenAccessibilitySettings()
 {
     PlatformAutomation::openAccessibilitySettings();
+}
+
+void MainWindow::onOpenScreenRecordingSettings()
+{
+    PlatformAutomation::openScreenRecordingSettings();
 }
 
 QJsonObject MainWindow::buildPresetJson() const

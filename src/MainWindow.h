@@ -138,6 +138,7 @@ private slots:
     void onRegionScreenshotCaptured();
     void onSaveRegionScreenshot();
     void onOpenAccessibilitySettings();
+    void onOpenScreenRecordingSettings();
     void updateElapsedLabel();
     void onAboutApp();
     void onAboutQt();
@@ -330,6 +331,14 @@ private:
     QPushButton *m_refreshButton = nullptr;
     QLabel *m_permissionLabel = nullptr;
     QPushButton *m_openSettingsButton = nullptr;
+    // SPEC.md 10追加実装及び修正依頼「macOSの場合に、操作領域を追加しようとすると、
+    // 他のアプリが見えなくなります」: surfaces macOS Screen Recording permission
+    // status the same way m_permissionLabel/m_openSettingsButton already do for
+    // Accessibility -- see PlatformAutomation::isScreenRecordingTrusted()'s
+    // comment for why missing this permission looks exactly like that report
+    // (always green/granted on Linux, where no such permission exists).
+    QLabel *m_screenRecordingPermissionLabel = nullptr;
+    QPushButton *m_openScreenRecordingSettingsButton = nullptr;
     QList<WindowInfo> m_windows;
     // The appName of whichever window ① last had selected (updated on every
     // onRefreshTargets() call, and set directly from a loaded preset's

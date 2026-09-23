@@ -2,6 +2,7 @@
 
 #include <QCheckBox>
 #include <QDateTime>
+#include <QDialog>
 #include <QEvent>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -127,6 +128,25 @@ TestTargetWindow::TestTargetWindow(QWidget *parent) : QMainWindow(parent)
         QStringLiteral("選択内訳: 項目1:0 項目2:0 項目3:0 キャンセル:0"), contextGroup);
     contextLayout->addWidget(m_contextMenuLabel);
     rootLayout->addWidget(contextGroup);
+
+    // --- Custom dialog target (SPEC.md 6.2 v0.70 「ダイアログのボタンを押す」の
+    // 確認用): the existing 終了ボタン's confirmation dialog only has the two
+    // standard Yes/No buttons, so it can't exercise "複数の候補名から実在する
+    // ものを探して押す" (dialogButtonNames) with more than a binary choice.
+    // This opens a plain QDialog with three custom-labeled buttons instead.
+    auto *dialogButtonGroup = new QGroupBox(
+        QStringLiteral("ダイアログボタン対象 (タスクの「ダイアログのボタンを押す」設定の確認用)"), central);
+    auto *dialogButtonLayout = new QVBoxLayout(dialogButtonGroup);
+    m_openCustomDialogButton = new QPushButton(
+        QStringLiteral("カスタムダイアログを開く (呼出:0)"), dialogButtonGroup);
+    connect(m_openCustomDialogButton, &QPushButton::clicked, this,
+            &TestTargetWindow::onOpenCustomDialog);
+    dialogButtonLayout->addWidget(m_openCustomDialogButton);
+    m_customDialogButtonLabels = {QStringLiteral("承認"), QStringLiteral("却下"), QStringLiteral("保留")};
+    m_customDialogButtonCounts.fill(0, m_customDialogButtonLabels.size());
+    m_customDialogLabel = new QLabel(QStringLiteral("押下内訳: 承認:0 却下:0 保留:0"), dialogButtonGroup);
+    dialogButtonLayout->addWidget(m_customDialogLabel);
+    rootLayout->addWidget(dialogButtonGroup);
 
     // --- Window geometry / state ---
     m_geometryLabel = new QLabel(central);
@@ -257,6 +277,46 @@ void TestTargetWindow::onContextMenuItemTriggered(const QString &itemName)
                                      }()));
 }
 
+void TestTargetWindow::onOpenCustomDialog()
+{
+    ++m_customDialogOpenCount;
+    m_openCustomDialogButton->setText(
+        QStringLiteral("カスタムダイアログを開く (呼出:%1)").arg(m_customDialogOpenCount));
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("カスタムダイアログ"));
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(QStringLiteral("いずれかのボタンを押してください。"), &dialog));
+    auto *buttonRow = new QHBoxLayout;
+    for (const QString &label : m_customDialogButtonLabels) {
+        auto *button = new QPushButton(label, &dialog);
+        connect(button, &QPushButton::clicked, this, [this, &dialog, label] {
+            onCustomDialogButtonClicked(label);
+            dialog.accept();
+        });
+        buttonRow->addWidget(button);
+    }
+    layout->addLayout(buttonRow);
+    dialog.exec();
+}
+
+void TestTargetWindow::onCustomDialogButtonClicked(const QString &label)
+{
+    const int idx = m_customDialogButtonLabels.indexOf(label);
+    if (idx >= 0)
+        ++m_customDialogButtonCounts[idx];
+    appendLog(QStringLiteral("カスタムダイアログのボタンを押しました: %1").arg(label));
+    m_customDialogLabel->setText(QStringLiteral("押下内訳: %1")
+                                      .arg([this] {
+                                          QStringList parts;
+                                          for (int i = 0; i < m_customDialogButtonLabels.size(); ++i)
+                                              parts << QStringLiteral("%1:%2")
+                                                           .arg(m_customDialogButtonLabels[i])
+                                                           .arg(m_customDialogButtonCounts[i]);
+                                          return parts.join(QStringLiteral(" "));
+                                      }()));
+}
+
 void TestTargetWindow::onResetCounters()
 {
     for (int i = 0; i < m_buttons.size(); ++i) {
@@ -279,6 +339,10 @@ void TestTargetWindow::onResetCounters()
     m_contextMenuItemCounts.fill(0, m_contextMenuItemLabels.size());
     m_contextMenuTarget->setText(QStringLiteral("このボタンを右クリックするとメニューが出ます (呼出:0)"));
     m_contextMenuLabel->setText(QStringLiteral("選択内訳: 項目1:0 項目2:0 項目3:0 キャンセル:0"));
+    m_customDialogOpenCount = 0;
+    m_customDialogButtonCounts.fill(0, m_customDialogButtonLabels.size());
+    m_openCustomDialogButton->setText(QStringLiteral("カスタムダイアログを開く (呼出:0)"));
+    m_customDialogLabel->setText(QStringLiteral("押下内訳: 承認:0 却下:0 保留:0"));
     m_minimizeCount = 0;
     m_maximizeCount = 0;
     m_keyInputEdit->clear();

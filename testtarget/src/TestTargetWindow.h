@@ -16,14 +16,15 @@ class CounterButton;
 
 // Minimal target application for exercising EnduranceTestGUI against:
 // a grid of buttons, a checkbox, a slider, a text field, vertical and
-// horizontal scroll areas, a real context menu, and window-state tracking,
-// each with visible counters so you can confirm random clicks, double
-// clicks, drags, key/shortcut input, scroll events, context-menu
-// selection, and window move/resize/minimize/maximize are actually
-// arriving. Includes one deliberately hazardous "Quit" button (with a
-// confirmation dialog) meant to be carved out with an exclude/mask region
-// while testing, and several visually distinct group boxes meant to be
-// drawn as separate named operation regions (SPEC.md 6.2/6.3).
+// horizontal scroll areas, a real context menu, a custom multi-button
+// dialog, and window-state tracking, each with visible counters so you can
+// confirm random clicks, double clicks, drags, key/shortcut input, scroll
+// events, context-menu selection, dialog-button presses, and window
+// move/resize/minimize/maximize are actually arriving. Includes one
+// deliberately hazardous "Quit" button (with a confirmation dialog) meant
+// to be carved out with an exclude/mask region while testing, and several
+// visually distinct group boxes meant to be drawn as separate named
+// operation regions (SPEC.md 6.2/6.3).
 class TestTargetWindow : public QMainWindow
 {
     Q_OBJECT
@@ -41,6 +42,8 @@ private slots:
     void onHScrollValueChanged(int value);
     void onContextMenuRequested(const QPoint &pos);
     void onContextMenuItemTriggered(const QString &itemName);
+    void onOpenCustomDialog();
+    void onCustomDialogButtonClicked(const QString &label);
     void onResetCounters();
     void onQuitButtonClicked();
     void updateStatsLabel();
@@ -84,6 +87,15 @@ private:
     int m_contextMenuOpenCount = 0;
     QVector<QString> m_contextMenuItemLabels;
     QVector<int> m_contextMenuItemCounts;
+
+    // Custom-named dialog buttons (SPEC.md 6.2 v0.70) -- see the
+    // constructor's comment on why this exists alongside the quit button's
+    // plain Yes/No confirmation dialog.
+    QPushButton *m_openCustomDialogButton = nullptr;
+    QLabel *m_customDialogLabel = nullptr;
+    int m_customDialogOpenCount = 0;
+    QVector<QString> m_customDialogButtonLabels;
+    QVector<int> m_customDialogButtonCounts;
 
     QLabel *m_geometryLabel = nullptr;
     int m_minimizeCount = 0;

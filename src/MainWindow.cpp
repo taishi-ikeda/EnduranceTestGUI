@@ -481,6 +481,15 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                                 "マウスクリック・ドラッグ・キー入力（対象アプリが開くダイアログへの操作も"
                                 "含む）を記録し、この一覧に追加していきます。")));
     setupActionsLayout->addWidget(m_recordSetupButton);
+    // SPEC.md 6.13追加実装及び修正依頼「設定した起動時セットアップが実際に
+    // 問題なく動くかどうかの確認するために、起動時セットアップを実行する
+    // 機能が欲しい」: runs just this list against ①で選択中の対象 and stops,
+    // without requiring ②の ステップ構成 to be configured at all yet.
+    m_testSetupButton = new QPushButton(I18n::t(QStringLiteral("▶ 起動時セットアップを試す")), m_setupActionsGroup);
+    m_testSetupButton->setToolTip(
+        I18n::t(QStringLiteral("①で選択中の対象ウィンドウに対して、この一覧のセットアップだけを実行して"
+                                "確認します。②のステップ構成は実行しません（未設定でも構いません）。")));
+    setupActionsLayout->addWidget(m_testSetupButton);
     m_setupActionsFirstRunOnlyCheck = new QCheckBox(
         I18n::t(QStringLiteral("連続自動実行（①バッチ）では初回のみ実行する")), m_setupActionsGroup);
     m_setupActionsFirstRunOnlyCheck->setToolTip(
@@ -498,6 +507,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
     connect(m_clearSetupActionsButton, &QPushButton::clicked, this, &MainWindow::onClearSetupActions);
     connect(m_recordSetupButton, &QPushButton::clicked, this, &MainWindow::onRecordSetupActions);
+    connect(m_testSetupButton, &QPushButton::clicked, this, &MainWindow::onTestSetupActions);
 
     layout->addWidget(m_setupActionsGroup);
 
@@ -1945,6 +1955,47 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     return config;
 }
 
+TestConfig MainWindow::buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessage) const
+{
+    ok = false;
+    TestConfig config;
+
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size()) {
+        errorMessage = I18n::t(QStringLiteral("対象ウィンドウを選択してください。"));
+        return config;
+    }
+    const WindowInfo &target = m_windows[idx];
+    config.targetPid = target.pid;
+    config.targetWindowId = target.windowId;
+    config.targetAppName = target.appName;
+
+    if (m_setupActions.isEmpty()) {
+        errorMessage = I18n::t(QStringLiteral("起動時セットアップが設定されていません。"
+                                               "「追加...」または「記録...」でセットアップを作成してください。"));
+        return config;
+    }
+    // config.steps is deliberately left empty: this run only ever executes
+    // the setup phase (RandomActionEngine::startSetupOnly() stops as soon as
+    // it completes), so ②の ステップ構成 doesn't need to be configured, or
+    // even valid, just to check the setup sequence itself.
+    config.setupActions = m_setupActions;
+
+    if (m_intervalModeRateRadio->isChecked()) {
+        config.minIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_maxRateSpin->value())));
+        config.maxIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_minRateSpin->value())));
+    } else {
+        config.minIntervalMs = m_minIntervalSpin->value();
+        config.maxIntervalMs = m_maxIntervalSpin->value();
+    }
+    config.keepTargetActive = m_keepActiveCheck->isChecked();
+    config.rngSeed = quint32(m_rngSeedSpin->value());
+    config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
+
+    ok = true;
+    return config;
+}
+
 void MainWindow::setControlsEnabled(bool enabled)
 {
     m_targetGroup->setEnabled(enabled);
@@ -1965,6 +2016,7 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_batchRunCountSpin->setEnabled(enabled);
     m_startButton->setEnabled(enabled);
     m_continuousRunButton->setEnabled(enabled);
+    m_testSetupButton->setEnabled(enabled);
     m_stopButton->setEnabled(!enabled);
     m_pauseResumeButton->setEnabled(!enabled);
     if (enabled) {
@@ -2108,6 +2160,57 @@ bool MainWindow::beginRun(bool interactive)
 
     m_engine->start(config);
     return true;
+}
+
+void MainWindow::onTestSetupActions()
+{
+    if (!PlatformAutomation::isAccessibilityTrusted(true)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("権限が必要です")),
+                              I18n::t(QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
+                                              "設定を許可してから、もう一度お試しください。")));
+        onRefreshTargets();
+        return;
+    }
+
+    bool ok = false;
+    QString errorMessage;
+    TestConfig config = buildSetupOnlyConfigFromUi(ok, errorMessage);
+    if (!ok) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("設定エラー")), errorMessage);
+        return;
+    }
+
+    // Same preflight safety self-test as beginRun() -- see its own comment.
+    QRect targetBounds;
+    if (PlatformAutomation::queryWindowBounds(config.targetWindowId, config.targetPid, targetBounds)) {
+        PlatformAutomation::activateProcess(config.targetPid);
+        if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("安全確認に失敗しました")),
+                I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
+                    "対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認して"
+                    "ください。それでも解決しない場合、この環境（特にLinuxの一部のウィンドウマネージャ）"
+                    "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。")));
+            return;
+        }
+    }
+
+    m_lastRunTargetPid = config.targetPid;
+    m_setupOnlyTestRun = true;
+    setControlsEnabled(false);
+    m_statusLabel->setText(I18n::t(QStringLiteral("起動時セットアップを実行中...")));
+    m_runElapsed.restart();
+    m_uiTimer->start();
+
+    m_stopPanel = new StopPanel();
+    connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
+    m_stopPanel->show();
+
+    m_logView->clear();
+    appendLog(I18n::t(QStringLiteral("起動時セットアップの実行確認を開始します（%1件）。完了次第、自動的に"
+                                      "停止します"))
+                   .arg(config.setupActions.size()));
+    m_engine->startSetupOnly(config);
 }
 
 void MainWindow::onStart()
@@ -2269,6 +2372,7 @@ void MainWindow::onEngineFinished(const QString &reason)
     if (m_fullLogFile.isOpen())
         m_fullLogFile.close();
 
+    m_setupOnlyTestRun = false;
     continueBatchIfNeeded();
 }
 
@@ -2495,8 +2599,11 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
     // as one the batch loop started automatically. m_targetCombo/m_windows
     // still reflect the target as it was during this just-finished run;
     // onEngineFinished() (which fires right after this) is what refreshes
-    // them for the next one.
-    {
+    // them for the next one. Skipped for a setup-only test run
+    // (onTestSetupActions()): it never touches ②のステップ構成 at all, so
+    // there's no meaningful crashStepIndex/step-based crash-rate data to
+    // fold in here.
+    if (!m_setupOnlyTestRun) {
         const int targetIdx = m_targetCombo->currentIndex();
         const QString appName = (targetIdx >= 0 && targetIdx < m_windows.size())
                                      ? m_windows[targetIdx].appName
@@ -2513,16 +2620,21 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
         record.rngSeedUsed = summary.rngSeedUsed;
         record.stopReason = summary.stopReason;
         m_stats.addRun(record);
+        updateStatisticsDisplay();
     }
-    updateStatisticsDisplay();
 
     // Auto-save the exact test setup used (as a JSON preset) and the
     // operation-region screenshot alongside RandomActionEngine's own
     // anomaly screenshots/recording/crash-report search, all under the
     // same timestamp prefix, so a bug report is just "everything with this
     // prefix" (SPEC.md 6.7/10) -- no separate manual "save preset" step to
-    // remember in the moment right after something went wrong.
-    if (summary.anomaly && !summary.anomalyArtifactTimestamp.isEmpty()) {
+    // remember in the moment right after something went wrong. Skipped for
+    // a setup-only test run for the same reason as the statistics above
+    // (RandomActionEngine::captureAnomalyArtifacts() itself -- the
+    // screenshot/recording/crash-dump-search inside doStop() -- still runs
+    // regardless, so an anomaly during setup is never left without any
+    // diagnostics at all).
+    if (!m_setupOnlyTestRun && summary.anomaly && !summary.anomalyArtifactTimestamp.isEmpty()) {
         const QString baseDir = RandomActionEngine::anomalyArtifactsDirectory();
         QDir().mkpath(baseDir);
 

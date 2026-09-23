@@ -90,6 +90,16 @@ public:
     explicit RandomActionEngine(QObject *parent = nullptr);
 
     void start(const TestConfig &config);
+    // Like start(), but stops as soon as TestConfig::setupActions finishes
+    // running instead of continuing into the randomized `steps` loop --
+    // lets a user verify a newly-built startup setup actually works without
+    // needing ②のステップ構成 configured at all yet (SPEC.md 6.13追加実装
+    // 及び修正依頼). config.steps is expected to be left empty by the
+    // caller (MainWindow::buildSetupOnlyConfigFromUi() does this), but
+    // isn't required to be -- if setupActions itself is empty there is
+    // nothing to run and this falls through to start()'s own normal
+    // "nothing configured" handling.
+    void startSetupOnly(const TestConfig &config);
     void stop();
     void pause();
     void resume();
@@ -312,6 +322,13 @@ private:
     // whenever a setup action succeeds and counts consecutive safety-check
     // retries of the *current* one (see retrySetupOrFail()).
     bool m_inSetupPhase = false;
+    // True only for a run started via startSetupOnly() -- makes
+    // performSetupAction() stop the run (doStop()) the moment the setup
+    // phase completes, instead of handing off into the normal `steps` loop
+    // the way a real test run does. Reset to false at the top of every
+    // start() (including one startSetupOnly() itself delegates to), so it
+    // never leaks into a later, normal run.
+    bool m_setupOnlyRun = false;
     int m_setupActionIndex = 0;
     int m_setupSafetyRetryCount = 0;
     QTimer m_timer;

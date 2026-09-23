@@ -81,6 +81,14 @@ private slots:
                                 int menuItemIndex);
     void onRecordingFinished(bool escapePressed);
 
+    // SPEC.md 6.13追加実装及び修正依頼: runs just m_setupActions against the
+    // selected target and stops (does not fall through into ②の
+    // ステップ構成), so a user can verify a newly-built startup setup
+    // actually works before configuring/running a full test. Deliberately
+    // bypasses buildConfigFromUi() (which requires at least one step) --
+    // see buildSetupOnlyConfigFromUi().
+    void onTestSetupActions();
+
     void onAddStep();
     void onAddWaitStep();
     void onEditSelectedStep();
@@ -173,6 +181,12 @@ private:
     // setControlsEnabled() toggles run state.
     void updateGroupButtonsEnabled();
     TestConfig buildConfigFromUi(bool &ok, QString &errorMessage) const;
+    // Lighter counterpart to buildConfigFromUi() for onTestSetupActions():
+    // only needs a selected target and a non-empty m_setupActions (②の
+    // ステップ構成 is deliberately left empty in the returned config, since
+    // this run is only ever meant to execute the setup phase and then stop
+    // -- see RandomActionEngine::startSetupOnly()).
+    TestConfig buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessage) const;
     void appendLog(const QString &message);
     QString describeStep(const RegionStep &step, int index) const;
     // The current ①②③ setup (named regions, steps, default action params/
@@ -308,6 +322,18 @@ private:
     InputRecorder *m_inputRecorder = nullptr;
     QPointer<RecordingIndicatorPanel> m_recordingPanel;
     int m_recordedActionCount = 0;
+    // SPEC.md 6.13追加実装及び修正依頼「起動時セットアップを実行する機能が
+    // 欲しい」: runs just m_setupActions (via RandomActionEngine::
+    // startSetupOnly()) so it can be verified independently of ②の
+    // ステップ構成 -- see onTestSetupActions().
+    QPushButton *m_testSetupButton = nullptr;
+    // Set for the duration of a run started by onTestSetupActions(), so
+    // onEngineFinished()/onRunSummaryReady() (shared with every other kind
+    // of run) can skip the bookkeeping that only makes sense for a real
+    // random-action test run (crash-rate statistics, anomaly preset/
+    // screenshot auto-save) -- reset back to false once that run's
+    // finished() fires.
+    bool m_setupOnlyTestRun = false;
     // If checked, a batch (① 連続自動実行) only runs this setup macro before
     // its first run, skipping it on every automatic restart after that
     // (e.g. a one-time EULA/license dialog that only appears the very first

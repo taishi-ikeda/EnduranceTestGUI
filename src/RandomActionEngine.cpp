@@ -182,6 +182,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_inSetupPhase = !m_config.setupActions.isEmpty();
     m_setupActionIndex = 0;
     m_setupSafetyRetryCount = 0;
+    m_setupOnlyRun = false;
 
     // A seed of 0 means "pick a fresh random one" -- but 0 is also a
     // perfectly valid *explicit* seed a user might type back in to
@@ -214,6 +215,12 @@ void RandomActionEngine::start(const TestConfig &config)
                              .arg(kRecordingFrameIntervalMs * kMaxRecordingFrames / 1000));
         m_recordingTimer.start();
     }
+}
+
+void RandomActionEngine::startSetupOnly(const TestConfig &config)
+{
+    start(config);
+    m_setupOnlyRun = true;
 }
 
 void RandomActionEngine::stop()
@@ -1445,8 +1452,16 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
 void RandomActionEngine::performSetupAction()
 {
     if (m_setupActionIndex >= m_config.setupActions.size()) {
-        // Setup phase complete -- hand off to the normal randomized loop.
         m_inSetupPhase = false;
+        if (m_setupOnlyRun) {
+            // startSetupOnly(): the point of this run was only to check the
+            // setup sequence itself, so stop here instead of falling
+            // through into the (likely unconfigured) `steps` loop.
+            doStop(I18n::t(QStringLiteral("起動時セットアップの実行確認が完了しました（%1件）"))
+                       .arg(m_config.setupActions.size()));
+            return;
+        }
+        // Setup phase complete -- hand off to the normal randomized loop.
         emit logMessage(I18n::t(QStringLiteral("起動時セットアップが完了しました。ランダム操作を開始します")));
         scheduleNext();
         return;

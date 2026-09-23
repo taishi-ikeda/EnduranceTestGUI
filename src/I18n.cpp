@@ -733,6 +733,29 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral(" → selected menu item (position %1 from top)")},
         {QStringLiteral(" → 指定した項目が見つからなかったため、メニューを閉じました"),
          QStringLiteral(" → the specified item wasn't found, so the menu was closed")},
+
+        // v0.67: 起動時セットアップを単体で試す機能
+        {QStringLiteral("▶ 起動時セットアップを試す"), QStringLiteral("▶ Test Startup Setup")},
+        {QStringLiteral("①で選択中の対象ウィンドウに対して、この一覧のセットアップだけを実行して"
+                        "確認します。②のステップ構成は実行しません（未設定でも構いません）。"),
+         QStringLiteral("Runs just this list's setup against the target window selected in ①, to check "
+                        "it works. Doesn't run ②'s step configuration at all (which doesn't need to be "
+                        "set up yet).")},
+        {QStringLiteral("起動時セットアップが設定されていません。"
+                        "「追加...」または「記録...」でセットアップを作成してください。"),
+         QStringLiteral("No startup setup is configured. Use \"Add...\" or \"Record...\" to create one "
+                        "first.")},
+        {QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
+                        "設定を許可してから、もう一度お試しください。"),
+         QStringLiteral("Permission to operate other applications hasn't been granted. Please grant it, "
+                        "then try again.")},
+        {QStringLiteral("起動時セットアップを実行中..."), QStringLiteral("Running startup setup...")},
+        {QStringLiteral("起動時セットアップの実行確認を開始します（%1件）。完了次第、自動的に"
+                        "停止します"),
+         QStringLiteral("Starting startup setup verification (%1 actions). Will stop automatically once "
+                        "it's done")},
+        {QStringLiteral("起動時セットアップの実行確認が完了しました（%1件）"),
+         QStringLiteral("Startup setup verification completed (%1 actions)")},
     };
     return table;
 }

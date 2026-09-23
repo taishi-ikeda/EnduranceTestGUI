@@ -36,6 +36,8 @@ QString setupActionTypeToString(SetupActionType type)
     case SetupActionType::TypeText: return QStringLiteral("typeText");
     case SetupActionType::KeyPress: return QStringLiteral("keyPress");
     case SetupActionType::Wait: return QStringLiteral("wait");
+    case SetupActionType::Scroll: return QStringLiteral("scroll");
+    case SetupActionType::MenuSelect: return QStringLiteral("menuSelect");
     }
     return QStringLiteral("click");
 }
@@ -48,6 +50,8 @@ SetupActionType setupActionTypeFromString(const QString &s)
     if (s == QStringLiteral("typeText")) return SetupActionType::TypeText;
     if (s == QStringLiteral("keyPress")) return SetupActionType::KeyPress;
     if (s == QStringLiteral("wait")) return SetupActionType::Wait;
+    if (s == QStringLiteral("scroll")) return SetupActionType::Scroll;
+    if (s == QStringLiteral("menuSelect")) return SetupActionType::MenuSelect;
     return SetupActionType::Click;
 }
 
@@ -312,6 +316,11 @@ QJsonObject setupActionToJson(const SetupAction &a)
     o["text"] = a.text;
     o["keySequence"] = a.keySequence;
     o["waitMs"] = a.waitMs;
+    o["scrollDx"] = a.scrollDx;
+    o["scrollDy"] = a.scrollDy;
+    o["menuSelectionMode"] = contextMenuModeToString(a.menuSelectionMode);
+    o["menuItemName"] = a.menuItemName;
+    o["menuItemIndex"] = a.menuItemIndex;
     o["label"] = a.label;
     return o;
 }
@@ -325,6 +334,11 @@ SetupAction setupActionFromJson(const QJsonObject &o)
     a.text = o["text"].toString();
     a.keySequence = o["keySequence"].toString();
     a.waitMs = o["waitMs"].toInt(a.waitMs);
+    a.scrollDx = o["scrollDx"].toInt(a.scrollDx);
+    a.scrollDy = o["scrollDy"].toInt(a.scrollDy);
+    a.menuSelectionMode = contextMenuModeFromString(o["menuSelectionMode"].toString());
+    a.menuItemName = o["menuItemName"].toString();
+    a.menuItemIndex = o["menuItemIndex"].toInt(a.menuItemIndex);
     a.label = o["label"].toString();
     return a;
 }

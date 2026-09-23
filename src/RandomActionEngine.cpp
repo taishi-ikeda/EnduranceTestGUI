@@ -1597,6 +1597,54 @@ bool RandomActionEngine::trySetupAction(const SetupAction &action, QString &outD
             labelSuffix;
         break;
     }
+    case SetupActionType::Scroll:
+        PlatformAutomation::scroll(pt, action.scrollDx, action.scrollDy);
+        outDesc = I18n::t(QStringLiteral("スクロール at (%1, %2) dx=%3 dy=%4"))
+                      .arg(pt.x())
+                      .arg(pt.y())
+                      .arg(action.scrollDx)
+                      .arg(action.scrollDy) +
+                  labelSuffix;
+        break;
+    case SetupActionType::MenuSelect: {
+        PlatformAutomation::mouseClick(pt, Qt::RightButton);
+        QString desc = I18n::t(QStringLiteral("右クリック at (%1, %2)")).arg(pt.x()).arg(pt.y());
+        // Same pre-introspection delay/focus re-check as
+        // handlePossibleContextMenu() -- let the menu render, then confirm
+        // the target is still the active process before touching it (it's
+        // not safe to assume *whose* menu got found otherwise).
+        QThread::msleep(150);
+        if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+            doStop(I18n::t(QStringLiteral("メニュー選択の直前に対象アプリがアクティブでなくなったため、安全のため"
+                       "テストを停止しました")),
+                   /*isAnomaly=*/true);
+            return false;
+        }
+        bool selected = false;
+        if (action.menuSelectionMode == ContextMenuSelectionMode::ByName) {
+            selected = PlatformAutomation::clickContextMenuItem(action.menuItemName, m_config.targetPid);
+            if (selected)
+                desc += I18n::t(QStringLiteral(" → メニュー項目「%1」を選択")).arg(action.menuItemName);
+        } else {  // ByIndex, 1-based (matches the editor UI's "上から何番目か")
+            const int zeroBased = action.menuItemIndex - 1;
+            if (zeroBased >= 0)
+                selected = PlatformAutomation::clickContextMenuItemAt(zeroBased, m_config.targetPid);
+            if (selected)
+                desc += I18n::t(QStringLiteral(" → メニュー項目(上から%1番目)を選択")).arg(action.menuItemIndex);
+        }
+        if (!selected) {
+            // The target app's menu contents can legitimately vary run to
+            // run (e.g. an item only enabled when the clipboard has
+            // content) -- never let a missing item fail the whole setup
+            // sequence; just close the menu and log that it didn't happen,
+            // same fail-soft spirit as a regular step's random selection
+            // silently falling back to dismissContextMenu().
+            PlatformAutomation::dismissContextMenu();
+            desc += I18n::t(QStringLiteral(" → 指定した項目が見つからなかったため、メニューを閉じました"));
+        }
+        outDesc = desc + labelSuffix;
+        break;
+    }
     default:
         break;
     }

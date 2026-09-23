@@ -1016,6 +1016,24 @@ QString MainWindow::describeSetupAction(const SetupAction &action, int index) co
     case SetupActionType::Wait:
         kindDesc = I18n::t(QStringLiteral("待機 %1ms")).arg(action.waitMs);
         break;
+    case SetupActionType::Scroll:
+        kindDesc = I18n::t(QStringLiteral("スクロール (%1, %2) dx=%3 dy=%4"))
+                       .arg(action.point.x())
+                       .arg(action.point.y())
+                       .arg(action.scrollDx)
+                       .arg(action.scrollDy);
+        break;
+    case SetupActionType::MenuSelect:
+        kindDesc = action.menuSelectionMode == ContextMenuSelectionMode::ByIndex
+                       ? I18n::t(QStringLiteral("メニュー選択 (%1, %2) → 上から%3番目"))
+                             .arg(action.point.x())
+                             .arg(action.point.y())
+                             .arg(action.menuItemIndex)
+                       : I18n::t(QStringLiteral("メニュー選択 (%1, %2) → 「%3」"))
+                             .arg(action.point.x())
+                             .arg(action.point.y())
+                             .arg(action.menuItemName);
+        break;
     }
     const QString labelSuffix =
         action.label.isEmpty() ? QString() : I18n::t(QStringLiteral(" [%1]")).arg(action.label);

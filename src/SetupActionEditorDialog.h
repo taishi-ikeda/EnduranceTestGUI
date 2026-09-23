@@ -9,13 +9,14 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QRadioButton;
 class QSpinBox;
 class QStackedWidget;
 class PointHighlightOverlay;
 
 // Modal dialog for creating/editing one SetupAction ("起動時セットアップ",
 // SPEC.md 6.x): a type (Click/DoubleClick/RightClick/Drag/TypeText/KeyPress/
-// Wait) plus that type's own fields. Point fields are picked by clicking on
+// Wait/Scroll/MenuSelect) plus that type's own fields. Point fields are picked by clicking on
 // screen via PointPickerOverlay rather than typing pixel coordinates by
 // hand -- mirrors NamedRegionEditorDialog's on-screen-picking UX, simplified
 // to single points instead of dragged rectangles.
@@ -64,6 +65,8 @@ private:
     QWidget *buildTypeTextPage();
     QWidget *buildKeyPressPage();
     QWidget *buildWaitPage();
+    QWidget *buildScrollPage();
+    QWidget *buildMenuSelectPage();
 
     QComboBox *m_typeCombo = nullptr;
     QStackedWidget *m_stack = nullptr;
@@ -80,6 +83,25 @@ private:
     QLineEdit *m_typeTextEdit = nullptr;
     QLineEdit *m_keySequenceEdit = nullptr;
     QSpinBox *m_waitMsSpin = nullptr;
+
+    // Scroll: shares m_point/m_pointPicked with the Click/DoubleClick/
+    // RightClick page above (onPickPoint() writes into the same field
+    // regardless of which page's button was pressed) -- these are just that
+    // page's own point-picker button/label, plus the direction/amount that
+    // are Scroll-specific.
+    QPushButton *m_pickScrollPointButton = nullptr;
+    QLabel *m_scrollPointValueLabel = nullptr;
+    QComboBox *m_scrollDirectionCombo = nullptr;
+    QSpinBox *m_scrollAmountSpin = nullptr;
+
+    // MenuSelect: also shares m_point/m_pointPicked (the right-click that
+    // opens the menu).
+    QPushButton *m_pickMenuPointButton = nullptr;
+    QLabel *m_menuPointValueLabel = nullptr;
+    QRadioButton *m_menuByNameRadio = nullptr;
+    QRadioButton *m_menuByIndexRadio = nullptr;
+    QLineEdit *m_menuItemNameEdit = nullptr;
+    QSpinBox *m_menuItemIndexSpin = nullptr;
 
     QPoint m_point;
     QPoint m_dragToPoint;

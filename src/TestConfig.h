@@ -281,7 +281,18 @@ struct RegionStep
 };
 
 // What kind of operation a single SetupAction (below) performs.
-enum class SetupActionType { Click, DoubleClick, RightClick, Drag, TypeText, KeyPress, Wait };
+enum class SetupActionType {
+    Click, DoubleClick, RightClick, Drag, TypeText, KeyPress, Wait,
+    // SPEC.md 6.13追加実装及び修正依頼「起動時セットアップの操作にホイール操作や
+    // 特定のメニューの選択を操作として追加してください」:
+    Scroll,      // one wheel event at a fixed point/direction/amount
+    MenuSelect,  // right-click to open a context menu, then pick one exact
+                 // item (by name or by position) -- unlike RightClick above,
+                 // which only ever dismisses whatever menu it opens (setup
+                 // is deterministic, so "pick one specific item, always the
+                 // same one" is its own action rather than a mode of
+                 // RightClick).
+};
 
 // One deterministic action performed exactly once, in the order it appears
 // in TestConfig::setupActions ("起動時セットアップ", SPEC.md 6.x) --
@@ -309,6 +320,32 @@ struct SetupAction
     QString text;         // TypeText only: the literal text to type, one key event per character
     QString keySequence;  // KeyPress only: QKeySequence-parseable, e.g. "Return", "Ctrl+A"
     int waitMs = 500;      // Wait only
+
+    // Scroll only: one wheel event at `point` (same window-relative
+    // resolution as above). dx/dy follow PlatformAutomation::scroll()'s own
+    // convention (also used by RegionStep's ScrollUp/ScrollDown/
+    // ScrollHorizontal in RandomActionEngine::runOneAction): positive dy
+    // scrolls up, negative scrolls down; positive dx scrolls right,
+    // negative scrolls left. Exactly one of dx/dy is normally set by the
+    // editor UI (a single wheel gesture is either vertical or horizontal),
+    // but both are applied if set -- there's nothing unsafe about a
+    // diagonal scroll, the UI just doesn't expose one.
+    int scrollDx = 0;
+    int scrollDy = 0;
+
+    // MenuSelect only: right-click at `point` to open a context menu, then
+    // select the item named `menuItemName` (menuSelectionMode == ByName) or
+    // at 1-based position `menuItemIndex` from the top (ByIndex) -- always
+    // the same item every run, unlike ActionParams::enableContextMenuSelection's
+    // random pick among several candidates for a regular step. If the named/
+    // indexed item can't be found once the menu is open, the menu is simply
+    // dismissed and the setup action counts as a (logged) no-op rather than
+    // failing the whole run -- a target app whose menu contents vary slightly
+    // run to run (e.g. a "Paste" entry only enabled when the clipboard has
+    // content) shouldn't make setup itself unreliable.
+    ContextMenuSelectionMode menuSelectionMode = ContextMenuSelectionMode::ByName;
+    QString menuItemName;
+    int menuItemIndex = 1;
 
     // Purely descriptive (e.g. "ユーザー名欄"), shown in the setup list;
     // has no effect on execution. Falls back to a generic per-type

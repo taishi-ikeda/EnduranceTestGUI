@@ -710,6 +710,29 @@ const QHash<QString, QString> &translationTable()
 
         // v0.64: 起動時セットアップに「全消去」ボタン
         {QStringLiteral("全消去"), QStringLiteral("Clear All")},
+
+        // v0.65: 起動時セットアップに「ホイールスクロール」「メニュー項目を選択」
+        {QStringLiteral("ホイールスクロール"), QStringLiteral("Wheel Scroll")},
+        {QStringLiteral("メニュー項目を選択"), QStringLiteral("Select Menu Item")},
+        {QStringLiteral("方向:"), QStringLiteral("Direction:")},
+        {QStringLiteral("量（ホイールの「目盛り」数）:"), QStringLiteral("Amount (wheel \"notches\"):")},
+        {QStringLiteral("対象ウィンドウを基準にした右クリックの位置を指定してください。開いた"
+                        "メニューから、常に同じ1項目を選択します。"),
+         QStringLiteral("Specify the right-click position, relative to the target window. Always "
+                        "selects the same one item from the menu it opens.")},
+        {QStringLiteral("項目名で指定:"), QStringLiteral("By item name:")},
+        {QStringLiteral("上から何番目かで指定:"), QStringLiteral("By position from top:")},
+        {QStringLiteral("選択する項目名を入力してください。"), QStringLiteral("Please enter the item name to select.")},
+        {QStringLiteral("スクロール (%1, %2) dx=%3 dy=%4"), QStringLiteral("Scroll (%1, %2) dx=%3 dy=%4")},
+        {QStringLiteral("メニュー選択 (%1, %2) → 上から%3番目"),
+         QStringLiteral("Menu select (%1, %2) → position %3 from top")},
+        {QStringLiteral("メニュー選択 (%1, %2) → 「%3」"), QStringLiteral("Menu select (%1, %2) → \"%3\"")},
+        {QStringLiteral("スクロール at (%1, %2) dx=%3 dy=%4"), QStringLiteral("Scroll at (%1, %2) dx=%3 dy=%4")},
+        {QStringLiteral(" → メニュー項目「%1」を選択"), QStringLiteral(" → selected menu item \"%1\"")},
+        {QStringLiteral(" → メニュー項目(上から%1番目)を選択"),
+         QStringLiteral(" → selected menu item (position %1 from top)")},
+        {QStringLiteral(" → 指定した項目が見つからなかったため、メニューを閉じました"),
+         QStringLiteral(" → the specified item wasn't found, so the menu was closed")},
     };
     return table;
 }

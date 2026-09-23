@@ -106,6 +106,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_batchWaitTimer->setInterval(1000);
     connect(m_batchWaitTimer, &QTimer::timeout, this, &MainWindow::onBatchWaitTick);
 
+    // SPEC.md 10追加実装及び修正依頼: extra grace delay after the target is
+    // first detected -- see startRunAfterLaunchWait()/m_launchWaitTimer's
+    // own field comment.
+    m_launchWaitTimer = new QTimer(this);
+    m_launchWaitTimer->setSingleShot(true);
+    connect(m_launchWaitTimer, &QTimer::timeout, this, &MainWindow::onLaunchWaitElapsed);
+
     // The Accessibility permission is typically granted/toggled in System
     // Settings while this app is running, then the user alt-tabs back.
     // Re-check it (and refresh the target list, in case new windows
@@ -433,6 +440,27 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
         I18n::t(QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
                                 "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。")));
     targetLayout->addWidget(m_launchBeforeStartCheck);
+
+    // SPEC.md 10追加実装及び修正依頼「連続実行ボタンを押してツールがすぐに
+    // 立ち上がらないとエラーができます...起動まで一定時間待つパラメータを
+    // 設定できるようにしてください」: applies to every launch-then-wait
+    // path (連続実行/バッチの自動再起動待ち、上のオプション)、not just
+    // 連続実行 despite the request's wording -- see startRunAfterLaunchWait().
+    auto *launchWaitRow = new QHBoxLayout;
+    launchWaitRow->addWidget(new QLabel(
+        I18n::t(QStringLiteral("対象ツールの起動検知後、さらに待つ時間:")), m_targetGroup));
+    m_launchWaitSecondsSpin = new QSpinBox(m_targetGroup);
+    m_launchWaitSecondsSpin->setRange(0, 300);
+    m_launchWaitSecondsSpin->setSuffix(I18n::t(QStringLiteral(" 秒")));
+    m_launchWaitSecondsSpin->setToolTip(
+        I18n::t(QStringLiteral("対象ツールのウィンドウを検知してから実際にテストを開始するまで、ここで"
+                                "指定した秒数だけ追加で待ちます。起動直後はまだ操作を受け付けられない"
+                                "ツールに対して、0（デフォルト。待たずに即座に開始）だと安全確認に失敗する"
+                                "場合に使います。連続実行・①バッチの自動再起動待ち・上の「起動してから"
+                                "開始する」のいずれにも適用されます。")));
+    launchWaitRow->addWidget(m_launchWaitSecondsSpin);
+    launchWaitRow->addStretch(1);
+    targetLayout->addLayout(launchWaitRow);
 
     connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshTargets);
     connect(m_openSettingsButton, &QPushButton::clicked, this,
@@ -2306,6 +2334,16 @@ void MainWindow::onStop()
         setControlsEnabled(true);
         return;
     }
+    if (m_launchWaitTimer->isActive()) {
+        // Target already detected, just waiting out the extra grace period
+        // (m_launchWaitSecondsSpin) before beginRun() -- same "nothing is
+        // actually running yet" situation as the m_batchWaitTimer case above.
+        m_launchWaitTimer->stop();
+        appendLog(I18n::t(QStringLiteral("連続実行を中断しました（起動待ち時間の経過待ち中でした）")));
+        m_batchProgressLabel->setText(QString());
+        setControlsEnabled(true);
+        return;
+    }
 
     if (wasBatching)
         appendLog(I18n::t(QStringLiteral("連続実行を中断します（現在の実行が終わり次第停止します）")));
@@ -2470,8 +2508,7 @@ void MainWindow::onBatchWaitTick()
         m_batchWaitTimer->stop();
         m_continuousWaitPhase = ContinuousWaitPhase::None;
         appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
-        if (!beginRun(/*interactive=*/false))
-            setControlsEnabled(true);
+        startRunAfterLaunchWait(/*interactive=*/false);
         return;
     }
 
@@ -2484,12 +2521,30 @@ void MainWindow::onBatchWaitTick()
         // plain interactive single run, not a batch/連続実行 continuation.
         m_launchBeforeStartPending = false;
         appendLog(I18n::t(QStringLiteral("対象ツールの起動を検知しました。開始します")));
-        if (!beginRun(/*interactive=*/true))
-            setControlsEnabled(true);
+        startRunAfterLaunchWait(/*interactive=*/true);
         return;
     }
     appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
-    if (!beginRun(/*interactive=*/false))
+    startRunAfterLaunchWait(/*interactive=*/false);
+}
+
+void MainWindow::startRunAfterLaunchWait(bool interactive)
+{
+    const int waitSec = m_launchWaitSecondsSpin->value();
+    if (waitSec <= 0) {
+        if (!beginRun(interactive))
+            setControlsEnabled(true);
+        return;
+    }
+    appendLog(I18n::t(QStringLiteral("対象ツールの起動を検知しました。安定するまでさらに%1秒待ちます..."))
+                   .arg(waitSec));
+    m_launchWaitInteractive = interactive;
+    m_launchWaitTimer->start(waitSec * 1000);
+}
+
+void MainWindow::onLaunchWaitElapsed()
+{
+    if (!beginRun(m_launchWaitInteractive))
         setControlsEnabled(true);
 }
 
@@ -2774,6 +2829,7 @@ QJsonObject MainWindow::buildPresetJson() const
     // SPEC.md 10 ②: saved/loaded alongside the rest of the setup so a
     // preset built for unattended batch runs (①) stays fully self-contained.
     root["targetLaunchCommand"] = m_targetLaunchCommandEdit->text();
+    root["launchWaitSeconds"] = m_launchWaitSecondsSpin->value();
 
     QJsonArray regionsArr;
     for (const NamedRegion &r : m_namedRegions)
@@ -2912,6 +2968,7 @@ void MainWindow::onLoadPreset()
     refreshStepList();
     loadActionParamsEditorForSelection();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());
+    m_launchWaitSecondsSpin->setValue(root["launchWaitSeconds"].toInt(m_launchWaitSecondsSpin->value()));
 
     const QString hint = root["targetAppNameHint"].toString();
     if (!hint.isEmpty()) {

@@ -756,6 +756,25 @@ const QHash<QString, QString> &translationTable()
                         "it's done")},
         {QStringLiteral("起動時セットアップの実行確認が完了しました（%1件）"),
          QStringLiteral("Startup setup verification completed (%1 actions)")},
+
+        // v0.68: 連続実行に対象ツール起動待ち時間パラメータを追加
+        {QStringLiteral("対象ツールの起動検知後、さらに待つ時間:"),
+         QStringLiteral("Extra wait after target launch is detected:")},
+        {QStringLiteral(" 秒"), QStringLiteral(" sec")},
+        {QStringLiteral("対象ツールのウィンドウを検知してから実際にテストを開始するまで、ここで"
+                        "指定した秒数だけ追加で待ちます。起動直後はまだ操作を受け付けられない"
+                        "ツールに対して、0（デフォルト。待たずに即座に開始）だと安全確認に失敗する"
+                        "場合に使います。連続実行・①バッチの自動再起動待ち・上の「起動してから"
+                        "開始する」のいずれにも適用されます。"),
+         QStringLiteral("After the target tool's window is detected, waits this many extra seconds "
+                        "before actually starting the test. Useful when a tool isn't ready to receive "
+                        "input right at launch and the safety check fails with 0 (the default -- start "
+                        "immediately, no extra wait). Applies to 連続実行, ①batch mode's automatic "
+                        "relaunch wait, and the \"launch then start\" option above alike.")},
+        {QStringLiteral("対象ツールの起動を検知しました。安定するまでさらに%1秒待ちます..."),
+         QStringLiteral("Target tool launch detected. Waiting %1 more seconds for it to settle...")},
+        {QStringLiteral("連続実行を中断しました（起動待ち時間の経過待ち中でした）"),
+         QStringLiteral("Continuous run interrupted (was waiting out the extra launch delay)")},
     };
     return table;
 }

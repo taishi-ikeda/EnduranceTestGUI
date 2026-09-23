@@ -254,6 +254,20 @@ private:
     // single-QString startDetached() overload Qt6 removed). No-op if the
     // field is empty.
     void launchTargetAppFromConfiguredCommand();
+    // SPEC.md 10追加実装及び修正依頼「連続実行ボタンを押してツールがすぐに
+    // 立ち上がらないとエラーができます...起動まで一定時間待つパラメータを
+    // 設定できるようにしてください」: called once the target window has
+    // just been detected (①'s launch-detection polling in onBatchWaitTick(),
+    // covering all three of its call sites -- 連続実行's kill+relaunch
+    // cycle, plain batch mode's auto/manual relaunch wait, and ▶開始's
+    // "起動してから開始する" option) instead of calling beginRun()
+    // directly. If m_launchWaitSecondsSpin is 0 (the default -- unchanged
+    // behavior), starts immediately; otherwise waits that many more seconds
+    // via m_launchWaitTimer first, giving a target app that takes a while
+    // to finish drawing its own UI time to become genuinely interactable
+    // before beginRun()'s safety self-test runs against it.
+    void startRunAfterLaunchWait(bool interactive);
+    void onLaunchWaitElapsed();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -285,6 +299,12 @@ private:
     // Independent of m_continuousRunMode below (連続実行 always launches
     // regardless of this checkbox's state).
     QCheckBox *m_launchBeforeStartCheck = nullptr;
+    // SPEC.md 10追加実装及び修正依頼: extra seconds to wait, after ①'s
+    // launch-detection polling first finds the target window, before
+    // actually calling beginRun() -- see startRunAfterLaunchWait(). 0 (the
+    // default) preserves the previous "start the instant it's detected"
+    // behavior. Persisted in preset JSON as timing.launchWaitSeconds.
+    QSpinBox *m_launchWaitSecondsSpin = nullptr;
 
     // Named operation regions (pool, referenced by name from steps)
     QListWidget *m_namedRegionListWidget = nullptr;
@@ -495,6 +515,15 @@ private:
     // "対象ツールの起動から開始する" option (m_launchBeforeStartPending) --
     // see onBatchWaitTick() for how it dispatches between the three.
     QTimer *m_batchWaitTimer = nullptr;
+    // SPEC.md 10追加実装及び修正依頼: single-shot delay armed by
+    // startRunAfterLaunchWait() once the target has just been detected but
+    // m_launchWaitSecondsSpin is > 0 -- separate from m_batchWaitTimer
+    // (which is stopped by that point) so onStop() can distinguish and
+    // cancel "waiting for the extra grace period" from every other wait
+    // state. m_launchWaitInteractive remembers which beginRun() mode to
+    // resume with once it fires (onLaunchWaitElapsed()).
+    QTimer *m_launchWaitTimer = nullptr;
+    bool m_launchWaitInteractive = false;
     // SPEC.md 10 ⑤ (連続実行, m_continuousRunButton): true while the
     // current batch loop is running in "always kill+relaunch" mode rather
     // than the plain passive-relaunch batch semantics above. Checked by

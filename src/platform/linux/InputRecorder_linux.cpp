@@ -93,7 +93,10 @@ int qtKeyFromKeycode(Display *dpy, unsigned int keycode, bool shiftHeld, QString
 }
 }  // namespace
 
-InputRecorder::InputRecorder(QObject *parent) : QObject(parent), m_impl(new Impl) {}
+InputRecorder::InputRecorder(QObject *parent) : QObject(parent), m_impl(new Impl)
+{
+    initSharedState();
+}
 
 InputRecorder::~InputRecorder()
 {
@@ -177,6 +180,32 @@ bool InputRecorder::start()
             const bool pressed = ev.xcookie.evtype == XI_RawButtonPress || ev.xcookie.evtype == XI_RawKeyPress;
 
             if (ev.xcookie.evtype == XI_RawButtonPress || ev.xcookie.evtype == XI_RawButtonRelease) {
+                // Wheel "clicks" arrive as button press/release pairs for
+                // buttons 4-7 (standard X11 wheel mapping, the same one
+                // Automation_linux.cpp's scroll() synthesizes when
+                // *dispatching* a scroll -- see notifyWheelScroll()'s dx/dy
+                // sign convention comment in InputRecorder.h). Recorded on
+                // press only: the release is an inherent, immediate part of
+                // the same physical/synthetic wheel "notch", not a
+                // separately meaningful gesture the way a button hold is.
+                if (pressed && (revent->detail == 4 || revent->detail == 5 || revent->detail == 6 ||
+                                revent->detail == 7)) {
+                    Window rootRet, childRet;
+                    int rootX = 0, rootY = 0, winX = 0, winY = 0;
+                    unsigned int maskRet = 0;
+                    XQueryPointer(m_impl->dpy, m_impl->root, &rootRet, &childRet, &rootX, &rootY, &winX,
+                                  &winY, &maskRet);
+                    int dx = 0, dy = 0;
+                    switch (revent->detail) {
+                    case 4: dy = 1; break;
+                    case 5: dy = -1; break;
+                    case 6: dx = 1; break;
+                    case 7: dx = -1; break;
+                    }
+                    notifyWheelScroll(QPoint(rootX, rootY), dx, dy);
+                    XFreeEventData(m_impl->dpy, &ev.xcookie);
+                    continue;
+                }
                 Qt::MouseButton button = Qt::NoButton;
                 if (revent->detail == 1)
                     button = Qt::LeftButton;

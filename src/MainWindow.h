@@ -76,7 +76,9 @@ private slots:
     // InputRecorder for the actual observation mechanism.
     void onRecordSetupActions();
     void onSetupActionRecorded(SetupActionType type, QPoint point, QPoint dragToPoint, QString text,
-                                QString keySequence);
+                                QString keySequence, int scrollDx, int scrollDy,
+                                ContextMenuSelectionMode menuSelectionMode, QString menuItemName,
+                                int menuItemIndex);
     void onRecordingFinished(bool escapePressed);
 
     void onAddStep();

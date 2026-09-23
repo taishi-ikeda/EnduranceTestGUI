@@ -96,7 +96,10 @@ int qtKeyFromCGKeyCode(CGKeyCode keycode, CGEventFlags flags, QString *outText)
 }
 }  // namespace
 
-InputRecorder::InputRecorder(QObject *parent) : QObject(parent), m_impl(new Impl) {}
+InputRecorder::InputRecorder(QObject *parent) : QObject(parent), m_impl(new Impl)
+{
+    initSharedState();
+}
 
 InputRecorder::~InputRecorder()
 {
@@ -131,6 +134,19 @@ CGEventRef inputRecorderTapCallback(CGEventTapProxy, CGEventType type, CGEventRe
             // very callback.
             QMetaObject::invokeMethod(self, &InputRecorder::notifyEscapePressed, Qt::QueuedConnection);
         }
+    } else if (type == kCGEventScrollWheel) {
+        // Mirrors Automation_mac.mm's scroll() dispatch, which passes dy/dx
+        // straight through as CGEventCreateScrollWheelEvent's wheel1/wheel2
+        // deltas -- reading the same fields back here should be the inverse
+        // of that, but this hasn't been independently verified against real
+        // scroll hardware (see SPEC.md 8章, same caveat as the rest of this
+        // file). kCGScrollEventUnitLine deltas are already "notches", so
+        // each event is passed straight through as one notifyWheelScroll()
+        // call rather than needing further scaling.
+        const int dy = int(CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1));
+        const int dx = int(CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2));
+        if (dx != 0 || dy != 0)
+            self->notifyWheelScroll(screenPos, dx, dy);
     } else if (type == kCGEventFlagsChanged) {
         // Modifier key press/release arrives as a single flags-changed
         // event rather than distinct key-down/up for the modifier itself;
@@ -171,7 +187,7 @@ bool InputRecorder::start()
     CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventLeftMouseUp) |
                         CGEventMaskBit(kCGEventRightMouseDown) | CGEventMaskBit(kCGEventRightMouseUp) |
                         CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) |
-                        CGEventMaskBit(kCGEventFlagsChanged);
+                        CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventScrollWheel);
     m_impl->tap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
                                     mask, inputRecorderTapCallback, this);
     if (!m_impl->tap)

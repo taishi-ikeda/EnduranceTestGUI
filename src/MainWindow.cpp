@@ -1300,7 +1300,9 @@ void MainWindow::onRecordSetupActions()
 }
 
 void MainWindow::onSetupActionRecorded(SetupActionType type, QPoint point, QPoint dragToPoint,
-                                        QString text, QString keySequence)
+                                        QString text, QString keySequence, int scrollDx, int scrollDy,
+                                        ContextMenuSelectionMode menuSelectionMode, QString menuItemName,
+                                        int menuItemIndex)
 {
     QPoint targetTopLeft;
     if (!currentTargetTopLeft(targetTopLeft)) {
@@ -1318,6 +1320,11 @@ void MainWindow::onSetupActionRecorded(SetupActionType type, QPoint point, QPoin
     action.dragToPoint = dragToPoint - targetTopLeft;
     action.text = text;
     action.keySequence = keySequence;
+    action.scrollDx = scrollDx;
+    action.scrollDy = scrollDy;
+    action.menuSelectionMode = menuSelectionMode;
+    action.menuItemName = menuItemName;
+    action.menuItemIndex = menuItemIndex;
     m_setupActions.append(action);
     refreshSetupActionList();
     m_setupActionListWidget->setCurrentRow(m_setupActions.size() - 1);

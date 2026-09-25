@@ -1,5 +1,6 @@
 #include "PointPickerOverlay.h"
 #include "OverlayGeometry.h"
+#include "platform/PlatformAutomation.h"
 
 #include <QEventLoop>
 #include <QGuiApplication>
@@ -14,18 +15,22 @@ using OverlayGeometry::virtualDesktopGeometry;
 
 PointPickerOverlay::PointPickerOverlay(QWidget *parent)
     : QWidget(parent)
-    // Must happen before this (still invisible) widget is shown -- see
-    // grabVirtualDesktopSnapshot()'s comment.
-    , m_backgroundSnapshot(grabVirtualDesktopSnapshot())
+    // Only grabbed when real window transparency isn't safe to use -- see
+    // RegionSelectorOverlay's constructor for the full rationale (shared by
+    // both overlays via PlatformAutomation::supportsWindowTransparency()).
+    , m_backgroundSnapshot(PlatformAutomation::supportsWindowTransparency()
+                                ? QPixmap()
+                                : grabVirtualDesktopSnapshot())
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     // Same rationale as RegionSelectorOverlay: keep this the active modal
     // surface instead of fighting a still-running modal dialog underneath
     // (e.g. SetupActionEditorDialog) while it's up.
     setWindowModality(Qt::ApplicationModal);
-    // Deliberately NOT Qt::WA_TranslucentBackground -- see
-    // RegionSelectorOverlay's constructor for why (paintEvent() draws
-    // m_backgroundSnapshot as an opaque background instead).
+    // Qt::WA_TranslucentBackground only where it's known to actually render
+    // as see-through -- see RegionSelectorOverlay's constructor comment.
+    if (PlatformAutomation::supportsWindowTransparency())
+        setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setCursor(Qt::CrossCursor);
     setGeometry(virtualDesktopGeometry());
@@ -73,17 +78,15 @@ void PointPickerOverlay::paintEvent(QPaintEvent * /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
+    // No-op when real transparency is in use (m_backgroundSnapshot is a null
+    // QPixmap then -- see the constructor); the real screen shows through
+    // this window directly instead. The full-screen semi-transparent dark
+    // tint and hint text bar this used to draw here (mirroring
+    // RegionSelectorOverlay's, until the same multi-monitor "黒帯" fix was
+    // applied there -- see its paintEvent() comment) were removed outright;
+    // Qt::CrossCursor (set in the constructor) already signals that this
+    // overlay is in point-picking mode.
     p.drawPixmap(0, 0, m_backgroundSnapshot);
-    // The full-screen semi-transparent dark tint and hint text bar this
-    // used to draw here (mirroring RegionSelectorOverlay's, until the same
-    // multi-monitor "黒帯" fix was applied there -- see its paintEvent()'s
-    // comment) were removed for the same reason: on screens of very
-    // different sizes/aspect ratios, the gap left uncovered by any real
-    // screen within virtualDesktopGeometry()'s union rect can be large, and
-    // this extra tint made that gap look like an oversized, disorienting
-    // black band rather than just an unreachable corner. Qt::CrossCursor
-    // (set in the constructor) already signals that this overlay is in
-    // point-picking mode.
 }
 
 void PointPickerOverlay::mousePressEvent(QMouseEvent *event)

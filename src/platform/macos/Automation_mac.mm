@@ -48,6 +48,15 @@ void openScreenRecordingSettings()
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
+bool supportsWindowTransparency()
+{
+    // Quartz (the macOS WindowServer) always composites every window, with or
+    // without any particular app's involvement -- there is no "bare window
+    // manager, no compositor" case on macOS the way there is on Linux (see the
+    // header comment).
+    return true;
+}
+
 static QList<WindowInfo> collectWindows()
 {
     QList<WindowInfo> result;

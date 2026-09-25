@@ -38,11 +38,12 @@ public:
         // below) as an opaque background, and draws the highlight
         // rectangles on top of that -- see OverlayGeometry::
         // grabVirtualDesktopSnapshot()'s comment for the same technique
-        // used by RegionSelectorOverlay/PointPickerOverlay, including why a
-        // captured screenshot (unlike real transparency) can drift out of
-        // alignment with the real screen on macOS when it covers a screen's
-        // full pixel bounds the way this window does (menu bar/Dock rows
-        // included).
+        // used by RegionSelectorOverlay/PointPickerOverlay. This window is
+        // restricted to the screen's *available* geometry (see setContent()
+        // below), not its full pixel bounds -- see OverlayGeometry::
+        // virtualDesktopGeometry()'s comment for why a captured screenshot
+        // (or the window itself) drifts out of alignment with the real
+        // screen by roughly the menu bar/Dock/panel strip's size otherwise.
         m_useRealTransparency = PlatformAutomation::supportsWindowTransparency();
         if (m_useRealTransparency)
             setAttribute(Qt::WA_TranslucentBackground);
@@ -65,19 +66,34 @@ public:
         // hide(), e.g. while RegionSelectorOverlay is up, or once the owning
         // dialog closes) -- so a fresh snapshot is grabbed each time this
         // highlight reappears, not just once ever.
+        // Restricted to this screen's *available* geometry (excluding the
+        // menu bar/Dock/panel strip the OS reserves for itself), not its
+        // full physical bounds -- see OverlayGeometry::virtualDesktopGeometry()'s
+        // comment for why: an ordinary always-on-top window like this one is
+        // not allowed to actually occupy that reserved strip, so requesting
+        // the full geometry gets it silently pushed/clipped away from that
+        // strip by the window manager, landing its real on-screen position
+        // off by roughly the strip's size from what was asked for (and from
+        // what this background snapshot/m_origin below assume).
+        const QRect screenGeom = m_screen->availableGeometry();
         if (!m_useRealTransparency && !isVisible()) {
             // See settleDesktopBeforeSnapshot()'s comment: this window is
             // typically re-shown right after RegionSelectorOverlay (or this
             // same overlay's previous hide()) has just closed/hidden, and
             // grabbing immediately can otherwise capture that leftover
-            // content instead of the real desktop.
+            // content instead of the real desktop. Cropped to screenGeom so
+            // the grabbed content lines up with this window's own bounds --
+            // grabWindow(0)'s x/y/w/h are relative to the screen's own
+            // top-left, hence subtracting screen->geometry() (not
+            // screenGeom itself) here.
             settleDesktopBeforeSnapshot();
-            m_background = screen->grabWindow(0);
+            const QPoint availOffsetInScreen = screenGeom.topLeft() - screen->geometry().topLeft();
+            m_background = screen->grabWindow(0, availOffsetInScreen.x(), availOffsetInScreen.y(),
+                                               screenGeom.width(), screenGeom.height());
         }
         // Order matters on macOS: RegionSelectorOverlay's working pattern
         // is show() *then* setGeometry().
         show();
-        const QRect screenGeom = m_screen->geometry();
         setGeometry(screenGeom);
         // Captured ourselves rather than re-read back via geometry() when
         // painting, in case the window system hasn't finished applying the

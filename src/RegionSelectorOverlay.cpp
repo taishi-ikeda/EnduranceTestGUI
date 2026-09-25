@@ -156,6 +156,18 @@ void RegionSelectorOverlay::mousePressEvent(QMouseEvent *event)
         m_currentRect = QRect(m_dragStart, m_dragStart);
         update();
     } else if (event->button() == Qt::RightButton) {
+        // A right-click to confirm doesn't require releasing the left
+        // button first -- dragging out a rectangle and right-clicking to
+        // finish in one continuous motion, without perfectly lifting the
+        // left button beforehand, is a natural gesture given the drawn
+        // hint text once said "ドラッグで矩形を追加 / Enter または右クリックで
+        // 確定". Without this, finish() below closes the overlay before
+        // mouseReleaseEvent() ever runs, silently dropping whatever
+        // rectangle was still being dragged at the moment of the right
+        // click (reported as the confirmed selection ending up slightly
+        // off from what was just dragged -- SPEC.md追加実装及び修正依頼).
+        if (m_dragging)
+            commitDraggedRect();
         finish(true);
     }
 }
@@ -171,12 +183,17 @@ void RegionSelectorOverlay::mouseMoveEvent(QMouseEvent *event)
 void RegionSelectorOverlay::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton && m_dragging) {
-        m_dragging = false;
-        if (m_currentRect.width() >= 4 && m_currentRect.height() >= 4)
-            m_newRects.append(m_currentRect);
-        m_currentRect = QRect();
+        commitDraggedRect();
         update();
     }
+}
+
+void RegionSelectorOverlay::commitDraggedRect()
+{
+    m_dragging = false;
+    if (m_currentRect.width() >= 4 && m_currentRect.height() >= 4)
+        m_newRects.append(m_currentRect);
+    m_currentRect = QRect();
 }
 
 void RegionSelectorOverlay::mouseDoubleClickEvent(QMouseEvent * /*event*/)

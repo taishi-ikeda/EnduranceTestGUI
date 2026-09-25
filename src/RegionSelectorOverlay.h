@@ -41,6 +41,7 @@ private:
                                     const QList<QRect> &existingExcludes,
                                     QWidget *parent = nullptr);
     void finish(bool accepted);
+    void commitDraggedRect();
 
     Mode m_mode;
     QList<QRect> m_existingIncludes;

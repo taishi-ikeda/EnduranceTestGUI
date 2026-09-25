@@ -64,29 +64,37 @@ bool isScreenRecordingTrusted();
 void openScreenRecordingSettings();
 
 // Whether a real, live-transparent top-level window (Qt::WA_TranslucentBackground)
-// can be trusted to actually render as see-through on this platform, instead of
-// silently rendering as solid black the way it does on a Linux window manager
-// with no compositor running (see OverlayGeometry::grabVirtualDesktopSnapshot()'s
+// can be trusted to actually render as see-through on this platform/session,
+// instead of silently rendering as solid black the way it does with no
+// compositor running (see OverlayGeometry::grabVirtualDesktopSnapshot()'s
 // comment for that failure mode, and why RegionSelectorOverlay/PointPickerOverlay/
 // RegionHighlightOverlay fall back to painting a captured screenshot as an opaque
-// background instead). macOS's WindowServer composites every window
-// unconditionally -- there is no "no compositor" case to guard against there --
-// so real transparency is always safe on macOS and is used in preference to the
-// screenshot-based fallback when this returns true.
+// background instead when this returns false). macOS's WindowServer composites
+// every window unconditionally -- there is no "no compositor" case to guard
+// against there -- so this is always true on macOS. Linux has no such guarantee
+// (a bare/minimal window manager may run no compositor at all), so the Linux
+// implementation checks for one at runtime instead of assuming either way (see
+// Automation_linux.cpp) -- true on a desktop that composites (GNOME/Mutter,
+// KDE/KWin, Wayland sessions in general, ...), false on one that doesn't (e.g.
+// this project's own bare Xvfb+openbox sandbox).
 //
-// This also sidesteps a macOS-specific misalignment the screenshot approach had
-// (SPEC.md追加実装及び修正依頼, reported as "two dialogs appear" -- #51): these
-// overlays size/position themselves using QScreen::geometry() (the screen's full
-// pixel bounds, menu bar/Dock rows included), but neither the real menu bar nor
-// the real Dock can actually be drawn over by an ordinary window -- so the OS may
-// shift where the window is actually placed on screen to avoid overlapping them,
-// while the captured screenshot painted inside it still starts from row 0 of the
-// *full* screen. The frozen image the user sees then drifts out of alignment
-// with the real screen underneath by roughly the menu bar's height, so a click
-// aimed at something visible in the (misaligned) image can land on a different
-// real control than intended. A genuinely transparent window has no captured
-// image to misalign in the first place -- mouse coordinates are simply read
-// against whatever is really on screen.
+// This also sidesteps a screenshot-vs-real-screen misalignment the screenshot
+// approach has wherever the desktop reserves a panel/menu bar strip an ordinary
+// window can't be placed under (SPEC.md追加実装及び修正依頼, reported as "two
+// dialogs appear" -- #51 -- first on macOS, then confirmed to reproduce the
+// same way on Ubuntu/GNOME): these overlays size/position themselves using
+// QScreen::geometry() (the screen's full pixel bounds, panel/menu bar/Dock rows
+// included), but the real panel can't actually be drawn over by an ordinary
+// window -- so the window system may shift where the window is actually placed
+// on screen to avoid overlapping it, while the captured screenshot painted
+// inside it still starts from row 0 of the *full* screen. The frozen image the
+// user sees then drifts out of alignment with the real screen underneath by
+// roughly the panel's height, so a click aimed at something visible in the
+// (misaligned) image can land on a different real control than intended. A
+// genuinely transparent window has no captured image to misalign in the first
+// place -- mouse coordinates are simply read against whatever is really on
+// screen -- which is why this is preferred over the screenshot-based fallback
+// wherever it's safe to use, not just on macOS.
 bool supportsWindowTransparency();
 
 // Enumerates on-screen, normal top-level windows owned by other running

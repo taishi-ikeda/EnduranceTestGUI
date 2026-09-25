@@ -225,6 +225,21 @@ void openScreenRecordingSettings()
     // No OS-level permission gate on X11; nothing to open.
 }
 
+bool supportsWindowTransparency()
+{
+    // Unlike macOS's WindowServer, an X11 window manager is not guaranteed to
+    // run a compositor -- a bare/minimal one (e.g. this project's own
+    // Xvfb+openbox sandbox, used for every Linux live test in SPEC.md) has
+    // none, and Qt::WA_TranslucentBackground renders as solid black there
+    // instead of blending against the real desktop (see the header comment).
+    // There is no reliable way to detect this from here (compositor presence
+    // is a runtime property of whatever WM the user happens to be running,
+    // not something queryable up front the way a permission is), so this
+    // conservatively stays false on Linux and the screenshot-based fallback
+    // is used unconditionally.
+    return false;
+}
+
 QList<WindowInfo> listWindows()
 {
     return collectWindows();

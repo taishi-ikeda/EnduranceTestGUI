@@ -1,5 +1,6 @@
 #include "RegionHighlightOverlay.h"
 #include "OverlayGeometry.h"
+#include "platform/PlatformAutomation.h"
 
 #include <QFont>
 #include <QGuiApplication>
@@ -24,18 +25,27 @@ public:
         // purely via the WA_TransparentForMouseEvents widget *attribute*
         // below, not an extra window flag.
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
-        // Deliberately NOT Qt::WA_TranslucentBackground: without a
-        // compositor running (common on minimal/tiling Linux window
-        // managers), a window with this attribute renders as solid black
-        // instead of blending against what's behind it -- since this
-        // window covers an entire screen, that made the whole screen go
-        // black the moment a NamedRegionEditorDialog opened (SPEC.md
-        // 6.3/8), even hiding the dialog itself underneath. paintEvent()
-        // instead paints a real screenshot of the screen (m_background,
-        // grabbed in setContent() below) as an opaque background, and
-        // draws the highlight rectangles on top of that -- see
-        // OverlayGeometry::grabVirtualDesktopSnapshot()'s comment for the
-        // same technique used by RegionSelectorOverlay/PointPickerOverlay.
+        // Qt::WA_TranslucentBackground only where PlatformAutomation::
+        // supportsWindowTransparency() says it will actually render as
+        // see-through. Without a compositor running (common on minimal/
+        // tiling Linux window managers), a window with this attribute
+        // renders as solid black instead of blending against what's behind
+        // it -- since this window covers an entire screen, that made the
+        // whole screen go black the moment a NamedRegionEditorDialog opened
+        // (SPEC.md 6.3/8), even hiding the dialog itself underneath. Where
+        // real transparency isn't safe, paintEvent() instead paints a real
+        // screenshot of the screen (m_background, grabbed in setContent()
+        // below) as an opaque background, and draws the highlight
+        // rectangles on top of that -- see OverlayGeometry::
+        // grabVirtualDesktopSnapshot()'s comment for the same technique
+        // used by RegionSelectorOverlay/PointPickerOverlay, including why a
+        // captured screenshot (unlike real transparency) can drift out of
+        // alignment with the real screen on macOS when it covers a screen's
+        // full pixel bounds the way this window does (menu bar/Dock rows
+        // included).
+        m_useRealTransparency = PlatformAutomation::supportsWindowTransparency();
+        if (m_useRealTransparency)
+            setAttribute(Qt::WA_TranslucentBackground);
         setAttribute(Qt::WA_ShowWithoutActivating);
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
@@ -55,7 +65,7 @@ public:
         // hide(), e.g. while RegionSelectorOverlay is up, or once the owning
         // dialog closes) -- so a fresh snapshot is grabbed each time this
         // highlight reappears, not just once ever.
-        if (!isVisible()) {
+        if (!m_useRealTransparency && !isVisible()) {
             // See settleDesktopBeforeSnapshot()'s comment: this window is
             // typically re-shown right after RegionSelectorOverlay (or this
             // same overlay's previous hide()) has just closed/hidden, and
@@ -83,6 +93,9 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing, true);
 
+        // No-op when m_useRealTransparency is true (m_background is never
+        // grabbed then, so it's a null QPixmap) -- the real screen shows
+        // through this window's own transparency instead.
         p.drawPixmap(0, 0, m_background);
 
         auto drawRectList = [&](const QList<QRect> &rects, const QColor &fill, const QColor &border) {
@@ -113,6 +126,7 @@ protected:
     }
 
 private:
+    bool m_useRealTransparency = false;
     QScreen *m_screen = nullptr;
     QPoint m_origin;
     QString m_name;

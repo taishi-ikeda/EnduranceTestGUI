@@ -63,6 +63,32 @@ void openAccessibilitySettings();
 bool isScreenRecordingTrusted();
 void openScreenRecordingSettings();
 
+// Whether a real, live-transparent top-level window (Qt::WA_TranslucentBackground)
+// can be trusted to actually render as see-through on this platform, instead of
+// silently rendering as solid black the way it does on a Linux window manager
+// with no compositor running (see OverlayGeometry::grabVirtualDesktopSnapshot()'s
+// comment for that failure mode, and why RegionSelectorOverlay/PointPickerOverlay/
+// RegionHighlightOverlay fall back to painting a captured screenshot as an opaque
+// background instead). macOS's WindowServer composites every window
+// unconditionally -- there is no "no compositor" case to guard against there --
+// so real transparency is always safe on macOS and is used in preference to the
+// screenshot-based fallback when this returns true.
+//
+// This also sidesteps a macOS-specific misalignment the screenshot approach had
+// (SPEC.md追加実装及び修正依頼, reported as "two dialogs appear" -- #51): these
+// overlays size/position themselves using QScreen::geometry() (the screen's full
+// pixel bounds, menu bar/Dock rows included), but neither the real menu bar nor
+// the real Dock can actually be drawn over by an ordinary window -- so the OS may
+// shift where the window is actually placed on screen to avoid overlapping them,
+// while the captured screenshot painted inside it still starts from row 0 of the
+// *full* screen. The frozen image the user sees then drifts out of alignment
+// with the real screen underneath by roughly the menu bar's height, so a click
+// aimed at something visible in the (misaligned) image can land on a different
+// real control than intended. A genuinely transparent window has no captured
+// image to misalign in the first place -- mouse coordinates are simply read
+// against whatever is really on screen.
+bool supportsWindowTransparency();
+
 // Enumerates on-screen, normal top-level windows owned by other running
 // processes/applications. Excludes this process's own windows.
 QList<WindowInfo> listWindows();

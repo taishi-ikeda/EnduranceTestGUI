@@ -1,5 +1,6 @@
 #include "RegionSelectorOverlay.h"
 #include "OverlayGeometry.h"
+#include "platform/PlatformAutomation.h"
 
 #include <QApplication>
 #include <QEventLoop>
@@ -20,9 +21,15 @@ RegionSelectorOverlay::RegionSelectorOverlay(Mode mode, const QList<QRect> &exis
     , m_mode(mode)
     , m_existingIncludes(existingIncludes)
     , m_existingExcludes(existingExcludes)
-    // Must happen before this (still invisible) widget is shown -- see
-    // grabVirtualDesktopSnapshot()'s comment.
-    , m_backgroundSnapshot(grabVirtualDesktopSnapshot())
+    // Only grabbed when real window transparency isn't safe to use (see
+    // PlatformAutomation::supportsWindowTransparency()) -- when it is, this
+    // window is genuinely see-through instead, so there is no screenshot to
+    // capture or to ever drift out of alignment with the real screen. Must
+    // happen before this (still invisible) widget is shown when it *is*
+    // grabbed -- see grabVirtualDesktopSnapshot()'s comment.
+    , m_backgroundSnapshot(PlatformAutomation::supportsWindowTransparency()
+                                ? QPixmap()
+                                : grabVirtualDesktopSnapshot())
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     // This overlay is typically launched from inside a modal QDialog
@@ -34,11 +41,12 @@ RegionSelectorOverlay::RegionSelectorOverlay(Mode mode, const QList<QRect> &exis
     // the still-active modal session underneath (which was left the app
     // unresponsive after the overlay closed).
     setWindowModality(Qt::ApplicationModal);
-    // Deliberately NOT Qt::WA_TranslucentBackground: this window paints
-    // m_backgroundSnapshot as an opaque background instead (see paintEvent()
-    // and grabVirtualDesktopSnapshot()'s comment for why -- real
-    // window-level translucency renders as solid black on several Linux
-    // window managers with no compositor running).
+    // Qt::WA_TranslucentBackground only where PlatformAutomation::
+    // supportsWindowTransparency() says it will actually render as
+    // see-through (see its header comment) -- otherwise this window paints
+    // m_backgroundSnapshot as an opaque background instead (paintEvent()).
+    if (PlatformAutomation::supportsWindowTransparency())
+        setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setCursor(Qt::CrossCursor);
     setMouseTracking(true);
@@ -98,26 +106,18 @@ void RegionSelectorOverlay::paintEvent(QPaintEvent * /*event*/)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
+    // No-op (draws nothing) when PlatformAutomation::supportsWindowTransparency()
+    // is true: m_backgroundSnapshot is a default-constructed null QPixmap in
+    // that case (see the constructor), and the real screen shows through this
+    // window's own transparency instead -- nothing painted here can drift out
+    // of alignment with it. SPEC.md追加実装及び修正依頼 has the full history
+    // of why a captured screenshot is still used at all on platforms where
+    // real transparency isn't safe (a semi-transparent black tint and a hint
+    // text bar also used to be drawn over this background; both were removed
+    // outright as unnecessary -- the drawn rectangles below plus the
+    // Qt::CrossCursor set in the constructor are enough indication that this
+    // overlay is in region-drawing mode).
     p.drawPixmap(0, 0, m_backgroundSnapshot);
-    // SPEC.md追加実装及び修正依頼「ディスプレイが複数ありそれぞれのサイズや
-    // 縦横比が異なる場合に...黒帯表示がディスプレイの半分近くを占める...
-    // また黒帯は必要ないので表示しないようにしてください」: this used to
-    // additionally darken the whole overlay with a semi-transparent black
-    // fillRect() covering the full virtualDesktopGeometry() union rect.
-    // On a multi-monitor setup where the screens don't tile into a perfect
-    // rectangle (different sizes/aspect ratios), a large chunk of that
-    // union rect belongs to no real screen at all -- grabVirtualDesktopSnapshot()
-    // leaves those gaps genuinely solid black (nothing to grab there), and
-    // this extra tint used to sit on top of *that*, making an already
-    // possibly-large black gap area (up to roughly half the combined
-    // canvas, depending on how differently sized/positioned the screens
-    // are) look like a deliberate, disorienting black band spanning a good
-    // portion of the screen -- particularly confusing since the hint text
-    // below used to be drawn right at its top edge. Removed outright per
-    // the request rather than only reduced, since the drawn rectangles
-    // (existing regions below, the one being dragged) plus the
-    // Qt::CrossCursor already set in the constructor are enough indication
-    // that this overlay is in region-drawing mode.
     const QPoint origin = geometry().topLeft();
 
     auto drawRectList = [&](const QList<QRect> &rects, const QColor &fill, const QColor &border) {

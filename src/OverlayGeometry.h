@@ -20,11 +20,36 @@
 // logic without one silently drifting from the other.
 namespace OverlayGeometry
 {
+// Union of every screen's *available* geometry (QScreen::availableGeometry(),
+// i.e. excluding whatever strip the OS reserves for its own chrome -- the
+// menu bar/notch area and Dock on macOS, a top/bottom panel on GNOME/KDE,
+// etc.), not the screen's full physical bounds (QScreen::geometry()).
+// Deliberately *not* the full geometry: an ordinary always-on-top window
+// (Qt::Tool | Qt::WindowStaysOnTopHint, which is what RegionSelectorOverlay/
+// PointPickerOverlay/RegionHighlightOverlay all use) is not allowed to
+// actually occupy that reserved strip, so a window explicitly sized/
+// positioned to cover the *full* geometry gets silently pushed/clipped away
+// from it by the window manager -- its real on-screen position then differs
+// from the position Qt was asked for and (initially) still reports back.
+// This is what caused both the screenshot-vs-real-screen misalignment fixed
+// in SPEC.md追加実装及び修正依頼 (#51, v0.79/v0.80) and a further residual
+// "the drawn selection lands off by roughly the reserved strip's height"
+// report on a real menu-bar/panel-having desktop even after switching to
+// real transparency there (real transparency removes the *screenshot*'s own
+// misalignment, but does nothing about the window itself still being pushed
+// around by the same reserved-strip rule). Restricting these overlay
+// windows to availableGeometry() up front means the window manager never
+// needs to move/resize them away from where they were asked to be in the
+// first place -- there is no reserved-strip conflict left to trigger the
+// silent repositioning either fix was working around. The one user-visible
+// cost is that a region can no longer be drawn literally underneath the
+// menu bar/Dock/panel strip itself, which is not a real limitation in
+// practice since ordinary application content is never rendered there.
 inline QRect virtualDesktopGeometry()
 {
     QRect all;
     for (QScreen *screen : QGuiApplication::screens())
-        all = all.united(screen->geometry());
+        all = all.united(screen->availableGeometry());
     return all;
 }
 
@@ -110,10 +135,18 @@ inline QPixmap grabVirtualDesktopSnapshot()
     snapshot.fill(Qt::black);
     QPainter painter(&snapshot);
     for (QScreen *screen : QGuiApplication::screens()) {
-        const QPixmap shot = screen->grabWindow(0);
+        // Cropped to this screen's *available* area (see virtualDesktopGeometry()'s
+        // comment) so the grabbed content lines up with virtualGeom's own
+        // coordinate frame -- grabWindow(0)'s x/y/w/h are relative to this
+        // screen's own top-left, which is what screen->geometry().topLeft()
+        // is subtracted against here.
+        const QRect avail = screen->availableGeometry();
+        const QPoint availOffsetInScreen = avail.topLeft() - screen->geometry().topLeft();
+        const QPixmap shot = screen->grabWindow(0, availOffsetInScreen.x(), availOffsetInScreen.y(),
+                                                 avail.width(), avail.height());
         if (shot.isNull())
             continue;
-        painter.drawPixmap(screen->geometry().topLeft() - virtualGeom.topLeft(), shot);
+        painter.drawPixmap(avail.topLeft() - virtualGeom.topLeft(), shot);
     }
     return snapshot;
 }

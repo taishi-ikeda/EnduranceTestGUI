@@ -78,23 +78,28 @@ void openScreenRecordingSettings();
 // KDE/KWin, Wayland sessions in general, ...), false on one that doesn't (e.g.
 // this project's own bare Xvfb+openbox sandbox).
 //
-// This also sidesteps a screenshot-vs-real-screen misalignment the screenshot
-// approach has wherever the desktop reserves a panel/menu bar strip an ordinary
-// window can't be placed under (SPEC.md追加実装及び修正依頼, reported as "two
-// dialogs appear" -- #51 -- first on macOS, then confirmed to reproduce the
-// same way on Ubuntu/GNOME): these overlays size/position themselves using
-// QScreen::geometry() (the screen's full pixel bounds, panel/menu bar/Dock rows
-// included), but the real panel can't actually be drawn over by an ordinary
-// window -- so the window system may shift where the window is actually placed
-// on screen to avoid overlapping it, while the captured screenshot painted
-// inside it still starts from row 0 of the *full* screen. The frozen image the
-// user sees then drifts out of alignment with the real screen underneath by
-// roughly the panel's height, so a click aimed at something visible in the
-// (misaligned) image can land on a different real control than intended. A
-// genuinely transparent window has no captured image to misalign in the first
-// place -- mouse coordinates are simply read against whatever is really on
-// screen -- which is why this is preferred over the screenshot-based fallback
-// wherever it's safe to use, not just on macOS.
+// A screenshot-vs-real-screen misalignment used to also motivate preferring
+// this over the screenshot-based fallback (SPEC.md追加実装及び修正依頼,
+// reported as "two dialogs appear" -- #51, then as a residual "selection
+// lands off by roughly the menu bar's height" even with real transparency
+// already in use on the reporting desktop): these overlays used to size/
+// position themselves using QScreen::geometry() (the screen's full pixel
+// bounds, panel/menu bar/Dock rows included), but the real panel can't
+// actually be drawn under by an ordinary window -- so the window system
+// would shift/clip where the window was actually placed on screen to avoid
+// overlapping it, throwing off both a screenshot painted assuming row 0 of
+// the *full* screen and, independently of any screenshot, the window's own
+// on-screen bounds that its drawn rectangles' local coordinates were
+// translated against. That root cause is now fixed directly (see
+// OverlayGeometry::virtualDesktopGeometry()'s comment): these overlays are
+// restricted to QScreen::availableGeometry() up front, so the window
+// manager never needs to move/clip them away from a reserved strip they
+// were never placed on in the first place. Real transparency's remaining
+// advantage over the screenshot-based fallback is therefore just showing
+// the actual live desktop instead of a frozen frame from just before the
+// overlay opened (nothing can change out from under the user mid-selection),
+// not avoiding this specific misalignment -- which no longer depends on
+// which path is used.
 bool supportsWindowTransparency();
 
 // Enumerates on-screen, normal top-level windows owned by other running

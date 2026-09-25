@@ -20,6 +20,7 @@
 #include <atspi/atspi.h>
 #endif
 
+#include <cstdio>
 #include <errno.h>
 #include <signal.h>
 #include <unistd.h>
@@ -227,17 +228,50 @@ void openScreenRecordingSettings()
 
 bool supportsWindowTransparency()
 {
-    // Unlike macOS's WindowServer, an X11 window manager is not guaranteed to
-    // run a compositor -- a bare/minimal one (e.g. this project's own
-    // Xvfb+openbox sandbox, used for every Linux live test in SPEC.md) has
-    // none, and Qt::WA_TranslucentBackground renders as solid black there
-    // instead of blending against the real desktop (see the header comment).
-    // There is no reliable way to detect this from here (compositor presence
-    // is a runtime property of whatever WM the user happens to be running,
-    // not something queryable up front the way a permission is), so this
-    // conservatively stays false on Linux and the screenshot-based fallback
-    // is used unconditionally.
-    return false;
+    // SPEC.md追加実装及び修正依頼「現在LinuxOSでもUbuntuはメニューバーがあり、
+    // やはり実画面とスクリーンショットがずれてしまいます」: the screenshot-vs-
+    // real-screen misalignment that motivated switching to real transparency
+    // on macOS (see PlatformAutomation.h's comment) is not actually macOS-
+    // specific -- it happens on *any* desktop that reserves a panel/menu bar
+    // strip an ordinary window can't be placed under, which Ubuntu's default
+    // GNOME Shell session has too. Unconditionally returning false here (as
+    // an earlier version of this function did) avoided the "renders solid
+    // black with no compositor" failure mode, but at the cost of leaving
+    // this same misalignment unfixed on any Linux desktop -- including ones,
+    // like GNOME/Mutter or KDE/KWin, that always run a compositor and would
+    // have rendered real transparency correctly.
+    //
+    // Unlike a permission, compositor presence is directly queryable at
+    // runtime on X11 via the standard EWMH/ICCCM convention: a running
+    // compositing manager owns a well-known selection named
+    // "_NET_WM_CM_S<screen number>" (see e.g. the Extended Window Manager
+    // Hints spec's "Compositing Managers" section). If nothing owns it,
+    // there is no compositor, and Qt::WA_TranslucentBackground would render
+    // as solid black instead of blending against the real desktop -- so the
+    // screenshot-based fallback is kept for exactly that case (e.g. this
+    // project's own bare Xvfb+openbox sandbox, used for every Linux live
+    // test in SPEC.md, which has no separate compositor running and is
+    // confirmed by this same check to report false).
+    //
+    // On Wayland there is no separate "no compositor" case to detect in the
+    // first place -- the compositor *is* the display server -- so this
+    // returns true immediately without the X11-specific query below.
+    if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland")))
+        return true;
+
+    Display *dpy = display();
+    if (!dpy)
+        return false;
+    char atomName[32];
+    std::snprintf(atomName, sizeof(atomName), "_NET_WM_CM_S%d", DefaultScreen(dpy));
+    // False (don't auto-create): if the atom has never been interned, no
+    // compositor has ever announced itself on this display, so there is
+    // nothing to look up -- an absent atom and an atom with no selection
+    // owner both mean "no compositor" here.
+    const Atom compositorManagerAtom = XInternAtom(dpy, atomName, False);
+    if (compositorManagerAtom == None)
+        return false;
+    return XGetSelectionOwner(dpy, compositorManagerAtom) != None;
 }
 
 QList<WindowInfo> listWindows()

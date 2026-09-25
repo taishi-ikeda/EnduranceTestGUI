@@ -1,5 +1,4 @@
 #include "PointPickerOverlay.h"
-#include "I18n.h"
 #include "OverlayGeometry.h"
 
 #include <QEventLoop>
@@ -75,13 +74,16 @@ void PointPickerOverlay::paintEvent(QPaintEvent * /*event*/)
     p.setRenderHint(QPainter::Antialiasing, true);
 
     p.drawPixmap(0, 0, m_backgroundSnapshot);
-    p.fillRect(rect(), QColor(0, 0, 0, 70));
-
-    p.setPen(Qt::white);
-    p.setFont(QFont(font().family(), 14, QFont::Bold));
-    const QString hint =
-        I18n::t(QStringLiteral("クリックした位置を座標として使用します  ―  Esc でキャンセル"));
-    p.drawText(QRect(20, 16, width() - 40, 30), Qt::AlignLeft | Qt::AlignVCenter, hint);
+    // The full-screen semi-transparent dark tint and hint text bar this
+    // used to draw here (mirroring RegionSelectorOverlay's, until the same
+    // multi-monitor "黒帯" fix was applied there -- see its paintEvent()'s
+    // comment) were removed for the same reason: on screens of very
+    // different sizes/aspect ratios, the gap left uncovered by any real
+    // screen within virtualDesktopGeometry()'s union rect can be large, and
+    // this extra tint made that gap look like an oversized, disorienting
+    // black band rather than just an unreachable corner. Qt::CrossCursor
+    // (set in the constructor) already signals that this overlay is in
+    // point-picking mode.
 }
 
 void PointPickerOverlay::mousePressEvent(QMouseEvent *event)

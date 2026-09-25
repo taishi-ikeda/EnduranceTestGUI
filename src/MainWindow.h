@@ -444,6 +444,16 @@ private:
     InputRecorder *m_inputRecorder = nullptr;
     QPointer<RecordingIndicatorPanel> m_recordingPanel;
     int m_recordedActionCount = 0;
+    // SPEC.md追加実装及び修正依頼「起動時セットアップの記録機能において、
+    // 操作の間の時間間隔を記憶して、再生時に同じ間隔で操作を再現するように
+    // してください」: measures the real wall-clock gap between consecutive
+    // recorded actions (restarted every time one arrives -- see
+    // onSetupActionRecorded()) so it can be inserted as an explicit Wait
+    // SetupAction ahead of the next one, reusing Wait's existing playback
+    // behavior (RandomActionEngine::performSetupAction() already honors a
+    // Wait action's own waitMs verbatim in place of the usual randomized
+    // inter-action delay) instead of adding a separate timing mechanism.
+    QElapsedTimer m_lastRecordedActionTimer;
     // SPEC.md 6.13追加実装及び修正依頼「起動時セットアップを実行する機能が
     // 欲しい」: runs just m_setupActions (via RandomActionEngine::
     // startSetupOnly()) so it can be verified independently of ②の

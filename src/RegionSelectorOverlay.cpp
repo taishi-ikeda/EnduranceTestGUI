@@ -1,5 +1,4 @@
 #include "RegionSelectorOverlay.h"
-#include "I18n.h"
 #include "OverlayGeometry.h"
 
 #include <QApplication>
@@ -100,8 +99,25 @@ void RegionSelectorOverlay::paintEvent(QPaintEvent * /*event*/)
     p.setRenderHint(QPainter::Antialiasing, true);
 
     p.drawPixmap(0, 0, m_backgroundSnapshot);
-    p.fillRect(rect(), QColor(0, 0, 0, 70));
-
+    // SPEC.md追加実装及び修正依頼「ディスプレイが複数ありそれぞれのサイズや
+    // 縦横比が異なる場合に...黒帯表示がディスプレイの半分近くを占める...
+    // また黒帯は必要ないので表示しないようにしてください」: this used to
+    // additionally darken the whole overlay with a semi-transparent black
+    // fillRect() covering the full virtualDesktopGeometry() union rect.
+    // On a multi-monitor setup where the screens don't tile into a perfect
+    // rectangle (different sizes/aspect ratios), a large chunk of that
+    // union rect belongs to no real screen at all -- grabVirtualDesktopSnapshot()
+    // leaves those gaps genuinely solid black (nothing to grab there), and
+    // this extra tint used to sit on top of *that*, making an already
+    // possibly-large black gap area (up to roughly half the combined
+    // canvas, depending on how differently sized/positioned the screens
+    // are) look like a deliberate, disorienting black band spanning a good
+    // portion of the screen -- particularly confusing since the hint text
+    // below used to be drawn right at its top edge. Removed outright per
+    // the request rather than only reduced, since the drawn rectangles
+    // (existing regions below, the one being dragged) plus the
+    // Qt::CrossCursor already set in the constructor are enough indication
+    // that this overlay is in region-drawing mode.
     const QPoint origin = geometry().topLeft();
 
     auto drawRectList = [&](const QList<QRect> &rects, const QColor &fill, const QColor &border) {
@@ -127,14 +143,9 @@ void RegionSelectorOverlay::paintEvent(QPaintEvent * /*event*/)
         p.setBrush(newFill);
         p.drawRect(local);
     }
-
-    p.setPen(Qt::white);
-    p.setFont(QFont(font().family(), 14, QFont::Bold));
-    const QString modeLabel =
-        (m_mode == Mode::Include) ? I18n::t(QStringLiteral("含める領域を選択中")) : I18n::t(QStringLiteral("除外(マスク)領域を選択中"));
-    const QString hint = I18n::t(QStringLiteral("%1  ―  ドラッグで矩形を追加（複数可） / Enter または右クリックで確定 / Esc でキャンセル"))
-                              .arg(modeLabel);
-    p.drawText(QRect(20, 16, width() - 40, 30), Qt::AlignLeft | Qt::AlignVCenter, hint);
+    // The "含める領域を選択中 ― ドラッグで矩形を追加..." hint text bar (and
+    // the full-screen dark tint it used to sit on) was removed here per
+    // the request above -- see the comment earlier in this function.
 }
 
 void RegionSelectorOverlay::mousePressEvent(QMouseEvent *event)

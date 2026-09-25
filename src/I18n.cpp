@@ -214,7 +214,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("名前:"), QStringLiteral("Name:")},
         {QStringLiteral("名前を入力してください。"), QStringLiteral("Please enter a name.")},
         {QStringLiteral("名前付きキーも候補に含める:"), QStringLiteral("Also include named keys as candidates:")},
-        {QStringLiteral("含める領域を選択中"), QStringLiteral("Selecting Include Region")},
         {QStringLiteral("回/秒"), QStringLiteral("/sec")},
         {QStringLiteral("回数/秒指定"), QStringLiteral("Specify actions/sec")},
         {QStringLiteral("回数制限に達したため停止しました"), QStringLiteral("Stopped because the action-count limit was reached")},
@@ -327,7 +326,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("録画フレームの保存先作成に失敗しました: %1"),
          QStringLiteral("Failed to create the save location for recording frames: %1")},
         {QStringLiteral("除外"), QStringLiteral("Exclude")},
-        {QStringLiteral("除外(マスク)領域を選択中"), QStringLiteral("Selecting Exclude (Mask) Region")},
         {QStringLiteral("除外矩形を描画..."), QStringLiteral("Draw Exclude Rectangle...")},
         {QStringLiteral("項目名で指定"), QStringLiteral("Specify by item name")},
         {QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行"),
@@ -407,7 +405,6 @@ const QHash<QString, QString> &translationTable()
                                     "パネルでこのステップを選択して設定します。"), QStringLiteral("Please select the region this step will operate on.\nThe action types, weights, counts, and detailed parameters are set afterward by selecting this step in the ③ Action Parameters panel.")},
         {QStringLiteral("②で新しくステップを追加したときの初期値です。既存のステップには"
                         "影響しません。"), QStringLiteral("These are the initial values used when a new step is added in ②. They do not affect existing steps.")},
-        {QStringLiteral("%1  ―  ドラッグで矩形を追加（複数可） / Enter または右クリックで確定 / Esc でキャンセル"), QStringLiteral("%1  ―  Drag to add a rectangle (multiple allowed) / Enter or right-click to confirm / Esc to cancel")},
 
         // SPEC.md 10 ③④⑤: crash-rate statistics (TestStatistics/StatisticsDialog).
         {QStringLiteral("直近の操作（古い順、確率的な不具合の解析用）:"), QStringLiteral("Recent actions (oldest first, for diagnosing probabilistic bugs):")},
@@ -493,8 +490,6 @@ const QHash<QString, QString> &translationTable()
 
         // 起動時セットアップ ("startup setup macro" -- SPEC.md 6.x): PointPickerOverlay,
         // SetupActionEditorDialog, RandomActionEngine's setup phase, MainWindow's ① UI.
-        {QStringLiteral("クリックした位置を座標として使用します  ―  Esc でキャンセル"),
-         QStringLiteral("The point you click will be used as the coordinate  ―  Esc to cancel")},
         {QStringLiteral("起動時セットアップ操作の設定"), QStringLiteral("Startup Setup Action Settings")},
         {QStringLiteral("種類:"), QStringLiteral("Type:")},
         {QStringLiteral("文字入力"), QStringLiteral("Text Input")},
@@ -655,6 +650,9 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("● 記録中... (Escで終了)"), QStringLiteral("● Recording... (Escape to stop)")},
         {QStringLiteral("記録件数: %1"), QStringLiteral("Actions recorded: %1")},
         {QStringLiteral("■ 記録終了"), QStringLiteral("■ Stop Recording")},
+
+        // v0.77: 記録機能で操作間の時間間隔も記録し、待機として再生
+        {QStringLiteral("記録された間隔"), QStringLiteral("Recorded gap")},
 
         // v0.61: ステップ構成「タスク」機能 (TaskEditorDialog)
         {QStringLiteral("タスク化"), QStringLiteral("Task")},

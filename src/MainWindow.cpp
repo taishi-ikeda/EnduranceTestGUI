@@ -1520,6 +1520,12 @@ void MainWindow::onRecordSetupActions()
     }
 
     m_recordedActionCount = 0;
+    // Restarted every time a recorded action actually arrives (see
+    // onSetupActionRecorded()) -- started here too so the very first
+    // recorded action has a valid elapsed() to read, even though that
+    // particular gap (recording-start to first action) is deliberately not
+    // turned into a Wait (see onSetupActionRecorded()'s own comment).
+    m_lastRecordedActionTimer.start();
     setControlsEnabled(false);
     m_statusLabel->setText(I18n::t(QStringLiteral("記録中")));
 
@@ -1541,6 +1547,24 @@ void MainWindow::onSetupActionRecorded(SetupActionType type, QPoint point, QPoin
         appendLog(I18n::t(QStringLiteral("記録: 対象ウィンドウが見つからないため、この操作は記録されません"
                                           "でした")));
         return;
+    }
+
+    // SPEC.md追加実装及び修正依頼「記録の間の時間間隔を記憶して、再生時に
+    // 同じ間隔で操作を再現するように」: the real gap since the previous
+    // recorded action (or since recording started, for the first one --
+    // deliberately not turned into a Wait below, since there is no prior
+    // *action* to have paced against yet) becomes an explicit Wait
+    // SetupAction inserted just ahead of the one about to be appended, so
+    // RandomActionEngine::performSetupAction() reproduces it verbatim the
+    // same way it already honors any other Wait's waitMs.
+    const qint64 gapMs = m_lastRecordedActionTimer.isValid() ? m_lastRecordedActionTimer.elapsed() : 0;
+    m_lastRecordedActionTimer.restart();
+    if (m_recordedActionCount > 0 && gapMs > 0) {
+        SetupAction waitAction;
+        waitAction.type = SetupActionType::Wait;
+        waitAction.waitMs = int(gapMs);
+        waitAction.label = I18n::t(QStringLiteral("記録された間隔"));
+        m_setupActions.append(waitAction);
     }
 
     SetupAction action;

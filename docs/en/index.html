@@ -278,8 +278,7 @@
       <li><a href="#layout">Screen layout</a></li>
       <li><a href="#target">① Selecting the target app</a></li>
       <li><a href="#setup">Startup setup (running login etc. automatically, once)</a></li>
-      <li><a href="#steps">② Creating steps</a></li>
-      <li><a href="#params">③ Configuring action parameters</a></li>
+      <li><a href="#steps">② Creating steps (including action parameters)</a></li>
       <li><a href="#timing">Timing / limits &amp; automatic anomaly recording</a></li>
       <li><a href="#run">Starting and stopping a run</a></li>
       <li><a href="#crash">Crash detection &amp; re-testing</a></li>
@@ -325,19 +324,19 @@
     <p>The window is divided into three vertical sections.</p>
     <ul>
       <li><strong>① Target Selection</strong> (top): choosing the app under test, registering operation regions, and timing/limits settings</li>
-      <li><strong>② Steps / ③ Action Parameters</strong> (middle, split left/right): the order and content of the actions to run</li>
+      <li><strong>② Steps</strong> (middle): the order of the actions to run. Each step's region, action types, count, and detailed parameters are all configured together in a dialog opened by double-clicking (or "Edit...") its row in the list</li>
       <li><strong>Run controls / Log</strong> (bottom): start/stop buttons, run status, and the log</li>
     </ul>
     <figure>
-      <img src="images/01_overview.png" alt="EnduranceTestGUI's full main window, showing the three vertical sections: Target Selection at top, Steps/Action Parameters in the middle, and the Log at the bottom.">
-      <figcaption>Figure 1: The full main window (the ①②③ three-section layout)</figcaption>
+      <img src="images/01_overview.png" alt="EnduranceTestGUI's full main window, showing the two vertical sections: Target Selection at top, Steps in the middle, and the Log at the bottom.">
+      <figcaption>Figure 1: The full main window (the ①② two-section layout; the ③ Action Parameters panel from earlier versions has been folded into ②'s "Edit..." dialog)</figcaption>
     </figure>
   </section>
 
   <section id="target">
     <h2><span class="num">4</span>① Selecting the target app</h2>
     <p>Choose the window you want to test from the "Target" dropdown. If it doesn't appear in the list, click "Update" to re-scan. Once selected, whether EnduranceTestGUI has permission to operate that app is shown in green (granted) or red (not granted); if not granted, "Open Permission Settings" opens the relevant OS settings screen. Below that, macOS's Screen Recording permission status is shown the same way (always "granted" on Linux). Without it, the operation-region selection screen's background appears solid black, making other apps look invisible, so use "Open Screen Recording Settings" if it shows red.</p>
-    <p>Setting a path in "Target app auto-launch command (optional)" lets you try launching it manually at any time with "Launch now", and is also used by the continuous-run features described in <a href="#run">"⑨ Starting and stopping the test"</a>. Checking "Launch the target tool with this command before starting" makes "▶ Start" launch the target app with this command first, wait for it to appear, and only then begin the startup setup and step sequence (the auto-launch command must be set when this is checked). Setting "Extra wait after target launch is detected" above 0 seconds waits that many extra seconds, after the target tool's window is detected, before actually starting the test. Use this for a tool that isn't ready to receive input right at launch, where starting immediately would otherwise fail the safety check (applies to continuous run, the automatic-relaunch wait, and the option above alike).</p>
+    <p>Setting a path in "Target app auto-launch command (optional)" lets you try launching it manually at any time with "Launch now", and is also used by the continuous-run features described in <a href="#run">"⑧ Starting and stopping the test"</a>. Checking "Launch the target tool with this command before starting" makes "▶ Start" launch the target app with this command first, wait for it to appear, and only then begin the startup setup and step sequence (the auto-launch command must be set when this is checked). Setting "Extra wait after target launch is detected" above 0 seconds waits that many extra seconds, after the target tool's window is detected, before actually starting the test. Use this for a tool that isn't ready to receive input right at launch, where starting immediately would otherwise fail the safety check (applies to continuous run, the automatic-relaunch wait, and the option above alike).</p>
     <p>"Save current window size" records the size of the currently selected target window (just one at a time; it's also saved in the preset JSON, so it survives restarting the app). "Restore saved size" changes the currently selected target window to that saved size. If the requested size is smaller than the target app's own layout minimum, the actual size it ends up with may be rounded up. Likewise, "Save current window position" / "Restore saved position" save and restore the target window's on-screen position, one value at a time. Checking "Apply the saved window position/size on each continuous-run relaunch" automatically applies whichever of the saved size/position are set every time the target app is (re)launched and detected, before the run starts (applies alike to 連続実行's kill-then-relaunch cycle, the auto/manual relaunch wait for "continuous run count", and the "launch before starting" option).</p>
     <div class="callout tip">
       <div class="title">About operation regions</div>
@@ -362,30 +361,20 @@
   </section>
 
   <section id="steps">
-    <h2><span class="num">6</span>② Creating steps</h2>
+    <h2><span class="num">6</span>② Creating steps (including action parameters)</h2>
     <p>A test is made up of one or more "steps" that run in order, repeating.</p>
-    <p><span class="step-num">1</span>Clicking "Add..." opens a small dialog for choosing which region this step will operate on. Choose either "Entire target GUI area (auto-follows)" or one of the named operation regions registered in ①, then click "OK".</p>
+    <p><span class="step-num">1</span>Clicking "Add..." opens this step's settings dialog. First choose which region it will operate on: either "Entire target GUI area (auto-follows)" or one of the named operation regions registered in ①.</p>
     <figure>
-      <img src="images/02_step_region_dialog.png" alt="The step-region selection dialog, offering a choice between 'Entire target GUI area (auto-follows)' and a registered operation region.">
-      <figcaption>Figure 2: The operation-region selection dialog shown when adding a step</figcaption>
+      <img src="images/02_step_region_dialog.png" alt="The step settings dialog, offering a choice of operating region ('Entire target GUI area (auto-follows)' or a registered operation region) as well as the action types, weights, action count, and detailed action settings, all within this one dialog.">
+      <figcaption>Figure 2: The step settings dialog. Besides choosing the operating region, this single dialog also covers which action types to enable (Click, Double-click, Drag, Key Input, Scroll, Shortcut Key, Window Operation — for a "target a newly appeared window" task member, "Press dialog button" replaces Window Operation), each one's weight (higher means more likely to be picked) and the step's action count, plus — via a "Use default / Custom" toggle — detailed settings such as click/drag distance, which characters to use for key input, and scroll amount</figcaption>
     </figure>
-    <p><span class="step-num">2</span>The step is added to the list and automatically selected. Its action types aren't decided yet at this point — that's configured next, in "③ Action Parameters".</p>
+    <p><span class="step-num">2</span>Clicking "OK" adds the step to the list and selects it automatically. To change its settings later, either <strong>double-click</strong> its row in the list, or select it and click "Edit..." — either way reopens the same dialog. The shared initial values (defaults) used for newly created steps can be edited at any time via the "Default" button in ②'s header row, even with no step selected.</p>
     <p>Steps can be reordered within the list with "Move Up"/"Move Down", or multi-selected and combined into a single group with "Group" (members within a group are picked at random according to their weight). Multi-selecting and using "Task" combines steps the same way, but unlike a group, a task always runs every combined step exactly once, in the order they were added, and the whole run counts as a single "run count" — use this when you have a sequence of actions that must not be randomly reordered. For either a group or a task, selecting it and pressing "Ungroup"/"Untask" splits it back into its original individual steps. "Add Wait..." lets you insert a "wait step" that does nothing for a specified number of milliseconds.</p>
-    <p>The region-selection dialog shown when adding or editing a task's actions also offers "Target a newly appeared window (dialog, etc.) (auto-detected)". An action using this option operates on whichever window newly appeared besides the target app's main window — e.g. a confirmation dialog opened by a preceding action's context-menu selection — instead of any of the usual named/whole-window regions. If no such window has appeared yet when it's this action's turn to run, it automatically waits until one does. For this "target a newly appeared window" task member, the ③ Action Parameters panel also offers a "Press dialog button" action type. Register a list of candidate button names (e.g. "OK", "Yes") ahead of time, and at run time it searches that dialog for whichever of those names is actually present and clicks it (the same mechanism as context-menu item selection). If none of the candidates can be found, that attempt is skipped and retried on the next opportunity.</p>
-  </section>
-
-  <section id="params">
-    <h2><span class="num">7</span>③ Configuring action parameters</h2>
-    <p>Selecting a step in ② shows its settings in the ③ panel. Check the action types you want to enable (Click, Double-click, Drag, Key Input, Scroll, Shortcut Key, Window Operation — for a "target a newly appeared window" task member, "Press dialog button" replaces Window Operation), and specify how many actions to run for that step (Action count) and how likely each type is to be picked (Weight — higher means more likely).</p>
-    <figure>
-      <img src="images/03_step_added_params.png" alt="The Action Parameters panel right after a step is added, with Click and Left checked and Action count set to 50.">
-      <figcaption>Figure 3: The ③ Action Parameters panel right after creating a step (Click / Left are enabled by default)</figcaption>
-    </figure>
-    <p>Detailed settings for each action — click/drag distance and direction, which characters to use for key input, scroll amount, and so on — are also available further down the same panel. The "Default" button in ① lets you edit the shared initial values used for newly created steps.</p>
+    <p>The region-selection dialog shown when adding or editing a task's actions also offers "Target a newly appeared window (dialog, etc.) (auto-detected)". An action using this option operates on whichever window newly appeared besides the target app's main window — e.g. a confirmation dialog opened by a preceding action's context-menu selection — instead of any of the usual named/whole-window regions. If no such window has appeared yet when it's this action's turn to run, it automatically waits until one does. For this "target a newly appeared window" task member, the detailed action settings also offer a "Press dialog button" action type. Register a list of candidate button names (e.g. "OK", "Yes") ahead of time, and at run time it searches that dialog for whichever of those names is actually present and clicks it (the same mechanism as context-menu item selection). If none of the candidates can be found, that attempt is skipped and retried on the next opportunity.</p>
   </section>
 
   <section id="timing">
-    <h2><span class="num">8</span>Timing / limits &amp; automatic anomaly recording</h2>
+    <h2><span class="num">7</span>Timing / limits &amp; automatic anomaly recording</h2>
     <p>The "Timing / Limits" area of panel ① sets the interval between actions (ms, or actions/sec), the max action count, max run time, and repeat count for the whole step sequence (all three are required — unlimited isn't an option), the RNG seed, and more. Scrolling down reveals the following additional settings.</p>
     <figure>
       <img src="images/04_timing_limits.png" alt="The Timing/Limits panel scrolled down, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording and collecting crash dumps on an abnormal stop.">
@@ -402,7 +391,7 @@
   </section>
 
   <section id="run">
-    <h2><span class="num">9</span>Starting and stopping a run</h2>
+    <h2><span class="num">8</span>Starting and stopping a run</h2>
     <p>Once configured, click "▶ Start" to begin the run. While it's running, an always-on-top floating panel appears in the upper right (showing the action count and a "■ Stop (STOP)" button), so you can stop it immediately even if focus has moved to the target app. "‖ Pause" lets you pause and resume as well.</p>
     <p>Setting "Repeat count" to 2 or more and clicking "▶ Start" automatically begins the next run (waiting for the target app to relaunch) each time one finishes, repeating that many times. If the target app is still alive when a run ends it's reused as-is; if it has gone, the next run starts once the auto-launch command (①) restarts it, or once a manual relaunch is detected. Separately, the "⟳ Continuous run" button always terminates the target app first — whether or not it's currently running — before launching a fresh instance and running the startup setup and step sequence, repeating that kill-then-relaunch cycle for "Repeat count" cycles. Use it when you want every run to start from a genuinely clean instance (the auto-launch command in ① is required for this button). Either mode can be interrupted at any time with "■ Stop".</p>
     <figure>
@@ -422,7 +411,7 @@
   </section>
 
   <section id="crash">
-    <h2><span class="num">10</span>Crash detection &amp; re-testing</h2>
+    <h2><span class="num">9</span>Crash detection &amp; re-testing</h2>
     <p>When the target app's process is detected as gone, the run stops immediately and a dialog like the following appears.</p>
     <figure>
       <img src="images/06_crash_dialog.png" alt="A dialog titled 'Target App Crash Detected', showing which step was running when it was detected, the action count, and the RNG seed, and noting that records have been saved automatically.">
@@ -436,12 +425,12 @@
   </section>
 
   <section id="preset">
-    <h2><span class="num">11</span>Saving &amp; loading test settings</h2>
-    <p>"Save Test Settings..." in the "File" menu saves the operation regions, step configuration, and timing settings assembled in ①②③ together into a JSON file. "Load Test Settings..." loads it back and, if the app it was targeting when saved is currently running, automatically selects it again (otherwise a message prompts you to pick it manually). This lets the same configuration be reused across sessions or across different builds, without rebuilding it from scratch each time.</p>
+    <h2><span class="num">10</span>Saving &amp; loading test settings</h2>
+    <p>"Save Test Settings..." in the "File" menu saves the operation regions, step configuration, and timing settings assembled in ①② together into a JSON file. "Load Test Settings..." loads it back and, if the app it was targeting when saved is currently running, automatically selects it again (otherwise a message prompts you to pick it manually). This lets the same configuration be reused across sessions or across different builds, without rebuilding it from scratch each time.</p>
   </section>
 
   <section id="lang">
-    <h2><span class="num">12</span>Switching the display language</h2>
+    <h2><span class="num">11</span>Switching the display language</h2>
     <p>Choose "日本語" or "English" from the "言語 / Language" menu in the menu bar. Your choice is saved and takes effect <strong>from the next launch onward</strong> (the currently running window doesn't switch live).</p>
     <figure>
       <img src="images/07_language_menu.png" alt="The 'Language' menu open in the menu bar, showing two options: Japanese and English.">
@@ -450,7 +439,7 @@
   </section>
 
   <section id="faq">
-    <h2><span class="num">13</span>Troubleshooting</h2>
+    <h2><span class="num">12</span>Troubleshooting</h2>
     <h3>Clicking "Start" fails with a safety-check error</h3>
     <p>Check that the target window isn't covered by another window and isn't minimized. If that doesn't help, some environments (particularly certain tiling window managers on Linux) don't support the mechanism used to confirm the target app can be operated safely at all.</p>
     <h3>The target app doesn't appear in the window list</h3>
@@ -460,7 +449,7 @@
   </section>
 
   <section id="license">
-    <h2><span class="num">14</span>Licensing</h2>
+    <h2><span class="num">13</span>Licensing</h2>
     <p>EnduranceTestGUI's own source code is released under the <strong>MIT License</strong> (see <code>LICENSE</code> at the repository root). The app uses Qt (the Widgets module); the free-software edition of Qt is distributed under the GNU LGPL version 3 (some modules under the GPL). You can always check exactly which license the Qt build in use is distributed under from "Help" → "About Qt..." inside the app itself. For details on the other dynamically linked libraries, see <code>THIRD_PARTY_NOTICES.md</code> at the repository root.</p>
   </section>
 

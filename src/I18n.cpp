@@ -51,7 +51,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("② ステップ構成"), QStringLiteral("② Steps")},
         {QStringLiteral("②で「デフォルトを使う」になっているすべてのステップに適用されます。"),
          QStringLiteral("Applies to every step in ② that is set to \"Use default\".")},
-        {QStringLiteral("③ 操作パラメータ"), QStringLiteral("③ Action Parameters")},
         {QStringLiteral("■ 停止 (STOP)"), QStringLiteral("■ Stop (STOP)")},
         {QStringLiteral("■ 停止"), QStringLiteral("■ Stop")},
         {QStringLiteral("▶ 再開"), QStringLiteral("▶ Resume")},
@@ -61,8 +60,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("✗ 権限が必要です（下のボタンから設定を開いてください）"),
          QStringLiteral("✗ Permission required (open settings via the button below)")},
         {QStringLiteral("〜"), QStringLiteral(" - ")},
-        {QStringLiteral("このステップの操作種別・重み・回数（②でステップを選択すると編集できます）"),
-         QStringLiteral("This step's action types, weights, and counts (editable by selecting a step in ②)")},
+        {QStringLiteral("このステップの操作種別・重み・回数"),
+         QStringLiteral("This step's action types, weights, and count")},
         {QStringLiteral("このステップ専用の設定を使う"), QStringLiteral("Use settings specific to this step")},
         {QStringLiteral("この操作領域内でクリックしたくない除外(マスク)矩形があれば指定してください（任意、複数可）:"),
          QStringLiteral("Specify any exclude (mask) rectangles within this region you don't want clicked (optional, multiple allowed):")},
@@ -117,11 +116,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("スクロール（上）"), QStringLiteral("Scroll (Up)")},
         {QStringLiteral("スクロール（下）"), QStringLiteral("Scroll (Down)")},
         {QStringLiteral("スクロール（横）"), QStringLiteral("Scroll (Horizontal)")},
-        {QStringLiteral("ステップ %1 の操作種別・詳細設定を編集中"), QStringLiteral("Editing action types/details for Step %1")},
-        {QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください"),
-         QStringLiteral("Step %1 is a group. Configure its members via \"Edit...\"")},
-        {QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）"),
-         QStringLiteral("Step %1 is a wait step (no action parameters)")},
         {QStringLiteral("ステップ %1 へ移行します"), QStringLiteral("Moving to step %1")},
         {QStringLiteral("ステップ %1"), QStringLiteral("Step %1")},
         {QStringLiteral("ステップ %1: %2 ms 待機します"), QStringLiteral("Step %1: waiting %2 ms")},
@@ -135,6 +129,7 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ステップが変わるたび"), QStringLiteral("Every time the step changes")},
         {QStringLiteral("ステップが設定されていません"), QStringLiteral("No step is configured")},
         {QStringLiteral("ステップの操作領域を選択"), QStringLiteral("Select the Step's Operation Region")},
+        {QStringLiteral("ステップの設定"), QStringLiteral("Step Settings")},
         {QStringLiteral("ステップの設定エラー"), QStringLiteral("Step Configuration Error")},
         {QStringLiteral("ステップを最低1つ追加してください。"), QStringLiteral("Please add at least one step.")},
         {QStringLiteral("ステップ全体（シーケンス）の繰り返し回数（必須）:"),
@@ -159,7 +154,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("デフォルトの操作種別・重み・回数"), QStringLiteral("Default Action Types, Weights, and Counts")},
         {QStringLiteral("デフォルトの操作設定"), QStringLiteral("Default Action Settings")},
         {QStringLiteral("デフォルトを使う"), QStringLiteral("Use default")},
-        {QStringLiteral("デフォルト値を編集中（ステップ未選択）"), QStringLiteral("Editing default values (no step selected)")},
         {QStringLiteral("ドラッグ (%1, %2) → (%3, %4)"), QStringLiteral("Drag (%1, %2) → (%3, %4)")},
         {QStringLiteral("ドラッグ"), QStringLiteral("Drag")},
         {QStringLiteral("ドラッグ方向:"), QStringLiteral("Drag direction:")},
@@ -202,8 +196,10 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("停止: %1"), QStringLiteral("Stopped: %1")},
         {QStringLiteral("停止理由: %1%2"), QStringLiteral("Stop reason: %1%2")},
         {QStringLiteral("入力エラー"), QStringLiteral("Input Error")},
-        {QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します（②の選択は変わりません）"),
-         QStringLiteral("Edit the shared default action parameters in a dialog (the selection in ② is unchanged)")},
+        {QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します"
+                                "（新しいステップの初期値、および「デフォルトを使う」ステップに反映されます）"),
+         QStringLiteral("Edit the shared default action parameters in a dialog (applied to new steps' "
+                                "initial values, and to any step set to \"Use default\")")},
         {QStringLiteral("再開しました"), QStringLiteral("Resumed")},
         {QStringLiteral("削除"), QStringLiteral("Delete")},
         {QStringLiteral("削除できません"), QStringLiteral("Cannot Delete")},
@@ -350,8 +346,8 @@ const QHash<QString, QString> &translationTable()
                         "見つからなくても実行には影響しません。"), QStringLiteral("If a crash report/core dump that appears to belong to the target app is found on the system, its path is included in the abnormal-stop log and record set. Not finding one has no effect on the run.")},
         {QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
                             "先にそれらのステップの領域を変更するか、ステップを削除してください。"), QStringLiteral("This operation region cannot be deleted because it is used by the following steps: %1\nPlease change those steps' region or delete the steps first.")},
-        {QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
-            "パネルで操作種別を1つ以上有効にしてください。"), QStringLiteral("%1 has no action type selected. Select this step in ② and enable at least one action type in the ③ Action Parameters panel.")},
+        {QStringLiteral("%1は操作種別が選択されていません。②でこのステップの「編集...」を開き、"
+            "操作種別を1つ以上有効にしてください。"), QStringLiteral("%1 has no action type selected. Open this step's \"Edit...\" in ② and enable at least one action type.")},
         {QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
                                         "（デフォルトまたはそのステップの専用設定）。"), QStringLiteral("%1 has key input enabled. Please specify characters to use (in the default or that step's own settings).")},
         {QStringLiteral("ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
@@ -395,14 +391,18 @@ const QHash<QString, QString> &translationTable()
                         "1操作ずつ実行され、この回数に達すると次のステップへ進みます）:"), QStringLiteral("Total call count for the whole group (each time, a randomly chosen member\nexecutes one action; once this count is reached, it moves to the next step):")},
         {QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには①対象選択の"
                         "「デフォルト」ボタンを使ってください。"), QStringLiteral("* When \"Use default\" is selected, these values are shown for reference only. To change them, use the \"Default\" button in ① Target Selection.")},
+        {QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには②の"
+                        "「デフォルト」ボタンを使ってください。"), QStringLiteral("* When \"Use default\" is selected, these values are shown for reference only. To change them, use the \"Default\" button in ②.")},
         {QStringLiteral("候補の番号（上から何番目か、1始まり）。開いたメニューの項目数に収まるものの中からランダムに1つ選択。"
             "無ければメニューを閉じる。※メニューの項目数や並びが状況によって変わる場合、意図しない項目を"
             "選んでしまう可能性があるため注意（項目名指定の方が安全）:"), QStringLiteral("Candidate positions (from the top, 1-based). One is chosen at random from those that fit within the opened menu's item count. The menu is closed if none fit. Note: if the menu's item count or order can vary, this may pick an unintended item (specifying by item name is safer):")},
         {QStringLiteral("対象ウィンドウが選択されていないため、今は変更できません"
                                      "（既存の設定はそのまま保持されます）。"), QStringLiteral("Cannot change this right now because no target window is selected (the existing setting is kept as-is).")},
         {QStringLiteral("このステップで操作する領域を選択してください。\n"
-                                    "操作の種類・重み・回数や詳細パラメータは、追加後に③操作パラメータ"
-                                    "パネルでこのステップを選択して設定します。"), QStringLiteral("Please select the region this step will operate on.\nThe action types, weights, counts, and detailed parameters are set afterward by selecting this step in the ③ Action Parameters panel.")},
+                                    "操作の種類・重み・回数や詳細パラメータは、追加後にメンバー一覧で"
+                                    "この項目を選択して設定します。"), QStringLiteral("Please select the region this step will operate on.\nThe action types, weights, counts, and detailed parameters are set afterward by selecting this item in the member list.")},
+        {QStringLiteral("このステップで操作する領域と、操作の種類・重み・回数、"
+                                      "詳細パラメータを設定してください。"), QStringLiteral("Set the region this step operates on, along with its action types, weights, counts, and detailed parameters.")},
         {QStringLiteral("②で新しくステップを追加したときの初期値です。既存のステップには"
                         "影響しません。"), QStringLiteral("These are the initial values used when a new step is added in ②. They do not affect existing steps.")},
 
@@ -672,8 +672,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("%1: %2 | 操作: %3"), QStringLiteral("%1: %2 | Action: %3")},
         {QStringLiteral("%1ステップ%2: タスク（%3個の操作を順番に実行）%4"),
          QStringLiteral("%1Step%2: Task (%3 actions, run in order)%4")},
-        {QStringLiteral("ステップ %1 はタスクです。「編集...」から操作を設定してください"),
-         QStringLiteral("Step %1 is a task. Configure its actions via \"Edit...\"")},
         {QStringLiteral("ステップ %1（タスク内操作 %2/%3）"), QStringLiteral("Step %1 (task action %2/%3)")},
         {QStringLiteral("ステップ %1（タスク）にステップが登録されていません"),
          QStringLiteral("Step %1 (task) has no actions registered")},
@@ -777,11 +775,11 @@ const QHash<QString, QString> &translationTable()
         // v0.70: タスク内ダイアログ操作を「ダイアログのボタンを押す」に拡張
         {QStringLiteral("ダイアログのボタンを押す"), QStringLiteral("Press dialog button")},
         {QStringLiteral("このステップ（タスク内のメンバー）が「新しく出現したダイアログ（自動検出）」"
-                        "を操作対象にしている場合のみ有効です。③操作パラメータの「ダイアログの"
+                        "を操作対象にしている場合のみ有効です。操作の詳細設定の「ダイアログの"
                         "ボタン名」で指定した名前のボタンを探して押します。"),
          QStringLiteral("Only takes effect when this step (a task member) targets \"Newly appeared "
                         "dialog (auto-detected)\". Looks for and presses a button named one of "
-                        "\"Dialog button names\" in ③ Action Parameters.")},
+                        "\"Dialog button names\" in the detailed action settings.")},
         {QStringLiteral("ダイアログのボタン名（この中で実際に見つかったものからランダムに1つ選んで"
                         "押す。1つも見つからなければこの操作をスキップ):"),
          QStringLiteral("Dialog button names (randomly picks one of these that's actually found and "

@@ -133,6 +133,13 @@ signals:
     // the sequence back to index 0) -- lets the UI show which step is
     // currently running (SPEC.md 6.9).
     void currentStepChanged(int index);
+    // Emitted whenever execution moves to a different entry of
+    // TestConfig::setupActions during the startup setup phase, and with -1
+    // once that phase ends (whether by completing normally or by the whole
+    // run stopping) -- lets the UI show which setup action is currently
+    // running, the same way currentStepChanged() does for the main step
+    // loop (SPEC.md追加実装及び修正依頼).
+    void currentSetupActionChanged(int index);
     void finished(const QString &reason);
     void pausedChanged(bool paused);
     // Emitted periodically (every few seconds) with the target process's

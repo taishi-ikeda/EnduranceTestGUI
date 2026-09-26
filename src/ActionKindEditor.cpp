@@ -106,7 +106,7 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     m_dialogButtonPressCheck = new QCheckBox(I18n::t(QStringLiteral("ダイアログのボタンを押す")), this);
     m_dialogButtonPressCheck->setToolTip(
         I18n::t(QStringLiteral("このステップ（タスク内のメンバー）が「新しく出現したダイアログ（自動検出）」"
-                                "を操作対象にしている場合のみ有効です。③操作パラメータの「ダイアログの"
+                                "を操作対象にしている場合のみ有効です。操作の詳細設定の「ダイアログの"
                                 "ボタン名」で指定した名前のボタンを探して押します。")));
     dialogButtonPressRow->addWidget(m_dialogButtonPressCheck);
     dialogButtonPressRow->addStretch();

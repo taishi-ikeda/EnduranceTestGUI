@@ -28,25 +28,25 @@ class QTimer;
 class QAction;
 class StopPanel;
 class RecordingIndicatorPanel;
-class ActionParamsEditor;
-class ActionKindEditor;
 class GlobalHotkey;
 class InputRecorder;
 
-// Main window, laid out (per SPEC.md 6.9) as three columns:
+// Main window, laid out (per SPEC.md 6.9, revised by 追加実装及び修正依頼)
+// as two columns:
 //   1. 対象選択  -- target picker, named/reusable operation regions, timing
 //      & limits.
-//   2. ステップ構成 -- ordered step list (add/edit/remove/reorder). The
-//      "追加"/"編集" buttons only pick which region (whole window, or one
-//      of the named regions from column 1) the step operates in --
-//      StepEditorDialog no longer edits anything else.
-//   3. 操作パラメータ -- master/detail editor for whichever step is
-//      selected in column 2: which action kinds are enabled for it, their
-//      relative weights, and its action count (no "default" concept --
-//      disabled while no step is selected), plus the detailed ActionParams,
-//      either the shared defaults (edited when no step, or no step's own
-//      settings, is selected) or that step's own custom ActionParams,
-//      toggled as a whole per step.
+//   2. ステップ構成 -- ordered step list (add/edit/remove/reorder, plus
+//      double-clicking a row). "追加"/"編集" opens StepEditorDialog, which
+//      for a plain step covers everything about it: which region it
+//      operates in, which action kinds are enabled, their relative
+//      weights, its action count, and its detailed ActionParams (either
+//      the shared defaults, or its own custom settings) -- there is no
+//      longer a separate always-visible "③操作パラメータ" column for
+//      these; a group/task member is still edited within its own
+//      StepGroupEditorDialog/TaskEditorDialog instead. The "デフォルト"
+//      button in this column's own header opens DefaultActionParamsDialog
+//      to edit the shared ActionParams default and the kind/weight/count
+//      preset newly created steps are seeded from.
 // Start/Stop controls and the log span the full width below the columns.
 class MainWindow : public QMainWindow
 {
@@ -117,8 +117,6 @@ private slots:
     void onUngroupSelectedStep();
     void onTaskifySelectedSteps();
     void onUntaskifySelectedStep();
-    void onStepSelectionChanged();
-    void onStepParamsModeChanged();
     void onEditDefaultParams();
 
     void onStart();
@@ -130,6 +128,7 @@ private slots:
     void onActionLog(const QString &message);
     void onIterationCountChanged(qint64 count);
     void onCurrentStepChanged(int index);
+    void onCurrentSetupActionChanged(int index);
     void onResourceUsageUpdated(double residentMemoryMB, double cpuPercent);
     void onClearLog();
     void onSaveLog();
@@ -155,7 +154,6 @@ private:
     void buildMenuBar();
     QWidget *buildTargetColumn(QWidget *parent);
     QWidget *buildStepsColumn(QWidget *parent);
-    QWidget *buildActionParamsColumn(QWidget *parent);
 
     void refreshStepList();
     void refreshNamedRegionList();
@@ -193,8 +191,6 @@ private:
     // `stepLabel`) and returns false.
     bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                    QString &errorMessage) const;
-    void flushActionParamsEditor();
-    void loadActionParamsEditorForSelection();
     void setControlsEnabled(bool enabled);
     // Enables m_groupStepsButton/m_ungroupStepButton/m_taskifyStepsButton/
     // m_untaskifyStepButton based on the current ②list selection (2+ plain
@@ -506,42 +502,25 @@ private:
     // not running; describeStep() marks this one so ②'s list shows
     // progress during a run (SPEC.md 6.9).
     int m_currentRunningStepIndex = -1;
+    // Same idea as m_currentRunningStepIndex, but for m_setupActions during
+    // the startup setup phase (SPEC.md追加実装及び修正依頼): describeSetupAction()
+    // marks this one so the list shows which setup action is currently
+    // running instead of the user having to infer it from the log text.
+    int m_currentRunningSetupActionIndex = -1;
 
-    // Action parameters (master/detail: default, or selected step's custom)
-    QLabel *m_actionParamsContextLabel = nullptr;
-    QRadioButton *m_stepUseDefaultParamsRadio = nullptr;
-    QRadioButton *m_stepUseCustomParamsRadio = nullptr;
-    ActionParamsEditor *m_actionParamsEditor = nullptr;
+    // The live shared ActionParams default (any step whose
+    // useDefaultActionParams is true resolves to this) and the kind/weight/
+    // count preset used to seed newly created steps -- both edited together
+    // via m_editDefaultParamsButton below (DefaultActionParamsDialog), or
+    // per-step inside that step's own "編集..." dialog (StepEditorDialog
+    // with includeActionParams=true) since the always-visible "③操作
+    // パラメータ" column that used to hold a live editor for them was
+    // removed (SPEC.md追加実装及び修正依頼).
     ActionParams m_defaultActionParams;
-    int m_lastEditedStepRow = -1;  // row whose params/kinds the editors currently reflect, -1 = defaults
-    // Set around any sequence that mutates m_steps' indices (move/remove/
-    // group/ungroup) and then re-populates/reselects m_stepListWidget:
-    // QListWidget::clear() and setCurrentRow() both fire currentRowChanged
-    // synchronously, which would otherwise re-enter onStepSelectionChanged()
-    // mid-mutation and flush the (by-then-stale) editor contents into
-    // whichever step has shifted into that index -- silently corrupting it
-    // (or, once m_lastEditedStepRow is invalidated, into m_defaultActionParams
-    // instead). While this is true, onStepSelectionChanged() does nothing;
-    // the caller calls loadActionParamsEditorForSelection() itself once,
-    // after the dust settles.
-    bool m_suppressStepSelectionHandling = false;
-
-    // Step-level: which action kinds the selected step performs, their
-    // relative weight, and its action count (SPEC.md 6.2/6.3). There is no
-    // *live* shared default for these (unlike ActionParams above) that
-    // existing steps can opt into -- so the group is disabled while no step
-    // is selected in column 2. m_defaultActionKinds below is only a seed
-    // template applied to newly created steps, not a dynamic reference.
-    QGroupBox *m_stepKindGroup = nullptr;
-    ActionKindEditor *m_stepKindEditor = nullptr;
-
-    // Top-right of column ③: opens DefaultActionParamsDialog to edit
-    // m_defaultActionParams (the live shared ActionParams default) and
-    // m_defaultActionKinds (the kind/weight/count preset used to seed
-    // newly created steps) together, without disturbing the current step
-    // selection in column ②.
-    QPushButton *m_editDefaultParamsButton = nullptr;
     RegionStep m_defaultActionKinds;
+    // In ②'s header row: opens DefaultActionParamsDialog to edit the two
+    // fields above together, without disturbing the current step selection.
+    QPushButton *m_editDefaultParamsButton = nullptr;
 
     // Timing & limits
     // Operation interval can be specified either directly in ms, or as a
@@ -590,7 +569,6 @@ private:
     QGroupBox *m_targetGroup = nullptr;
     QGroupBox *m_namedRegionGroup = nullptr;
     QGroupBox *m_stepsGroup = nullptr;
-    QGroupBox *m_actionParamsGroup = nullptr;
     QGroupBox *m_timingGroup = nullptr;
 
     // Controls

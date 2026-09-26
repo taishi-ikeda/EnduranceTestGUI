@@ -1519,6 +1519,7 @@ void RandomActionEngine::performSetupAction()
 {
     if (m_setupActionIndex >= m_config.setupActions.size()) {
         m_inSetupPhase = false;
+        emit currentSetupActionChanged(-1);
         if (m_setupOnlyRun) {
             // startSetupOnly(): the point of this run was only to check the
             // setup sequence itself, so stop here instead of falling
@@ -1532,6 +1533,13 @@ void RandomActionEngine::performSetupAction()
         scheduleNext();
         return;
     }
+
+    // Emitted for the current (not-yet-incremented) index so the UI can
+    // highlight this entry as "実行中" for as long as it takes to complete
+    // -- including a Wait action's own delay, or a safety-check retry
+    // backoff, both of which re-enter this function for the same index
+    // before it ever advances.
+    emit currentSetupActionChanged(m_setupActionIndex);
 
     const SetupAction &action = m_config.setupActions[m_setupActionIndex];
     QString desc;

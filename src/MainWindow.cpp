@@ -40,8 +40,6 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include "ActionKindEditor.h"
-#include "ActionParamsEditor.h"
 #include "DefaultActionParamsDialog.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
@@ -87,6 +85,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             &MainWindow::onResourceUsageUpdated);
     connect(m_engine, &RandomActionEngine::currentStepChanged, this,
             &MainWindow::onCurrentStepChanged);
+    connect(m_engine, &RandomActionEngine::currentSetupActionChanged, this,
+            &MainWindow::onCurrentSetupActionChanged);
     connect(m_engine, &RandomActionEngine::summaryReady, this, &MainWindow::onRunSummaryReady);
     connect(m_engine, &RandomActionEngine::regionScreenshotCaptured, this,
             &MainWindow::onRegionScreenshotCaptured);
@@ -155,25 +155,21 @@ void MainWindow::buildUi()
     setCentralWidget(central);
     auto *rootLayout = new QVBoxLayout(central);
 
-    // SPEC.md 6.9: 3 vertically-stacked rows -- ①対象選択 on top (full
-    // width), ②ステップ構成/③操作パラメータ split horizontally in the
-    // middle row, and execution controls + ログ on the bottom row. Nesting
-    // a horizontal QSplitter inside a vertical one lets the user drag to
-    // resize every one of these (row boundaries and the ②/③ divide alike).
+    // SPEC.md 6.9/追加実装及び修正依頼: 2 vertically-stacked rows --
+    // ①対象選択 on top (full width) and execution controls + ログ on the
+    // bottom row, with ②ステップ構成 in between. A step's own action
+    // kinds/weights/count/ActionParams (formerly a separate always-visible
+    // "③操作パラメータ" column here) are now edited in that step's own
+    // "編集..." dialog instead, so there's no second column left to split
+    // this middle row against.
     auto *outerSplitter = new QSplitter(Qt::Vertical, central);
 
     outerSplitter->addWidget(buildTargetColumn(outerSplitter));
+    outerSplitter->addWidget(buildStepsColumn(outerSplitter));
 
-    auto *middleSplitter = new QSplitter(Qt::Horizontal, outerSplitter);
-    middleSplitter->addWidget(buildStepsColumn(middleSplitter));
-    middleSplitter->addWidget(buildActionParamsColumn(middleSplitter));
-    middleSplitter->setStretchFactor(0, 1);
-    middleSplitter->setStretchFactor(1, 2);
-    outerSplitter->addWidget(middleSplitter);
-
-    // Execution controls and ログ don't belong to any one of ①②③ -- they're
+    // Execution controls and ログ don't belong to any one of ①② -- they're
     // cross-cutting (control/monitor the run as a whole), so they share the
-    // bottom row rather than living inside one of the three sections.
+    // bottom row rather than living inside one of those sections.
     auto *bottomWidget = new QWidget(outerSplitter);
     auto *bottomLayout = new QVBoxLayout(bottomWidget);
     bottomLayout->setContentsMargins(0, 0, 0, 0);
@@ -281,7 +277,7 @@ void MainWindow::buildUi()
     bottomLayout->addWidget(logGroup, 1);
     outerSplitter->addWidget(bottomWidget);
 
-    // ①対象選択 row stays compact by default; ②/③ gets the most vertical
+    // ①対象選択 row stays compact by default; ② gets the most vertical
     // space; the controls+ログ row gets a modest share. All are still
     // freely draggable by the user afterward.
     outerSplitter->setStretchFactor(0, 0);
@@ -292,7 +288,6 @@ void MainWindow::buildUi()
 
     refreshNamedRegionList();
     refreshStepList();
-    m_actionParamsEditor->setParams(m_defaultActionParams);
     updateStatisticsDisplay();
 
     resize(1200, 900);
@@ -587,6 +582,11 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_addSetupActionButton, &QPushButton::clicked, this, &MainWindow::onAddSetupAction);
     connect(m_editSetupActionButton, &QPushButton::clicked, this,
             &MainWindow::onEditSelectedSetupAction);
+    // SPEC.md追加実装及び修正依頼: double-clicking a row opens its edit
+    // dialog directly, without first having to also find/click the
+    // separate "編集..." button below the list.
+    connect(m_setupActionListWidget, &QListWidget::itemDoubleClicked, this,
+            &MainWindow::onEditSelectedSetupAction);
     connect(m_removeSetupActionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedSetupAction);
     connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
@@ -788,7 +788,20 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     auto *wrapper = new QWidget(parent);
     auto *wrapperLayout = new QVBoxLayout(wrapper);
     wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->addWidget(columnHeader(I18n::t(QStringLiteral("② ステップ構成")), wrapper));
+    auto *headerRow = new QHBoxLayout;
+    headerRow->addWidget(columnHeader(I18n::t(QStringLiteral("② ステップ構成")), wrapper), 1);
+    // SPEC.md追加実装及び修正依頼: kept here (moved from the now-removed
+    // "③操作パラメータ" column's own header row) since it edits the shared
+    // defaults, not any one step -- there's no step list selection for it
+    // to be "next to" the way a step's own kinds/params now live inside
+    // each step's "編集..." dialog instead.
+    m_editDefaultParamsButton = new QPushButton(I18n::t(QStringLiteral("デフォルト")), wrapper);
+    m_editDefaultParamsButton->setToolTip(
+        I18n::t(QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します"
+                                "（新しいステップの初期値、および「デフォルトを使う」ステップに反映されます）")));
+    headerRow->addWidget(m_editDefaultParamsButton);
+    wrapperLayout->addLayout(headerRow);
+    connect(m_editDefaultParamsButton, &QPushButton::clicked, this, &MainWindow::onEditDefaultParams);
 
     m_stepsGroup = new QGroupBox(
         I18n::t(QStringLiteral("領域ごとに操作種別・回数を指定し、順番に繰り返し実行")), wrapper);
@@ -842,13 +855,14 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     taskButtonsRow->addWidget(m_untaskifyStepButton);
     stepsLayout->addLayout(taskButtonsRow);
 
-    connect(m_stepListWidget, &QListWidget::currentRowChanged, this,
-            &MainWindow::onStepSelectionChanged);
     connect(m_stepListWidget, &QListWidget::itemSelectionChanged, this,
             &MainWindow::updateGroupButtonsEnabled);
     connect(m_addStepButton, &QPushButton::clicked, this, &MainWindow::onAddStep);
     connect(m_addWaitStepButton, &QPushButton::clicked, this, &MainWindow::onAddWaitStep);
     connect(m_editStepButton, &QPushButton::clicked, this, &MainWindow::onEditSelectedStep);
+    // SPEC.md追加実装及び修正依頼: same double-click-to-edit shortcut as
+    // the setup-action list above.
+    connect(m_stepListWidget, &QListWidget::itemDoubleClicked, this, &MainWindow::onEditSelectedStep);
     connect(m_removeStepButton, &QPushButton::clicked, this, &MainWindow::onRemoveSelectedStep);
     connect(m_moveStepUpButton, &QPushButton::clicked, this, &MainWindow::onMoveStepUp);
     connect(m_moveStepDownButton, &QPushButton::clicked, this, &MainWindow::onMoveStepDown);
@@ -859,75 +873,6 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_untaskifyStepButton, &QPushButton::clicked, this, &MainWindow::onUntaskifySelectedStep);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
-    return wrapper;
-}
-
-QWidget *MainWindow::buildActionParamsColumn(QWidget *parent)
-{
-    auto *wrapper = new QWidget(parent);
-    auto *wrapperLayout = new QVBoxLayout(wrapper);
-    wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->addWidget(columnHeader(I18n::t(QStringLiteral("③ 操作パラメータ")), wrapper));
-
-    auto *contextRow = new QHBoxLayout;
-    m_actionParamsContextLabel = new QLabel(I18n::t(QStringLiteral("デフォルト値を編集中（ステップ未選択）")), wrapper);
-    contextRow->addWidget(m_actionParamsContextLabel, 1);
-    m_editDefaultParamsButton = new QPushButton(I18n::t(QStringLiteral("デフォルト")), wrapper);
-    m_editDefaultParamsButton->setToolTip(
-        I18n::t(QStringLiteral("共通のデフォルト操作パラメータをダイアログで編集します（②の選択は変わりません）")));
-    contextRow->addWidget(m_editDefaultParamsButton);
-    wrapperLayout->addLayout(contextRow);
-    connect(m_editDefaultParamsButton, &QPushButton::clicked, this, &MainWindow::onEditDefaultParams);
-
-    auto *scroll = new QScrollArea(wrapper);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto *scrollContent = new QWidget;
-    scroll->setWidget(scrollContent);
-    auto *scrollLayout = new QVBoxLayout(scrollContent);
-
-    // --- Step-level: which action kinds this step performs, their
-    // relative weight, and how many actions to run (SPEC.md 6.2/6.3).
-    m_stepKindGroup = new QGroupBox(
-        I18n::t(QStringLiteral("このステップの操作種別・重み・回数（②でステップを選択すると編集できます）")),
-        scrollContent);
-    auto *kindLayout = new QVBoxLayout(m_stepKindGroup);
-    m_stepKindEditor = new ActionKindEditor(m_stepKindGroup);
-    kindLayout->addWidget(m_stepKindEditor);
-    m_stepKindGroup->setEnabled(false);
-    scrollLayout->addWidget(m_stepKindGroup);
-    // Keep ②'s step label (action list, count, badge) in sync as the user
-    // edits, rather than only on the next selection change/add/remove
-    // (SPEC.md 6.2/6.4): flushActionParamsEditor() already re-writes the
-    // list item's text after applying the current widget values.
-    connect(m_stepKindEditor, &ActionKindEditor::changed, this, &MainWindow::flushActionParamsEditor);
-
-    // --- ActionParams: shared defaults, or a per-step override toggled as
-    // a whole (unchanged from before -- SPEC.md 6.4/6.9).
-    m_actionParamsGroup = new QGroupBox(
-        I18n::t(QStringLiteral("操作の詳細設定（ドラッグ距離・キー文字種・スクロール量など）")), scrollContent);
-    auto *layout = new QVBoxLayout(m_actionParamsGroup);
-
-    auto *modeRow = new QHBoxLayout;
-    m_stepUseDefaultParamsRadio = new QRadioButton(I18n::t(QStringLiteral("デフォルトを使う")), m_actionParamsGroup);
-    m_stepUseCustomParamsRadio =
-        new QRadioButton(I18n::t(QStringLiteral("このステップ専用の設定を使う")), m_actionParamsGroup);
-    m_stepUseDefaultParamsRadio->setChecked(true);
-    m_stepUseDefaultParamsRadio->setEnabled(false);
-    m_stepUseCustomParamsRadio->setEnabled(false);
-    modeRow->addWidget(m_stepUseDefaultParamsRadio);
-    modeRow->addWidget(m_stepUseCustomParamsRadio);
-    modeRow->addStretch();
-    layout->addLayout(modeRow);
-    connect(m_stepUseDefaultParamsRadio, &QRadioButton::toggled, this,
-            &MainWindow::onStepParamsModeChanged);
-
-    m_actionParamsEditor = new ActionParamsEditor(m_actionParamsGroup);
-    layout->addWidget(m_actionParamsEditor, 1);
-
-    scrollLayout->addWidget(m_actionParamsGroup, 1);
-
-    wrapperLayout->addWidget(scroll, 1);
     return wrapper;
 }
 
@@ -1155,7 +1100,9 @@ QString MainWindow::describeSetupAction(const SetupAction &action, int index) co
     }
     const QString labelSuffix =
         action.label.isEmpty() ? QString() : I18n::t(QStringLiteral(" [%1]")).arg(action.label);
-    return I18n::t(QStringLiteral("%1: %2%3")).arg(index + 1).arg(kindDesc).arg(labelSuffix);
+    const QString runningPrefix =
+        index == m_currentRunningSetupActionIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
+    return I18n::t(QStringLiteral("%1%2: %3%4")).arg(runningPrefix).arg(index + 1).arg(kindDesc).arg(labelSuffix);
 }
 
 void MainWindow::refreshSetupActionList()
@@ -1404,8 +1351,8 @@ void MainWindow::onEditSelectedNamedRegion()
         // them.
         renameRegionReferences(m_steps, oldName, region.name);
         // refreshStepList() clears and re-adds all items, which drops the
-        // list's current selection -- restore it so column ③'s kind/
-        // ActionParams editors (keyed on that selection) aren't reset.
+        // list's current selection -- restore it so the user doesn't lose
+        // their place.
         const int selectedStepRow = m_stepListWidget->currentRow();
         refreshStepList();
         if (selectedStepRow >= 0 && selectedStepRow < m_steps.size())
@@ -1604,179 +1551,24 @@ void MainWindow::onRecordingFinished(bool escapePressed)
                   : I18n::t(QStringLiteral("記録を終了しました。記録件数: %1")).arg(m_recordedActionCount));
 }
 
-void MainWindow::flushActionParamsEditor()
-{
-    if (!m_actionParamsEditor)
-        return;
-    const ActionParams p = m_actionParamsEditor->params();
-    if (m_lastEditedStepRow < 0 || m_lastEditedStepRow >= m_steps.size()) {
-        m_defaultActionParams = p;
-        return;
-    }
-
-    RegionStep &step = m_steps[m_lastEditedStepRow];
-    if (!step.useDefaultActionParams)
-        step.customActionParams = p;
-    else
-        m_defaultActionParams = p;
-
-    // Step-level enabled kinds / weights / action count (SPEC.md 6.2/6.3):
-    // only meaningful for a selected step, which is guaranteed here by the
-    // early return above.
-    m_stepKindEditor->applyKindsTo(step);
-
-    if (auto *item = m_stepListWidget->item(m_lastEditedStepRow))
-        item->setText(describeStep(step, m_lastEditedStepRow));
-}
-
-void MainWindow::loadActionParamsEditorForSelection()
-{
-    const int row = m_stepListWidget->currentRow();
-    if (row < 0 || row >= m_steps.size()) {
-        m_actionParamsContextLabel->setText(I18n::t(QStringLiteral("デフォルト値を編集中（ステップ未選択）")));
-        m_stepUseDefaultParamsRadio->blockSignals(true);
-        m_stepUseDefaultParamsRadio->setChecked(true);
-        m_stepUseDefaultParamsRadio->blockSignals(false);
-        m_stepUseDefaultParamsRadio->setEnabled(false);
-        m_stepUseCustomParamsRadio->setEnabled(false);
-        m_actionParamsEditor->setParams(m_defaultActionParams);
-        m_stepKindGroup->setEnabled(false);
-        m_lastEditedStepRow = -1;
-        return;
-    }
-
-    if (m_steps[row].isWaitStep) {
-        // A wait step has no region/action-kind/ActionParams fields to
-        // edit here at all (see RegionStep::isWaitStep) -- disable both
-        // groups entirely rather than showing controls that don't apply.
-        m_actionParamsContextLabel->setText(
-            I18n::t(QStringLiteral("ステップ %1 は待機ステップです（操作パラメータはありません）")).arg(row + 1));
-        m_stepUseDefaultParamsRadio->blockSignals(true);
-        m_stepUseDefaultParamsRadio->setChecked(true);
-        m_stepUseDefaultParamsRadio->blockSignals(false);
-        m_stepUseDefaultParamsRadio->setEnabled(false);
-        m_stepUseCustomParamsRadio->setEnabled(false);
-        m_actionParamsEditor->setParams(m_defaultActionParams);
-        m_stepKindGroup->setEnabled(false);
-        m_lastEditedStepRow = -1;
-        return;
-    }
-
-    if (m_steps[row].isGroup) {
-        // A group's members each have their own region/action-kind/
-        // ActionParams settings, edited in StepGroupEditorDialog (via ②'s
-        // "編集..." button) rather than here -- see RegionStep::isGroup.
-        m_actionParamsContextLabel->setText(
-            I18n::t(QStringLiteral("ステップ %1 はグループです。「編集...」からメンバーを設定してください")).arg(row + 1));
-        m_stepUseDefaultParamsRadio->blockSignals(true);
-        m_stepUseDefaultParamsRadio->setChecked(true);
-        m_stepUseDefaultParamsRadio->blockSignals(false);
-        m_stepUseDefaultParamsRadio->setEnabled(false);
-        m_stepUseCustomParamsRadio->setEnabled(false);
-        m_actionParamsEditor->setParams(m_defaultActionParams);
-        m_stepKindGroup->setEnabled(false);
-        m_lastEditedStepRow = -1;
-        return;
-    }
-
-    if (m_steps[row].isTask) {
-        // A task's members each have their own region/action-kind/
-        // ActionParams settings, edited in TaskEditorDialog (via ②'s
-        // "編集..." button) rather than here -- see RegionStep::isTask.
-        m_actionParamsContextLabel->setText(
-            I18n::t(QStringLiteral("ステップ %1 はタスクです。「編集...」から操作を設定してください")).arg(row + 1));
-        m_stepUseDefaultParamsRadio->blockSignals(true);
-        m_stepUseDefaultParamsRadio->setChecked(true);
-        m_stepUseDefaultParamsRadio->blockSignals(false);
-        m_stepUseDefaultParamsRadio->setEnabled(false);
-        m_stepUseCustomParamsRadio->setEnabled(false);
-        m_actionParamsEditor->setParams(m_defaultActionParams);
-        m_stepKindGroup->setEnabled(false);
-        m_lastEditedStepRow = -1;
-        return;
-    }
-
-    // A *copy*, not a reference into m_steps[row]: ActionKindEditor::changed()
-    // (fired by setKinds() below as it programmatically sets each widget) is
-    // connected to flushActionParamsEditor(), which writes straight back
-    // into m_steps[m_lastEditedStepRow] -- already equal to row by the time
-    // setKinds() runs. If `step` aliased that same array slot, a reentrant
-    // flush partway through setKinds() would overwrite fields setKinds()
-    // hasn't read yet, and setKinds() would then read back its own
-    // just-corrupted data for the remaining fields. A value copy is immune
-    // to that.
-    const RegionStep step = m_steps[row];
-    m_actionParamsContextLabel->setText(I18n::t(QStringLiteral("ステップ %1 の操作種別・詳細設定を編集中")).arg(row + 1));
-    m_stepUseDefaultParamsRadio->setEnabled(true);
-    m_stepUseCustomParamsRadio->setEnabled(true);
-    m_stepUseDefaultParamsRadio->blockSignals(true);
-    m_stepUseCustomParamsRadio->blockSignals(true);
-    if (step.useDefaultActionParams)
-        m_stepUseDefaultParamsRadio->setChecked(true);
-    else
-        m_stepUseCustomParamsRadio->setChecked(true);
-    m_stepUseDefaultParamsRadio->blockSignals(false);
-    m_stepUseCustomParamsRadio->blockSignals(false);
-
-    m_lastEditedStepRow = row;
-    m_actionParamsEditor->setParams(effectiveParamsOf(step, m_defaultActionParams));
-
-    m_stepKindGroup->setEnabled(true);
-    m_stepKindEditor->setKinds(step);
-}
-
-void MainWindow::onStepSelectionChanged()
-{
-    if (m_suppressStepSelectionHandling)
-        return;
-    flushActionParamsEditor();
-    loadActionParamsEditorForSelection();
-}
-
-void MainWindow::onStepParamsModeChanged()
-{
-    const int row = m_stepListWidget->currentRow();
-    if (row < 0 || row >= m_steps.size())
-        return;
-
-    const bool useDefault = m_stepUseDefaultParamsRadio->isChecked();
-    if (m_steps[row].useDefaultActionParams == useDefault)
-        return;
-
-    flushActionParamsEditor();
-    m_steps[row].useDefaultActionParams = useDefault;
-    if (auto *item = m_stepListWidget->item(row))
-        item->setText(describeStep(m_steps[row], row));
-
-    m_lastEditedStepRow = row;
-    m_actionParamsEditor->setParams(effectiveParamsOf(m_steps[row], m_defaultActionParams));
-}
-
 void MainWindow::onEditDefaultParams()
 {
-    // Flush any pending edits first so the dialog opens with the latest
-    // values (relevant if the panel is currently showing defaults in-place,
-    // i.e. no step selected).
-    flushActionParamsEditor();
-
     DefaultActionParamsDialog dialog(m_defaultActionKinds, m_defaultActionParams, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     m_defaultActionKinds = dialog.resultKinds();
     m_defaultActionParams = dialog.resultParams();
-
-    // If the panel is currently displaying the defaults (no step selected,
-    // or the selected step uses them), refresh it so it doesn't keep
-    // showing stale pre-dialog values until the selection next changes.
-    const bool showingDefaults = m_lastEditedStepRow < 0 || m_lastEditedStepRow >= m_steps.size() ||
-                                  m_steps[m_lastEditedStepRow].useDefaultActionParams;
-    if (showingDefaults)
-        m_actionParamsEditor->setParams(m_defaultActionParams);
 }
 
 void MainWindow::onAddStep()
 {
-    StepEditorDialog dialog(RegionStep(), m_namedRegions, this);
+    // Seed kinds/weights/count from the default preset up front (SPEC.md
+    // 追加実装及び修正依頼): with the always-visible "③操作パラメータ"
+    // column gone, this dialog is now the only place to configure a new
+    // step's action kinds/params at all, so it needs a sensible starting
+    // point rather than an entirely blank RegionStep().
+    StepEditorDialog dialog(m_defaultActionKinds, m_namedRegions, this, /*allowPopupDialogTarget=*/false,
+                            /*includeActionParams=*/true, m_defaultActionParams);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -1785,14 +1577,15 @@ void MainWindow::onAddStep()
         return;
     }
 
-    flushActionParamsEditor();
-    RegionStep step = m_defaultActionKinds;  // seed kinds/weights/count from the default preset
+    RegionStep step = m_defaultActionKinds;
     step.useWholeWindow = dialog.useWholeWindow();
     step.regionName = dialog.regionName();
+    dialog.applyActionKindsTo(step);
+    step.useDefaultActionParams = dialog.useDefaultActionParams();
+    if (!step.useDefaultActionParams)
+        step.customActionParams = dialog.customActionParams();
     m_steps.append(step);
     refreshStepList();
-    // Select the new step so its kinds/weights/count and ActionParams can
-    // be configured right away in ③操作パラメータ.
     m_stepListWidget->setCurrentRow(m_steps.size() - 1);
 }
 
@@ -1804,7 +1597,6 @@ void MainWindow::onAddWaitStep()
     if (!ok)
         return;
 
-    flushActionParamsEditor();
     RegionStep step;
     step.isWaitStep = true;
     step.waitDurationMs = ms;
@@ -1854,7 +1646,8 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
-    StepEditorDialog dialog(m_steps[row], m_namedRegions, this);
+    StepEditorDialog dialog(m_steps[row], m_namedRegions, this, /*allowPopupDialogTarget=*/false,
+                            /*includeActionParams=*/true, m_defaultActionParams);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -1863,11 +1656,16 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
-    // This dialog only changes which region the step operates in; its
-    // kinds/weights/count and ActionParams (edited in column ③) are left
-    // untouched.
+    // SPEC.md追加実装及び修正依頼: this dialog now covers everything about
+    // a step (region, action kinds/weights/count, and ActionParams source/
+    // custom value) since the always-visible "③操作パラメータ" column was
+    // removed in favor of editing it here.
     m_steps[row].useWholeWindow = dialog.useWholeWindow();
     m_steps[row].regionName = dialog.regionName();
+    dialog.applyActionKindsTo(m_steps[row]);
+    m_steps[row].useDefaultActionParams = dialog.useDefaultActionParams();
+    if (!m_steps[row].useDefaultActionParams)
+        m_steps[row].customActionParams = dialog.customActionParams();
     refreshStepList();
     m_stepListWidget->setCurrentRow(row);
 }
@@ -1877,30 +1675,20 @@ void MainWindow::onRemoveSelectedStep()
     const int row = m_stepListWidget->currentRow();
     if (row < 0 || row >= m_steps.size())
         return;
-    flushActionParamsEditor();
-    m_lastEditedStepRow = -1;
-    m_suppressStepSelectionHandling = true;
     m_steps.removeAt(row);
     refreshStepList();
     const int newRow = qMin(row, m_steps.size() - 1);
     if (newRow >= 0)
         m_stepListWidget->setCurrentRow(newRow);
-    m_suppressStepSelectionHandling = false;
-    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onMoveStepUp()
 {
     const int row = m_stepListWidget->currentRow();
     if (row > 0 && row < m_steps.size()) {
-        flushActionParamsEditor();
-        m_lastEditedStepRow = -1;
-        m_suppressStepSelectionHandling = true;
         m_steps.move(row, row - 1);
         refreshStepList();
         m_stepListWidget->setCurrentRow(row - 1);
-        m_suppressStepSelectionHandling = false;
-        loadActionParamsEditorForSelection();
     }
 }
 
@@ -1908,23 +1696,16 @@ void MainWindow::onMoveStepDown()
 {
     const int row = m_stepListWidget->currentRow();
     if (row >= 0 && row < m_steps.size() - 1) {
-        flushActionParamsEditor();
-        m_lastEditedStepRow = -1;
-        m_suppressStepSelectionHandling = true;
         m_steps.move(row, row + 1);
         refreshStepList();
         m_stepListWidget->setCurrentRow(row + 1);
-        m_suppressStepSelectionHandling = false;
-        loadActionParamsEditorForSelection();
     }
 }
 
 void MainWindow::onClearSteps()
 {
-    flushActionParamsEditor();
     m_steps.clear();
     refreshStepList();
-    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onGroupSelectedSteps()
@@ -1945,10 +1726,6 @@ void MainWindow::onGroupSelectedSteps()
             return;
         }
     }
-
-    flushActionParamsEditor();
-    m_lastEditedStepRow = -1;
-    m_suppressStepSelectionHandling = true;
 
     RegionStep group;
     group.isGroup = true;
@@ -1972,8 +1749,6 @@ void MainWindow::onGroupSelectedSteps()
 
     refreshStepList();
     m_stepListWidget->setCurrentRow(insertAt);
-    m_suppressStepSelectionHandling = false;
-    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onUngroupSelectedStep()
@@ -1982,9 +1757,6 @@ void MainWindow::onUngroupSelectedStep()
     if (row < 0 || row >= m_steps.size() || !m_steps[row].isGroup)
         return;
 
-    flushActionParamsEditor();
-    m_lastEditedStepRow = -1;
-    m_suppressStepSelectionHandling = true;
     const QList<RegionStep> members = m_steps[row].groupMembers;
     m_steps.removeAt(row);
     for (int i = 0; i < members.size(); ++i)
@@ -1993,8 +1765,6 @@ void MainWindow::onUngroupSelectedStep()
     refreshStepList();
     if (!members.isEmpty())
         m_stepListWidget->setCurrentRow(row);
-    m_suppressStepSelectionHandling = false;
-    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onTaskifySelectedSteps()
@@ -2015,10 +1785,6 @@ void MainWindow::onTaskifySelectedSteps()
             return;
         }
     }
-
-    flushActionParamsEditor();
-    m_lastEditedStepRow = -1;
-    m_suppressStepSelectionHandling = true;
 
     RegionStep task;
     task.isTask = true;
@@ -2042,8 +1808,6 @@ void MainWindow::onTaskifySelectedSteps()
 
     refreshStepList();
     m_stepListWidget->setCurrentRow(insertAt);
-    m_suppressStepSelectionHandling = false;
-    loadActionParamsEditorForSelection();
 }
 
 void MainWindow::onUntaskifySelectedStep()
@@ -2052,9 +1816,6 @@ void MainWindow::onUntaskifySelectedStep()
     if (row < 0 || row >= m_steps.size() || !m_steps[row].isTask)
         return;
 
-    flushActionParamsEditor();
-    m_lastEditedStepRow = -1;
-    m_suppressStepSelectionHandling = true;
     const QList<RegionStep> members = m_steps[row].taskMembers;
     m_steps.removeAt(row);
     for (int i = 0; i < members.size(); ++i)
@@ -2063,8 +1824,6 @@ void MainWindow::onUntaskifySelectedStep()
     refreshStepList();
     if (!members.isEmpty())
         m_stepListWidget->setCurrentRow(row);
-    m_suppressStepSelectionHandling = false;
-    loadActionParamsEditorForSelection();
 }
 
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
@@ -2073,8 +1832,8 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
     if (step.isWaitStep || step.isGroup || step.isTask)
         return true;  // nothing here to validate (a group's/task's members are validated individually)
     if (!step.hasAnyActionEnabled()) {
-        errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップを選択し、③操作パラメータ"
-            "パネルで操作種別を1つ以上有効にしてください。"))
+        errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップの「編集...」を開き、"
+            "操作種別を1つ以上有効にしてください。"))
                            .arg(stepLabel);
         return false;
     }
@@ -2249,13 +2008,6 @@ void MainWindow::setControlsEnabled(bool enabled)
     m_setupActionsGroup->setEnabled(enabled);
     m_namedRegionGroup->setEnabled(enabled);
     m_stepsGroup->setEnabled(enabled);
-    m_actionParamsGroup->setEnabled(enabled);
-    const int selectedStepRow = m_stepListWidget->currentRow();
-    const bool kindGroupApplicable = selectedStepRow >= 0 && selectedStepRow < m_steps.size() &&
-                                      !m_steps[selectedStepRow].isWaitStep &&
-                                      !m_steps[selectedStepRow].isGroup &&
-                                      !m_steps[selectedStepRow].isTask;
-    m_stepKindGroup->setEnabled(enabled && kindGroupApplicable);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
     m_savePresetAction->setEnabled(enabled);
@@ -2309,8 +2061,6 @@ bool MainWindow::beginRun(bool interactive)
         }
         return false;
     }
-
-    flushActionParamsEditor();
 
     bool ok = false;
     QString errorMessage;
@@ -2658,6 +2408,16 @@ void MainWindow::onEngineFinished(const QString &reason)
         if (auto *item = m_stepListWidget->item(finishedStepIndex))
             item->setText(describeStep(m_steps[finishedStepIndex], finishedStepIndex));
     }
+    // Same cleanup, for the setup-action list (SPEC.md追加実装及び修正依頼) --
+    // RandomActionEngine already emits currentSetupActionChanged(-1) once the
+    // setup phase itself ends, but this also covers a run stopped abruptly
+    // *during* that phase (e.g. a safety-check failure), which wouldn't have.
+    const int finishedSetupActionIndex = m_currentRunningSetupActionIndex;
+    m_currentRunningSetupActionIndex = -1;
+    if (finishedSetupActionIndex >= 0 && finishedSetupActionIndex < m_setupActions.size()) {
+        if (auto *item = m_setupActionListWidget->item(finishedSetupActionIndex))
+            item->setText(describeSetupAction(m_setupActions[finishedSetupActionIndex], finishedSetupActionIndex));
+    }
 
     if (m_fullLogFile.isOpen())
         m_fullLogFile.close();
@@ -2892,8 +2652,7 @@ void MainWindow::onCurrentStepChanged(int index)
         return;
     // Update just the two affected rows' text in place (not a full
     // refreshStepList(), which would clear/restore the list's current
-    // selection and needlessly re-trigger onStepSelectionChanged while a
-    // run is in progress).
+    // selection while a run is in progress).
     const int previous = m_currentRunningStepIndex;
     m_currentRunningStepIndex = index;
     if (previous >= 0 && previous < m_steps.size()) {
@@ -2904,6 +2663,26 @@ void MainWindow::onCurrentStepChanged(int index)
         if (auto *item = m_stepListWidget->item(index)) {
             item->setText(describeStep(m_steps[index], index));
             m_stepListWidget->scrollToItem(item);
+        }
+    }
+}
+
+void MainWindow::onCurrentSetupActionChanged(int index)
+{
+    if (index == m_currentRunningSetupActionIndex)
+        return;
+    // Same in-place update as onCurrentStepChanged() above, for the same
+    // reason (avoid a full refreshSetupActionList() disturbing selection).
+    const int previous = m_currentRunningSetupActionIndex;
+    m_currentRunningSetupActionIndex = index;
+    if (previous >= 0 && previous < m_setupActions.size()) {
+        if (auto *item = m_setupActionListWidget->item(previous))
+            item->setText(describeSetupAction(m_setupActions[previous], previous));
+    }
+    if (index >= 0 && index < m_setupActions.size()) {
+        if (auto *item = m_setupActionListWidget->item(index)) {
+            item->setText(describeSetupAction(m_setupActions[index], index));
+            m_setupActionListWidget->scrollToItem(item);
         }
     }
 }
@@ -3183,8 +2962,6 @@ QJsonObject MainWindow::buildPresetJson() const
 
 void MainWindow::onSavePreset()
 {
-    flushActionParamsEditor();
-
     const QString path = QFileDialog::getSaveFileName(this, I18n::t(QStringLiteral("テスト設定を保存")),
                                                         QStringLiteral("preset.json"),
                                                         QStringLiteral("JSON (*.json)"));
@@ -3279,11 +3056,9 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
         timing["enableCrashDumpCollection"].toBool(m_crashDumpCollectionCheck->isChecked()));
     m_autoSlowdownCheck->setChecked(timing["autoSlowdownEnabled"].toBool(m_autoSlowdownCheck->isChecked()));
 
-    m_lastEditedStepRow = -1;
     refreshNamedRegionList();
     refreshSetupActionList();
     refreshStepList();
-    loadActionParamsEditorForSelection();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());
     m_launchWaitSecondsSpin->setValue(root["launchWaitSeconds"].toInt(m_launchWaitSecondsSpin->value()));
     m_hasSavedWindowSize = root["hasSavedWindowSize"].toBool(false);
@@ -3341,8 +3116,7 @@ void MainWindow::updateStatisticsDisplay()
             : I18n::t(QStringLiteral("このテスト設定での実行記録はまだありません。")));
 
     // Update each row in place (not a full refreshStepList(), which would
-    // clear/restore ②'s current selection needlessly -- see
-    // m_suppressStepSelectionHandling's own comment for why that matters).
+    // clear/restore ②'s current selection needlessly).
     for (int i = 0; i < m_stepListWidget->count() && i < m_steps.size(); ++i)
         m_stepListWidget->item(i)->setText(describeStep(m_steps[i], i));
 }

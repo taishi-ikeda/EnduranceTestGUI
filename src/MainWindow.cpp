@@ -772,6 +772,23 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                         "応答が戻れば自動的に元の間隔に戻ります。")));
     timingForm->addRow(QString(), m_autoSlowdownCheck);
 
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: master override -- see
+    // TestConfig::disableAccessibilityFeatures' own comment. Off by default
+    // so existing context-menu-selection/dialog-button-press users see no
+    // change; users who want the fastest possible, purely coordinate-based
+    // execution (and don't use any accessibility-based feature) opt in.
+    m_disableAccessibilityCheck = new QCheckBox(
+        I18n::t(QStringLiteral("アクセシビリティAPI（右クリックメニュー選択・ダイアログのボタン押下・"
+                                "名前付きオブジェクト）による操作を無効にする（高速化）")),
+        m_timingGroup);
+    m_disableAccessibilityCheck->setChecked(false);
+    m_disableAccessibilityCheck->setToolTip(
+        I18n::t(QStringLiteral("有効にすると、実行中にAT-SPI/Accessibility APIへ一切接続しなくなり、"
+                                "最速の座標ベース操作のみで実行します。右クリックメニュー選択・"
+                                "ダイアログのボタン押下・名前付きオブジェクトを使うステップは"
+                                "（設定したままでも）実行時にスキップされます。")));
+    timingForm->addRow(QString(), m_disableAccessibilityCheck);
+
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
     auto *namedRegionAndTimingRow = new QHBoxLayout;
@@ -1035,6 +1052,16 @@ void MainWindow::refreshStepList()
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
 {
+    if (region.isObjectTarget) {
+        // SPEC.md 追加実装依頼「名前付きオブジェクト」
+        return I18n::t(QStringLiteral("%1（オブジェクト指定: %2 「%3」）%4"))
+            .arg(region.name,
+                 region.objectTarget.role.isEmpty() ? I18n::t(QStringLiteral("(役割不明)"))
+                                                     : region.objectTarget.role,
+                 region.objectTarget.name)
+            .arg(region.objectTarget.useDefaultAction ? I18n::t(QStringLiteral(" [既定アクション実行]"))
+                                                        : QString());
+    }
     return I18n::t(QStringLiteral("%1（矩形%2個・除外%3個）%4"))
         .arg(region.name)
         .arg(region.regions.size())
@@ -1183,6 +1210,14 @@ bool MainWindow::currentTargetTopLeft(QPoint &outTopLeft) const
     return true;
 }
 
+qint64 MainWindow::currentTargetPidOrInvalid() const
+{
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size())
+        return -1;
+    return m_windows[idx].pid;
+}
+
 bool MainWindow::currentTargetBounds(QRect &outBounds) const
 {
     const int idx = m_targetCombo->currentIndex();
@@ -1306,7 +1341,7 @@ void MainWindow::onAddNamedRegion()
     // NamedRegionEditorDialog visualizes the region being built on screen
     // itself for the duration it's open (SPEC.md 6.3) -- MainWindow no
     // longer shows any on-screen highlight from the list selection.
-    NamedRegionEditorDialog dialog(initial, targetTopLeft, hasTarget, this);
+    NamedRegionEditorDialog dialog(initial, targetTopLeft, hasTarget, currentTargetPidOrInvalid(), this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -1331,7 +1366,8 @@ void MainWindow::onEditSelectedNamedRegion()
 
     QPoint targetTopLeft;
     const bool hasTarget = currentTargetTopLeft(targetTopLeft);
-    NamedRegionEditorDialog dialog(m_namedRegions[row], targetTopLeft, hasTarget, this);
+    NamedRegionEditorDialog dialog(m_namedRegions[row], targetTopLeft, hasTarget,
+                                    currentTargetPidOrInvalid(), this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();
@@ -1956,6 +1992,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.enableScreenRecording = m_recordingCheck->isChecked();
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
     config.autoSlowdownEnabled = m_autoSlowdownCheck->isChecked();
+    config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
 
     ok = true;
     return config;
@@ -1997,6 +2034,7 @@ TestConfig MainWindow::buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessag
     config.keepTargetActive = m_keepActiveCheck->isChecked();
     config.rngSeed = quint32(m_rngSeedSpin->value());
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
+    config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
 
     ok = true;
     return config;
@@ -2956,6 +2994,7 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["enableScreenRecording"] = m_recordingCheck->isChecked();
     timing["enableCrashDumpCollection"] = m_crashDumpCollectionCheck->isChecked();
     timing["autoSlowdownEnabled"] = m_autoSlowdownCheck->isChecked();
+    timing["disableAccessibilityFeatures"] = m_disableAccessibilityCheck->isChecked();
     root["timing"] = timing;
     return root;
 }
@@ -3055,6 +3094,8 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_crashDumpCollectionCheck->setChecked(
         timing["enableCrashDumpCollection"].toBool(m_crashDumpCollectionCheck->isChecked()));
     m_autoSlowdownCheck->setChecked(timing["autoSlowdownEnabled"].toBool(m_autoSlowdownCheck->isChecked()));
+    m_disableAccessibilityCheck->setChecked(
+        timing["disableAccessibilityFeatures"].toBool(m_disableAccessibilityCheck->isChecked()));
 
     refreshNamedRegionList();
     refreshSetupActionList();

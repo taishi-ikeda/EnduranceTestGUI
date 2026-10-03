@@ -164,6 +164,14 @@ void RandomActionEngine::start(const TestConfig &config)
     if (m_running)
         stop();
 
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: applied before anything
+    // else, same rationale as calling this first thing in
+    // startSetupOnly() below -- see TestConfig::disableAccessibilityFeatures'
+    // own comment.
+    PlatformAutomation::setAccessibilityFeaturesDisabled(config.disableAccessibilityFeatures);
+    m_objectTargetCache.clear();
+    m_lastResolvedObjectRegionName.clear();
+
     m_config = config;
     m_iterationCount = 0;
     m_currentStepIndex = 0;
@@ -501,9 +509,63 @@ void RandomActionEngine::sampleResourceUsage()
                          .arg(cpuPercent, 0, 'f', 1));
 }
 
+bool RandomActionEngine::resolveObjectTargetRegion(const NamedRegion &region, QList<QRect> &outIncludeRegions,
+                                                    QList<QRect> &outExcludeRegions)
+{
+    outExcludeRegions.clear();
+    const ObjectTarget &target = region.objectTarget;
+
+    const bool enteringFresh = (m_lastResolvedObjectRegionName != region.name);
+    m_lastResolvedObjectRegionName = region.name;
+
+    auto it = m_objectTargetCache.find(region.name);
+    bool needResolve = enteringFresh || it == m_objectTargetCache.end() || !it->second.handle.isValid();
+    if (!needResolve && target.reresolveEveryActions > 0 &&
+        it->second.actionsSinceResolve >= target.reresolveEveryActions) {
+        needResolve = true;
+    }
+
+    if (needResolve) {
+        PlatformAutomation::AccessibleObjectHandle handle = PlatformAutomation::findAccessibleObject(
+            m_config.targetPid, target.role, target.name, target.occurrenceIndex);
+        if (!handle.isValid()) {
+            m_objectTargetCache.erase(region.name);
+            return false;
+        }
+        CachedObjectTarget entry;
+        entry.handle = std::move(handle);
+        entry.actionsSinceResolve = 0;
+        m_objectTargetCache[region.name] = std::move(entry);
+        it = m_objectTargetCache.find(region.name);
+    }
+
+    QRect bounds;
+    if (!it->second.handle.currentBounds(bounds)) {
+        // The cached reference has gone stale (the object was
+        // destroyed/removed since it was resolved) -- drop it so the next
+        // call starts fresh instead of repeatedly querying a dead
+        // reference, and treat this occurrence like any other resolution
+        // failure (SPEC.md: a step whose target can't currently be found is
+        // skipped, not treated as fatal).
+        m_objectTargetCache.erase(region.name);
+        return false;
+    }
+    ++it->second.actionsSinceResolve;
+
+    outIncludeRegions = {bounds};
+    if (target.useDefaultAction) {
+        m_currentRegionUsesObjectDefaultAction = true;
+        m_currentObjectHandleForAction = &it->second.handle;
+    }
+    return true;
+}
+
 bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> &outIncludeRegions,
                                             QList<QRect> &outExcludeRegions)
 {
+    m_currentRegionUsesObjectDefaultAction = false;
+    m_currentObjectHandleForAction = nullptr;
+
     if (step.targetsPopupDialog) {
         // SPEC.md 6.2追加実装及び修正依頼: operate on whichever top-level
         // window the target process currently has open besides the main
@@ -544,6 +606,8 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
 
     for (const NamedRegion &region : m_config.namedRegions) {
         if (region.name == step.regionName) {
+            if (region.isObjectTarget)
+                return resolveObjectTargetRegion(region, outIncludeRegions, outExcludeRegions);
             if (region.regions.isEmpty())
                 return false;
             outIncludeRegions = region.regions;
@@ -1246,6 +1310,21 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     QString desc;
     switch (kind) {
     case ActionKind::Click: {
+        // SPEC.md 追加実装依頼「名前付きオブジェクト」:
+        // ObjectTarget::useDefaultAction -- invoke the resolved object's
+        // registered default action directly (no synthetic mouse event,
+        // not left/right-button-specific) instead of clicking `pt`. A
+        // failure here (stale handle/no default action) is logged and
+        // simply counts as this occurrence's outcome -- resolveStepRegion()
+        // already dropped the stale cache entry, so the next action
+        // re-resolves from scratch rather than repeating the same failure.
+        if (m_currentRegionUsesObjectDefaultAction && m_currentObjectHandleForAction) {
+            const bool actionOk = m_currentObjectHandleForAction->performDefaultAction();
+            desc = actionOk ? I18n::t(QStringLiteral("名前付きオブジェクトの既定アクションを実行"))
+                             : I18n::t(QStringLiteral("名前付きオブジェクトの既定アクション実行に失敗しました"));
+            break;
+        }
+
         QList<Qt::MouseButton> buttons;
         if (step.enableLeftClick)
             buttons << Qt::LeftButton;

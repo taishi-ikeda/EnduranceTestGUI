@@ -192,6 +192,29 @@ ActionParams actionParamsFromJson(const QJsonObject &o)
     return p;
 }
 
+// SPEC.md 追加実装依頼「名前付きオブジェクト」
+QJsonObject objectTargetToJson(const ObjectTarget &t)
+{
+    QJsonObject o;
+    o["role"] = t.role;
+    o["name"] = t.name;
+    o["occurrenceIndex"] = t.occurrenceIndex;
+    o["useDefaultAction"] = t.useDefaultAction;
+    o["reresolveEveryActions"] = t.reresolveEveryActions;
+    return o;
+}
+
+ObjectTarget objectTargetFromJson(const QJsonObject &o)
+{
+    ObjectTarget t;
+    t.role = o["role"].toString();
+    t.name = o["name"].toString();
+    t.occurrenceIndex = o["occurrenceIndex"].toInt(0);
+    t.useDefaultAction = o["useDefaultAction"].toBool(false);
+    t.reresolveEveryActions = o["reresolveEveryActions"].toInt(0);
+    return t;
+}
+
 QJsonObject namedRegionToJson(const NamedRegion &r)
 {
     QJsonObject o;
@@ -201,6 +224,13 @@ QJsonObject namedRegionToJson(const NamedRegion &r)
     o["followsTargetWindow"] = r.followsTargetWindow;
     o["anchorTopLeftX"] = r.anchorTopLeft.x();
     o["anchorTopLeftY"] = r.anchorTopLeft.y();
+    // Old presets (predating this field) have neither key, which
+    // namedRegionFromJson() below correctly reads back as isObjectTarget ==
+    // false -- the rectangle-based fields above are always present/
+    // meaningful regardless, so there is nothing to migrate.
+    o["isObjectTarget"] = r.isObjectTarget;
+    if (r.isObjectTarget)
+        o["objectTarget"] = objectTargetToJson(r.objectTarget);
     return o;
 }
 
@@ -212,6 +242,9 @@ NamedRegion namedRegionFromJson(const QJsonObject &o)
     r.excludeRegions = rectListFromJson(o["excludeRegions"].toArray());
     r.followsTargetWindow = o["followsTargetWindow"].toBool(false);
     r.anchorTopLeft = QPoint(o["anchorTopLeftX"].toInt(), o["anchorTopLeftY"].toInt());
+    r.isObjectTarget = o["isObjectTarget"].toBool(false);
+    if (o.contains("objectTarget"))
+        r.objectTarget = objectTargetFromJson(o["objectTarget"].toObject());
     return r;
 }
 

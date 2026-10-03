@@ -16,6 +16,28 @@
 namespace PlatformAutomation
 {
 
+namespace
+{
+// SPEC.md 追加実装依頼「名前付きオブジェクト」: master override, checked by
+// every Accessibility-API-touching function below (the pre-existing
+// context-menu/dialog-button/accessibleNameAtPoint ones too, not just the
+// new findAccessibleObject()/accessibleObjectAtPoint()) before doing
+// anything else -- see setAccessibilityFeaturesDisabled()'s own doc comment
+// in PlatformAutomation.h. Not atomic: only ever set from the UI thread,
+// before a run starts, never concurrently with a run already using it.
+bool g_accessibilityDisabled = false;
+}  // namespace
+
+void setAccessibilityFeaturesDisabled(bool disabled)
+{
+    g_accessibilityDisabled = disabled;
+}
+
+bool accessibilityFeaturesDisabled()
+{
+    return g_accessibilityDisabled;
+}
+
 bool isAccessibilityTrusted(bool promptIfNeeded)
 {
     NSDictionary *options = @{
@@ -471,6 +493,8 @@ static AXUIElementRef copyMenuAncestor(AXUIElementRef start)
 
 static AXUIElementRef findOpenMenuElement(qint64 expectedOwnerPid)
 {
+    if (accessibilityFeaturesDisabled())
+        return nullptr;
     CFArrayRef cfWindows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
     if (!cfWindows)
         return nullptr;
@@ -621,6 +645,8 @@ static AXUIElementRef copyAncestorWithRole(AXUIElementRef start, CFStringRef wan
 
 static AXUIElementRef findFrontmostDialogElement(qint64 expectedOwnerPid)
 {
+    if (accessibilityFeaturesDisabled())
+        return nullptr;
     CFArrayRef cfWindows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
     if (!cfWindows)
         return nullptr;
@@ -721,6 +747,8 @@ void dismissContextMenu()
 
 QString accessibleNameAtPoint(const QPoint &pt)
 {
+    if (accessibilityFeaturesDisabled())
+        return QString();
     AXUIElementRef systemWide = AXUIElementCreateSystemWide();
     AXUIElementRef element = nullptr;
     const AXError err =
@@ -757,6 +785,249 @@ QString accessibleNameAtPoint(const QPoint &pt)
     }
     CFRelease(element);
     return result;
+}
+
+// SPEC.md 追加実装依頼「名前付きオブジェクト」: this node's current
+// on-screen bounding box via its kAXPosition/kAXSize attributes, or false if
+// either is missing/unreadable -- callers treat that as "this reference is
+// now stale" (see AccessibleObjectHandle::currentBounds()). Same
+// AXValueGetValue(..., kAXValueCGPointType/kAXValueCGSizeType, ...) pattern
+// copyAXWindow() below already uses for a window's own position/size.
+static bool getElementBounds(AXUIElementRef node, QRect &out)
+{
+    AXValueRef posValue = nullptr;
+    AXValueRef sizeValue = nullptr;
+    CGPoint pos = CGPointZero;
+    CGSize size = CGSizeZero;
+    bool havePos = false;
+    bool haveSize = false;
+    if (AXUIElementCopyAttributeValue(node, kAXPositionAttribute, (CFTypeRef *)&posValue) ==
+            kAXErrorSuccess &&
+        posValue) {
+        havePos = AXValueGetValue(posValue, (AXValueType)kAXValueCGPointType, &pos);
+        CFRelease(posValue);
+    }
+    if (AXUIElementCopyAttributeValue(node, kAXSizeAttribute, (CFTypeRef *)&sizeValue) ==
+            kAXErrorSuccess &&
+        sizeValue) {
+        haveSize = AXValueGetValue(sizeValue, (AXValueType)kAXValueCGSizeType, &size);
+        CFRelease(sizeValue);
+    }
+    if (!havePos || !haveSize)
+        return false;
+    out = QRect(qRound(pos.x), qRound(pos.y), qRound(size.width), qRound(size.height));
+    return true;
+}
+
+// Bounded recursive search of `node`'s subtree for a descendant whose
+// kAXRoleAttribute and kAXTitleAttribute both match exactly (role as the
+// backend reports it, e.g. "AXButton", "AXMenuItem", "AXCheckBox" -- see
+// ObjectTarget::role's comment), visiting matches in document order and
+// returning the `occurrenceIndex`'th one (0-based, via `matchesSeen`) --
+// used by findAccessibleObject() below. Same bounded-traversal rationale as
+// findNamedElementRecursive() above, just also role-checked and not
+// restricted to actionable nodes, since a check box or menu-bar item some
+// ObjectTarget only wants the bounding box of (useDefaultAction == false)
+// need not be "pressable" to begin with.
+static AXUIElementRef findRoleNamedElementRecursive(AXUIElementRef node, const QString &role,
+                                                     const QString &name, int occurrenceIndex,
+                                                     int &matchesSeen, int depth, int &budget)
+{
+    if (!node || depth > 20 || budget <= 0)
+        return nullptr;
+    --budget;
+
+    bool roleMatches = false;
+    CFStringRef nodeRole = nullptr;
+    if (AXUIElementCopyAttributeValue(node, kAXRoleAttribute, (CFTypeRef *)&nodeRole) ==
+            kAXErrorSuccess &&
+        nodeRole) {
+        roleMatches = (QString::fromCFString(nodeRole) == role);
+        CFRelease(nodeRole);
+    }
+
+    bool nameMatches = false;
+    if (roleMatches) {
+        CFStringRef title = nullptr;
+        if (AXUIElementCopyAttributeValue(node, kAXTitleAttribute, (CFTypeRef *)&title) ==
+                kAXErrorSuccess &&
+            title) {
+            nameMatches = (QString::fromCFString(title) == name);
+            CFRelease(title);
+        }
+    }
+
+    if (roleMatches && nameMatches) {
+        if (matchesSeen == occurrenceIndex) {
+            CFRetain(node);
+            return node;
+        }
+        ++matchesSeen;
+    }
+
+    CFArrayRef children = nullptr;
+    if (AXUIElementCopyAttributeValue(node, kAXChildrenAttribute, (CFTypeRef *)&children) ==
+            kAXErrorSuccess &&
+        children) {
+        const CFIndex count = CFArrayGetCount(children);
+        for (CFIndex i = 0; i < count && budget > 0; ++i) {
+            AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+            AXUIElementRef found = findRoleNamedElementRecursive(child, role, name, occurrenceIndex,
+                                                                  matchesSeen, depth + 1, budget);
+            if (found) {
+                CFRelease(children);
+                return found;
+            }
+        }
+        CFRelease(children);
+    }
+    return nullptr;
+}
+
+struct AccessibleObjectHandle::Impl
+{
+    AXUIElementRef element = nullptr;  // owned reference; released in ~Impl()
+    bool valid = false;
+
+    ~Impl()
+    {
+        if (element)
+            CFRelease(element);
+    }
+};
+
+AccessibleObjectHandle::AccessibleObjectHandle() = default;
+AccessibleObjectHandle::~AccessibleObjectHandle() = default;
+AccessibleObjectHandle::AccessibleObjectHandle(AccessibleObjectHandle &&) noexcept = default;
+AccessibleObjectHandle &AccessibleObjectHandle::operator=(AccessibleObjectHandle &&) noexcept = default;
+
+bool AccessibleObjectHandle::isValid() const
+{
+    return m_impl && m_impl->valid;
+}
+
+bool AccessibleObjectHandle::currentBounds(QRect &out) const
+{
+    if (!isValid())
+        return false;
+    if (!getElementBounds(m_impl->element, out)) {
+        m_impl->valid = false;
+        return false;
+    }
+    return true;
+}
+
+bool AccessibleObjectHandle::performDefaultAction() const
+{
+    if (!isValid())
+        return false;
+    const bool ok = (AXUIElementPerformAction(m_impl->element, kAXPressAction) == kAXErrorSuccess);
+    if (!ok)
+        m_impl->valid = false;
+    return ok;
+}
+
+AccessibleObjectInfo accessibleObjectAtPoint(const QPoint &pt, qint64 expectedOwnerPid)
+{
+    // Scoped to expectedOwnerPid when given (AXUIElementCopyElementAtPosition
+    // accepts either the system-wide accessibility object -- unscoped, finds
+    // whatever is frontmost at that screen point in any app -- or a specific
+    // application's own accessibility object, which limits the search to
+    // that application; see Apple's AXUIElementCopyElementAtPosition docs).
+    // Scoping here matters for more than precision: ObjectPickerOverlay is
+    // itself a full-screen always-on-top AT-SPI/AX-visible Qt window
+    // belonging to this same process, so an unscoped system-wide hit-test
+    // could match the overlay's own widget tree at the clicked point instead
+    // of the target application's (same reasoning as hitTestDesktop()'s
+    // comment in Automation_linux.cpp, which has an equivalent fix).
+    AccessibleObjectInfo info;
+    if (accessibilityFeaturesDisabled())
+        return info;
+
+    AXUIElementRef searchRoot = expectedOwnerPid > 0
+                                     ? AXUIElementCreateApplication((pid_t)expectedOwnerPid)
+                                     : AXUIElementCreateSystemWide();
+    AXUIElementRef element = nullptr;
+    const AXError err =
+        AXUIElementCopyElementAtPosition(searchRoot, (float)pt.x(), (float)pt.y(), &element);
+    CFRelease(searchRoot);
+    if (err != kAXErrorSuccess || !element)
+        return info;
+
+    QRect bounds;
+    if (getElementBounds(element, bounds)) {
+        info.found = true;
+        info.bounds = bounds;
+        CFStringRef title = nullptr;
+        if (AXUIElementCopyAttributeValue(element, kAXTitleAttribute, (CFTypeRef *)&title) ==
+                kAXErrorSuccess &&
+            title) {
+            info.name = QString::fromCFString(title);
+            CFRelease(title);
+        }
+        CFStringRef role = nullptr;
+        if (AXUIElementCopyAttributeValue(element, kAXRoleAttribute, (CFTypeRef *)&role) ==
+                kAXErrorSuccess &&
+            role) {
+            info.role = QString::fromCFString(role);
+            CFRelease(role);
+        }
+    }
+    CFRelease(element);
+    return info;
+}
+
+AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
+                                             const QString &name, int occurrenceIndex)
+{
+    AccessibleObjectHandle handle;
+    if (accessibilityFeaturesDisabled())
+        return handle;
+
+    AXUIElementRef app = AXUIElementCreateApplication((pid_t)expectedOwnerPid);
+    if (!app)
+        return handle;
+
+    int budget = 4000;
+    int matchesSeen = 0;
+    const int wantIndex = qMax(0, occurrenceIndex);
+    AXUIElementRef found = nullptr;
+
+    // SPEC.md 追加実装依頼「メニューバーの項目も対象にしたい」: the app's
+    // menu bar is not reachable via its AXChildren the way its windows are
+    // -- it needs its own kAXMenuBarAttribute lookup -- so it is searched
+    // explicitly, before the windows, rather than relying on the generic
+    // recursive search to stumble onto it.
+    AXUIElementRef menuBar = nullptr;
+    if (AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute, (CFTypeRef *)&menuBar) ==
+            kAXErrorSuccess &&
+        menuBar) {
+        found = findRoleNamedElementRecursive(menuBar, role, name, wantIndex, matchesSeen, 0, budget);
+        CFRelease(menuBar);
+    }
+
+    if (!found) {
+        CFArrayRef windows = nullptr;
+        if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&windows) ==
+                kAXErrorSuccess &&
+            windows) {
+            const CFIndex count = CFArrayGetCount(windows);
+            for (CFIndex i = 0; i < count && !found && budget > 0; ++i) {
+                AXUIElementRef win = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
+                found = findRoleNamedElementRecursive(win, role, name, wantIndex, matchesSeen, 0, budget);
+            }
+            CFRelease(windows);
+        }
+    }
+
+    CFRelease(app);
+    if (!found)
+        return handle;
+
+    handle.m_impl = std::make_unique<AccessibleObjectHandle::Impl>();
+    handle.m_impl->element = found;  // adopts the reference findRoleNamedElementRecursive returned
+    handle.m_impl->valid = true;
+    return handle;
 }
 
 QString findRecentCrashReport(qint64 /*pid*/, const QString &appName)

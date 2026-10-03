@@ -201,6 +201,29 @@ KeySym qtKeyToX11Keysym(Qt::Key key)
 
 }  // namespace
 
+namespace
+{
+// SPEC.md 追加実装依頼「名前付きオブジェクト」: master override, checked by
+// every AT-SPI-touching function below (the pre-existing context-menu/
+// dialog-button/accessibleNameAtPoint ones too, not just the new
+// findAccessibleObject()/accessibleObjectAtPoint()) before doing anything
+// else -- see setAccessibilityFeaturesDisabled()'s own doc comment in
+// PlatformAutomation.h. Not atomic: this is only ever set from the UI
+// thread, before a run starts, never concurrently with a run already using
+// it.
+bool g_accessibilityDisabled = false;
+}  // namespace
+
+void setAccessibilityFeaturesDisabled(bool disabled)
+{
+    g_accessibilityDisabled = disabled;
+}
+
+bool accessibilityFeaturesDisabled()
+{
+    return g_accessibilityDisabled;
+}
+
 bool isAccessibilityTrusted(bool /*promptIfNeeded*/)
 {
     Display *dpy = display();
@@ -778,6 +801,26 @@ bool atspiUsable()
     return usable;
 }
 
+// Shared gate for every desktop-wide AT-SPI search below (clickButtonByName,
+// accessibleNameAtPoint, accessibleObjectAtPoint, findAccessibleObject):
+// returns a new reference to the AT-SPI desktop root the caller must
+// g_object_unref, or nullptr if accessibility has been disabled
+// (accessibilityFeaturesDisabled()), the bus isn't reachable (atspiUsable()),
+// or atspi_get_desktop() itself failed. Lazily calls atspi_init() at most
+// once per process, same as findOpenMenu() above does independently for the
+// context-menu functions.
+AtspiAccessible *getUsableDesktop()
+{
+    if (accessibilityFeaturesDisabled() || !atspiUsable())
+        return nullptr;
+    static bool inited = false;
+    if (!inited) {
+        atspi_init();
+        inited = true;
+    }
+    return atspi_get_desktop(0);
+}
+
 // Experimental: best-effort search of the AT-SPI accessibility tree for a
 // currently-visible popup/context menu (role MENU, state VISIBLE). Bounds
 // the traversal (depth and total nodes visited) since walking the entire
@@ -857,7 +900,7 @@ AtspiAccessible *findNamedActionableRecursive(AtspiAccessible *node, const QStri
 
 AtspiAccessible *findOpenMenu()
 {
-    if (!atspiUsable())
+    if (accessibilityFeaturesDisabled() || !atspiUsable())
         return nullptr;
     static bool inited = false;
     if (!inited) {
@@ -872,13 +915,251 @@ AtspiAccessible *findOpenMenu()
     g_object_unref(desktop);
     return menu;
 }
+
+// SPEC.md 追加実装依頼「名前付きオブジェクト」: this node's current
+// on-screen bounding box via its Component interface, or false if it has
+// none (not all roles implement Component) or the call otherwise failed --
+// callers treat that as "this reference is now stale" (see
+// AccessibleObjectHandle::currentBounds()).
+bool getExtents(AtspiAccessible *node, QRect &out)
+{
+    AtspiComponent *component = atspi_accessible_get_component_iface(node);
+    if (!component)
+        return false;
+    AtspiRect *rect = atspi_component_get_extents(component, ATSPI_COORD_TYPE_SCREEN, nullptr);
+    g_object_unref(component);
+    if (!rect)
+        return false;
+    out = QRect(rect->x, rect->y, rect->width, rect->height);
+    g_free(rect);
+    return true;
+}
+
+// SPEC.md 追加実装依頼「名前付きオブジェクト」(ObjectPickerOverlay): calling
+// Component.GetAccessibleAtPoint on the *desktop* pseudo-accessible itself
+// (atspi_component_get_accessible_at_point(desktop, ...)) always returns
+// null on this project's own at-spi2-core/registry versions -- confirmed by
+// direct introspection of the registry in SPEC.md's Linux/Xvfb sandbox.
+// Nor does calling it on one of the desktop's direct application children
+// help: atspi_accessible_get_component_iface() returns null for the bare
+// *application* object itself (it has no single on-screen bounding box, so
+// it doesn't advertise the Component interface client-side, even though
+// at-spi2-core's D-Bus bridge would technically still answer a raw
+// Component method call sent straight at its object path -- that
+// client-side gate is what makes the difference). Only a real top-level
+// *window* -- a child of the application object -- implements Component
+// usefully. Working around both gaps here by doing the fan-out ourselves:
+// for each of the desktop's direct children (each a registered
+// application, optionally filtered to expectedOwnerPid -- see below), try
+// each of *that application's* children (its windows) in turn, hit-testing
+// whichever ones do expose a Component interface, and return the first
+// hit. When expectedOwnerPid is a real pid (> 0), only that application's
+// windows are tried -- both tighter (correct on overlapping windows) and
+// necessary for ObjectPickerOverlay specifically, which is itself a
+// full-screen always-on-top AT-SPI-visible Qt window belonging to *this*
+// process: an unscoped search could match the overlay's own widget tree
+// at the clicked point instead of the target application's, since both are
+// registered applications and either could be returned first depending on
+// iteration order. Returns a new reference the caller must g_object_unref,
+// or nullptr if no application (or the expected one) has anything there.
+AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 expectedOwnerPid)
+{
+    const gint appCount = atspi_accessible_get_child_count(desktop, nullptr);
+    for (gint i = 0; i < appCount; ++i) {
+        AtspiAccessible *app = atspi_accessible_get_child_at_index(desktop, i, nullptr);
+        if (!app)
+            continue;
+        if (expectedOwnerPid > 0) {
+            const guint pid = atspi_accessible_get_process_id(app, nullptr);
+            if (static_cast<qint64>(pid) != expectedOwnerPid) {
+                g_object_unref(app);
+                continue;
+            }
+        }
+
+        AtspiAccessible *hit = nullptr;
+        const gint windowCount = atspi_accessible_get_child_count(app, nullptr);
+        for (gint w = 0; w < windowCount && !hit; ++w) {
+            AtspiAccessible *window = atspi_accessible_get_child_at_index(app, w, nullptr);
+            if (!window)
+                continue;
+            AtspiComponent *component = atspi_accessible_get_component_iface(window);
+            if (component) {
+                hit = atspi_component_get_accessible_at_point(component, x, y, ATSPI_COORD_TYPE_SCREEN,
+                                                                nullptr);
+                g_object_unref(component);
+            }
+            g_object_unref(window);
+        }
+        g_object_unref(app);
+        if (hit)
+            return hit;
+    }
+    return nullptr;
+}
+
+// Bounded recursive search of `node`'s subtree for a descendant whose role
+// name and accessible name both match exactly (role as reported by
+// atspi_accessible_get_role_name(), e.g. "push button", "menu item", "check
+// box" -- not scoped to any particular ATSPI_ROLE_* enum value, so this
+// finds menu-bar items and ordinary widgets alike), visiting matches in
+// document order and returning the `occurrenceIndex`'th one (0-based, via
+// `matchesSeen`) -- used by findAccessibleObject() below. Same bounded-
+// traversal rationale as findNamedActionableRecursive() above, just not
+// restricted to actionable (has-an-Action-interface) nodes, since a check
+// box or a menu-bar item some ObjectTarget only wants the bounding box of
+// (useDefaultAction == false) need not have one either. Returns a new
+// reference the caller must g_object_unref, or nullptr if no such
+// occurrence exists within the budget.
+AtspiAccessible *findRoleNamedRecursive(AtspiAccessible *node, const QString &role, const QString &name,
+                                        int occurrenceIndex, int &matchesSeen, int depth, int &budget)
+{
+    if (!node || depth > 20 || budget <= 0)
+        return nullptr;
+    --budget;
+
+    gchar *nodeRole = atspi_accessible_get_role_name(node, nullptr);
+    gchar *nodeName = atspi_accessible_get_name(node, nullptr);
+    const bool roleMatches = nodeRole && role == QString::fromUtf8(nodeRole);
+    const bool nameMatches = nodeName && name == QString::fromUtf8(nodeName);
+    if (nodeRole)
+        g_free(nodeRole);
+    if (nodeName)
+        g_free(nodeName);
+    if (roleMatches && nameMatches) {
+        if (matchesSeen == occurrenceIndex) {
+            g_object_ref(node);
+            return node;
+        }
+        ++matchesSeen;
+    }
+
+    const gint childCount = atspi_accessible_get_child_count(node, nullptr);
+    for (gint i = 0; i < childCount && budget > 0; ++i) {
+        AtspiAccessible *child = atspi_accessible_get_child_at_index(node, i, nullptr);
+        if (!child)
+            continue;
+        AtspiAccessible *found =
+            findRoleNamedRecursive(child, role, name, occurrenceIndex, matchesSeen, depth + 1, budget);
+        g_object_unref(child);
+        if (found)
+            return found;
+    }
+    return nullptr;
+}
 }  // namespace
+
+struct AccessibleObjectHandle::Impl
+{
+    AtspiAccessible *node = nullptr;  // owned reference; released in ~Impl()
+    bool valid = false;
+
+    ~Impl()
+    {
+        if (node)
+            g_object_unref(node);
+    }
+};
+
+AccessibleObjectHandle::AccessibleObjectHandle() = default;
+AccessibleObjectHandle::~AccessibleObjectHandle() = default;
+AccessibleObjectHandle::AccessibleObjectHandle(AccessibleObjectHandle &&) noexcept = default;
+AccessibleObjectHandle &AccessibleObjectHandle::operator=(AccessibleObjectHandle &&) noexcept = default;
+
+bool AccessibleObjectHandle::isValid() const
+{
+    return m_impl && m_impl->valid;
+}
+
+bool AccessibleObjectHandle::currentBounds(QRect &out) const
+{
+    if (!isValid())
+        return false;
+    if (!getExtents(m_impl->node, out)) {
+        m_impl->valid = false;
+        return false;
+    }
+    return true;
+}
+
+bool AccessibleObjectHandle::performDefaultAction() const
+{
+    if (!isValid())
+        return false;
+    AtspiAction *action = atspi_accessible_get_action_iface(m_impl->node);
+    if (!action) {
+        m_impl->valid = false;
+        return false;
+    }
+    const bool ok = atspi_action_do_action(action, 0, nullptr);
+    g_object_unref(action);
+    if (!ok)
+        m_impl->valid = false;
+    return ok;
+}
+
+AccessibleObjectInfo accessibleObjectAtPoint(const QPoint &pt, qint64 expectedOwnerPid)
+{
+    // Scoped to expectedOwnerPid via hitTestDesktop() -- see that function's
+    // comment for why (both correctness on overlapping windows and avoiding
+    // a false match against ObjectPickerOverlay's own on-top widget tree).
+    AccessibleObjectInfo info;
+    AtspiAccessible *desktop = getUsableDesktop();
+    if (!desktop)
+        return info;
+
+    AtspiAccessible *hit = hitTestDesktop(desktop, pt.x(), pt.y(), expectedOwnerPid);
+    if (hit) {
+        QRect bounds;
+        if (getExtents(hit, bounds)) {
+            gchar *name = atspi_accessible_get_name(hit, nullptr);
+            gchar *roleName = atspi_accessible_get_role_name(hit, nullptr);
+            info.found = true;
+            info.bounds = bounds;
+            info.name = (name && *name) ? QString::fromUtf8(name) : QString();
+            info.role = roleName ? QString::fromUtf8(roleName) : QString();
+            if (name)
+                g_free(name);
+            if (roleName)
+                g_free(roleName);
+        }
+        g_object_unref(hit);
+    }
+    g_object_unref(desktop);
+    return info;
+}
+
+AccessibleObjectHandle findAccessibleObject(qint64 /*expectedOwnerPid*/, const QString &role,
+                                             const QString &name, int occurrenceIndex)
+{
+    // Not scoped to expectedOwnerPid, same desktop-wide-search caveat as
+    // clickButtonByName()/accessibleNameAtPoint() above.
+    AccessibleObjectHandle handle;
+    AtspiAccessible *desktop = getUsableDesktop();
+    if (!desktop)
+        return handle;
+
+    int budget = 4000;
+    int matchesSeen = 0;
+    AtspiAccessible *node = findRoleNamedRecursive(desktop, role, name, qMax(0, occurrenceIndex),
+                                                    matchesSeen, 0, budget);
+    g_object_unref(desktop);
+    if (!node)
+        return handle;
+
+    handle.m_impl = std::make_unique<AccessibleObjectHandle::Impl>();
+    handle.m_impl->node = node;  // adopts the reference findRoleNamedRecursive returned
+    handle.m_impl->valid = true;
+    return handle;
+}
 
 QStringList listOpenContextMenuItems(qint64 /*expectedOwnerPid*/)
 {
     // Not scoped to expectedOwnerPid: see PlatformAutomation.h -- the
     // caller's active-process focus check is the primary guard on Linux.
     QStringList names;
+    if (accessibilityFeaturesDisabled())
+        return names;
     AtspiAccessible *menu = findOpenMenu();
     if (!menu)
         return names;
@@ -901,6 +1182,8 @@ QStringList listOpenContextMenuItems(qint64 /*expectedOwnerPid*/)
 
 bool clickContextMenuItem(const QString &itemName, qint64 /*expectedOwnerPid*/)
 {
+    if (accessibilityFeaturesDisabled())
+        return false;
     AtspiAccessible *menu = findOpenMenu();
     if (!menu)
         return false;
@@ -929,6 +1212,8 @@ bool clickContextMenuItem(const QString &itemName, qint64 /*expectedOwnerPid*/)
 
 bool clickContextMenuItemAt(int index, qint64 /*expectedOwnerPid*/)
 {
+    if (accessibilityFeaturesDisabled())
+        return false;
     AtspiAccessible *menu = findOpenMenu();
     if (!menu)
         return false;
@@ -952,14 +1237,7 @@ bool clickContextMenuItemAt(int index, qint64 /*expectedOwnerPid*/)
 
 bool clickButtonByName(const QString &buttonName, qint64 /*expectedOwnerPid*/)
 {
-    if (!atspiUsable())
-        return false;
-    static bool inited = false;
-    if (!inited) {
-        atspi_init();
-        inited = true;
-    }
-    AtspiAccessible *desktop = atspi_get_desktop(0);
+    AtspiAccessible *desktop = getUsableDesktop();
     if (!desktop)
         return false;
     int budget = 4000;
@@ -980,14 +1258,7 @@ bool clickButtonByName(const QString &buttonName, qint64 /*expectedOwnerPid*/)
 
 QString accessibleNameAtPoint(const QPoint &pt)
 {
-    if (!atspiUsable())
-        return QString();
-    static bool inited = false;
-    if (!inited) {
-        atspi_init();
-        inited = true;
-    }
-    AtspiAccessible *desktop = atspi_get_desktop(0);
+    AtspiAccessible *desktop = getUsableDesktop();
     if (!desktop)
         return QString();
 
@@ -1042,6 +1313,41 @@ bool clickButtonByName(const QString & /*buttonName*/, qint64 /*expectedOwnerPid
 QString accessibleNameAtPoint(const QPoint & /*pt*/)
 {
     return QString();  // AT-SPI not available at build time; see CMakeLists.txt.
+}
+
+struct AccessibleObjectHandle::Impl
+{
+};
+
+AccessibleObjectHandle::AccessibleObjectHandle() = default;
+AccessibleObjectHandle::~AccessibleObjectHandle() = default;
+AccessibleObjectHandle::AccessibleObjectHandle(AccessibleObjectHandle &&) noexcept = default;
+AccessibleObjectHandle &AccessibleObjectHandle::operator=(AccessibleObjectHandle &&) noexcept = default;
+
+bool AccessibleObjectHandle::isValid() const
+{
+    return false;  // AT-SPI not available at build time; see CMakeLists.txt.
+}
+
+bool AccessibleObjectHandle::currentBounds(QRect & /*out*/) const
+{
+    return false;
+}
+
+bool AccessibleObjectHandle::performDefaultAction() const
+{
+    return false;
+}
+
+AccessibleObjectInfo accessibleObjectAtPoint(const QPoint & /*pt*/, qint64 /*expectedOwnerPid*/)
+{
+    return {};  // AT-SPI not available at build time; see CMakeLists.txt.
+}
+
+AccessibleObjectHandle findAccessibleObject(qint64 /*expectedOwnerPid*/, const QString & /*role*/,
+                                             const QString & /*name*/, int /*occurrenceIndex*/)
+{
+    return {};  // AT-SPI not available at build time; see CMakeLists.txt.
 }
 
 #endif  // HAVE_ATSPI

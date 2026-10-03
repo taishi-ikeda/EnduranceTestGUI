@@ -164,6 +164,11 @@ private:
     // region's "follow target window" option (SPEC.md 6.3/10). Returns
     // false (outTopLeft left unset) if no target is currently selectable.
     bool currentTargetTopLeft(QPoint &outTopLeft) const;
+    // pid of whatever target is currently selected in m_targetCombo, or -1
+    // if none is selectable -- passed to NamedRegionEditorDialog for its
+    // "画面上の部品を指定" mode's accessibility-tree lookups (SPEC.md
+    // 追加実装依頼「名前付きオブジェクト」).
+    qint64 currentTargetPidOrInvalid() const;
     // Live bounds of whatever target is currently selected in m_targetCombo,
     // if any -- used by the saved window size/position feature below
     // (SPEC.md 10 追加実装及び修正依頼). Returns false (outBounds left
@@ -564,6 +569,7 @@ private:
     QCheckBox *m_recordingCheck = nullptr;
     QCheckBox *m_crashDumpCollectionCheck = nullptr;
     QCheckBox *m_autoSlowdownCheck = nullptr;
+    QCheckBox *m_disableAccessibilityCheck = nullptr;
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;

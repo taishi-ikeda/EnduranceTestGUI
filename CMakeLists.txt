@@ -56,6 +56,7 @@ set(SOURCES
     src/RegionHighlightOverlay.cpp
     src/PointPickerOverlay.cpp
     src/PointHighlightOverlay.cpp
+    src/ObjectPickerOverlay.cpp
     src/StopPanel.cpp
     src/StepEditorDialog.cpp
     src/ActionParamsEditor.cpp
@@ -80,6 +81,7 @@ set(HEADERS
     src/OverlayGeometry.h
     src/PointPickerOverlay.h
     src/PointHighlightOverlay.h
+    src/ObjectPickerOverlay.h
     src/StopPanel.h
     src/StepEditorDialog.h
     src/ActionParamsEditor.h

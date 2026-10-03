@@ -19,6 +19,8 @@
 #include <QStringList>
 #include <Qt>
 
+#include <memory>
+
 struct WindowInfo
 {
     qint64 pid = -1;
@@ -294,5 +296,114 @@ QString accessibleNameAtPoint(const QPoint &pt);
 // permission to read that location. Meant to be called once, right after
 // noticing the target process has crashed (SPEC.md 6.7).
 QString findRecentCrashReport(qint64 pid, const QString &appName);
+
+// --- Named-object targeting (SPEC.md 追加実装依頼「名前付きオブジェクト」) ---
+// Generalizes the context-menu/dialog-button accessible-name lookups above
+// into a reusable "find me an object by role+name, then let me repeatedly
+// query its bounds or invoke its default action" primitive, backing
+// NamedRegion::isObjectTarget regions. Same accessibility backend (macOS
+// Accessibility API / Linux AT-SPI) and the same "not exhaustively verified
+// against every toolkit" caveat as the rest of this section.
+
+// Master override: when set to true, every function in this section --
+// and, retroactively, listOpenContextMenuItems()/clickContextMenuItem()/
+// clickContextMenuItemAt()/clickButtonByName()/accessibleNameAtPoint() above
+// too -- must behave exactly as if accessibility were unusable in this
+// environment, returning their "not found/not available" result
+// immediately, without attempting any OS accessibility API call (not even
+// backend initialization). Intended to be set once, right before a run
+// starts, from TestConfig::disableAccessibilityFeatures, so a run configured
+// that way is guaranteed to pay zero accessibility-related overhead no
+// matter what regions/steps happen to reference accessibility features.
+// Persists across calls (it is not a one-shot flag) until set back to
+// false.
+void setAccessibilityFeaturesDisabled(bool disabled);
+bool accessibilityFeaturesDisabled();
+
+struct AccessibleObjectInfo
+{
+    bool found = false;
+    QRect bounds;    // screen coordinates
+    QString role;    // backend-native role string (see ObjectTarget::role's comment)
+    QString name;    // accessible name/label, if any
+};
+
+// Diagnostic/picker use: resolves whatever accessible object is at this
+// screen point (same technique as accessibleNameAtPoint(), but returning
+// the full role/name/bounds instead of just a display string), for the
+// object-picker overlay to show the user what they are about to register.
+// `expectedOwnerPid` narrows the search to that application on both
+// platforms: on Linux this is more than an optimization, since
+// ObjectPickerOverlay is itself a full-screen always-on-top AT-SPI-visible
+// window belonging to this same process, so an unscoped search could match
+// the overlay's own widget tree at the clicked point instead of the target
+// application's (see hitTestDesktop()'s comment in Automation_linux.cpp).
+// found is false if no object could be resolved at that point, accessibility
+// is disabled, or this environment can't use its accessibility backend at
+// all.
+AccessibleObjectInfo accessibleObjectAtPoint(const QPoint &pt, qint64 expectedOwnerPid);
+
+// A cached reference to one resolved accessible object, kept across
+// repeated actions so only the *first* use of an ObjectTarget region within
+// a step pays for a tree search -- see ObjectTarget::reresolveEveryActions.
+// Move-only (copying an OS-level object reference has no sensible meaning
+// here); default-constructs as invalid. The backend-specific reference it
+// wraps (an AtspiAccessible* on Linux, an AXUIElementRef on macOS) is
+// defined in each platform's .cpp, never in this shared header.
+class AccessibleObjectHandle
+{
+public:
+    AccessibleObjectHandle();
+    ~AccessibleObjectHandle();
+    AccessibleObjectHandle(AccessibleObjectHandle &&other) noexcept;
+    AccessibleObjectHandle &operator=(AccessibleObjectHandle &&other) noexcept;
+    AccessibleObjectHandle(const AccessibleObjectHandle &) = delete;
+    AccessibleObjectHandle &operator=(const AccessibleObjectHandle &) = delete;
+
+    // False for a default-constructed handle, one findAccessibleObject()
+    // could not resolve, or one whose underlying object has since become
+    // stale (see currentBounds()/performDefaultAction()).
+    bool isValid() const;
+
+    // Cheaply re-queries just this held reference's current on-screen
+    // bounds (no tree search) and writes them to `out`. Returns false --
+    // and marks this handle invalid, so a subsequent isValid() check
+    // reflects it -- if the reference turned out to be stale (the object
+    // was destroyed/removed since it was resolved).
+    bool currentBounds(QRect &out) const;
+
+    // Invokes the object's registered default action ("press" for a button
+    // or menu item, "toggle" for a check box, etc. -- whatever the backend
+    // and toolkit define as that object's default action) directly, with no
+    // synthetic mouse event and no dependency on its on-screen position.
+    // Returns false (and marks this handle invalid, same as
+    // currentBounds()) if the reference is stale, or if the object has no
+    // default action to invoke.
+    bool performDefaultAction() const;
+
+    struct Impl;
+
+private:
+    // Only findAccessibleObject() below constructs a *resolved* handle (by
+    // populating m_impl directly after a successful tree search) -- every
+    // other way to obtain one goes through the public constructors/move
+    // operations above, which always leave it either empty or an exact copy
+    // of an already-resolved one.
+    friend AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
+                                                        const QString &name, int occurrenceIndex);
+    std::unique_ptr<Impl> m_impl;
+};
+
+// Searches the target process's accessibility tree (desktop-wide on Linux,
+// same not-pid-scoped caveat as listOpenContextMenuItems(); the frontmost
+// window owned by expectedOwnerPid on macOS, same technique as
+// findFrontmostDialogElement()) for an object whose role and accessible
+// name both match exactly, returning the occurrenceIndex'th such match
+// (0-based) if more than one exists. Returns an invalid handle (see
+// AccessibleObjectHandle::isValid()) if none match, if accessibility is
+// disabled (setAccessibilityFeaturesDisabled(true)), or if this platform/
+// environment cannot use its accessibility backend at all.
+AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
+                                             const QString &name, int occurrenceIndex);
 
 }  // namespace PlatformAutomation

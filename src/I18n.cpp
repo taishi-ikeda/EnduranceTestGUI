@@ -861,6 +861,56 @@ const QHash<QString, QString> &translationTable()
                         "selection screen will appear black, making other apps look invisible. "
                         "Open Settings using the button below)")},
         {QStringLiteral("画面収録の権限設定を開く"), QStringLiteral("Open Screen Recording Settings")},
+
+        // SPEC.md 追加実装依頼「名前付きオブジェクト」
+        {QStringLiteral("アクセシビリティAPI（右クリックメニュー選択・ダイアログのボタン押下・"
+                        "名前付きオブジェクト）による操作を無効にする（高速化）"),
+         QStringLiteral("Disable accessibility-API-based operations (context-menu selection, "
+                        "dialog-button press, named objects) for speed")},
+        {QStringLiteral("有効にすると、実行中にAT-SPI/Accessibility APIへ一切接続しなくなり、"
+                        "最速の座標ベース操作のみで実行します。右クリックメニュー選択・"
+                        "ダイアログのボタン押下・名前付きオブジェクトを使うステップは"
+                        "（設定したままでも）実行時にスキップされます。"),
+         QStringLiteral("When enabled, no AT-SPI/Accessibility API connection is made at all during "
+                        "the run, so only the fastest, purely coordinate-based actions are used. "
+                        "Steps using context-menu selection, dialog-button press, or a named object "
+                        "are simply skipped at run time (even if still configured).")},
+        {QStringLiteral("%1（オブジェクト指定: %2 「%3」）%4"), QStringLiteral("%1 (object: %2 \"%3\")%4")},
+        {QStringLiteral("(役割不明)"), QStringLiteral("(unknown role)")},
+        {QStringLiteral(" [既定アクション実行]"), QStringLiteral(" [invokes default action]")},
+        {QStringLiteral("矩形を描画"), QStringLiteral("Draw Rectangle")},
+        {QStringLiteral("画面上の部品を指定"), QStringLiteral("Pick an On-Screen Object")},
+        {QStringLiteral("「オブジェクトを指定...」を押すと画面が切り替わるので、対象アプリ上で部品（ボタン・"
+                        "メニュー項目・チェックボックスなど）にカーソルを合わせ、緑の枠でハイライトされた"
+                        "状態でクリックしてください。"),
+         QStringLiteral("Clicking \"Pick Object...\" switches the screen so you can hover over a "
+                        "widget in the target app (button, menu item, check box, etc.) -- once it's "
+                        "highlighted with a green outline, click it.")},
+        {QStringLiteral("オブジェクトを指定..."), QStringLiteral("Pick Object...")},
+        {QStringLiteral("クリック操作では、座標の代わりにこの部品の既定アクションを直接実行する\n"
+                        "（ボタンなら押す、チェックボックスなら切り替える、など）"),
+         QStringLiteral("For the Click action, invoke this object's default action directly instead "
+                        "of a coordinate click\n(press for a button, toggle for a check box, etc.)")},
+        {QStringLiteral("再解決の間隔（この部品の位置を再検索する頻度）:"),
+         QStringLiteral("Re-resolve interval (how often to re-search for this object's position):")},
+        {QStringLiteral("ステップが変わるたびのみ"), QStringLiteral("Only when the step changes")},
+        {QStringLiteral(" 回ごと"), QStringLiteral(" actions")},
+        {QStringLiteral("0の場合、このステップの実行が始まった時（または対象が見失われた時）にのみ"
+                        "位置を再検索します。1以上にすると、実行中もこの回数ごとに強制的に再検索し、"
+                        "レイアウトの動的な変化によく追従しますが、その分だけ低速になります。"),
+         QStringLiteral("At 0, the position is only re-searched when this step starts running (or "
+                        "when the target is lost). At 1 or more, it's also force-refreshed every "
+                        "this many actions during the run, tracking dynamic layout changes better "
+                        "at the cost of some speed.")},
+        {QStringLiteral("（まだ指定されていません）"), QStringLiteral("(not picked yet)")},
+        {QStringLiteral("指定中: %1 「%2」（%3番目の一致）"), QStringLiteral("Picked: %1 \"%2\" (match #%3)")},
+        {QStringLiteral("(名前なし)"), QStringLiteral("(no name)")},
+        {QStringLiteral("「オブジェクトを指定...」で部品を選択してください。"),
+         QStringLiteral("Please pick an object using \"Pick Object...\".")},
+        {QStringLiteral("名前付きオブジェクトの既定アクションを実行"),
+         QStringLiteral("Invoked the named object's default action")},
+        {QStringLiteral("名前付きオブジェクトの既定アクション実行に失敗しました"),
+         QStringLiteral("Failed to invoke the named object's default action")},
     };
     return table;
 }

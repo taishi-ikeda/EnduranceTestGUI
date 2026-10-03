@@ -98,6 +98,70 @@ struct ActionParams
     QStringList dialogButtonNames;
 };
 
+// A named, reusable operation target resolved via the OS accessibility tree
+// (AT-SPI on Linux / Accessibility API on macOS) instead of fixed screen
+// coordinates -- SPEC.md 追加実装依頼「名前付きオブジェクト」. Only
+// meaningful when NamedRegion::isObjectTarget is true, in which case it
+// replaces `regions`/`excludeRegions` entirely: RandomActionEngine searches
+// the target app's accessibility tree for an object whose role+name match
+// (role/name are stored verbatim as the backend reports them -- e.g. Linux's
+// `atspi_accessible_get_role_name()` returns strings like "push button",
+// "menu item", "check box"; macOS's kAXRoleAttribute returns strings like
+// "AXButton", "AXMenuItem" -- so an ObjectTarget registered on one platform
+// is not portable to the other, same as any other platform-specific
+// automation detail this tool already has), then uses whatever bounding box
+// that object currently has as the step's region, same as any other
+// NamedRegion from that point on -- so weighted random click/drag/key/
+// scroll/action-count logic is entirely unchanged; only *where the rectangle
+// comes from* differs. Searching the tree is comparatively expensive (D-Bus
+// IPC on Linux, cross-process AX calls on macOS), so RandomActionEngine
+// caches the resolved object (see AccessibleObjectHandle) rather than
+// re-searching before every single action -- see reresolveEveryActions.
+struct ObjectTarget
+{
+    QString role;  // accessible role, exactly as the backend reports it
+    QString name;  // accessible name/label to match
+
+    // 0-based: which match to use among multiple objects that share the
+    // same role+name (common for e.g. several same-styled buttons with no
+    // distinguishing label). Recorded automatically by the object-picker
+    // overlay when more than one match exists for the point the user
+    // clicked.
+    int occurrenceIndex = 0;
+
+    // false (default): a Click action performed while this region is active
+    // picks a random point within the resolved object's current bounding
+    // box and synthesizes an ordinary mouse click there, exactly like any
+    // other region -- Drag/Scroll/Key/etc. always work this way regardless
+    // of this flag, since those have no equivalent "invoke it directly"
+    // operation.
+    // true: a Click action instead calls AccessibleObjectHandle::
+    // performDefaultAction() on the cached object reference directly (the
+    // object's registered default action -- "press" for a button or menu
+    // item, "toggle" for a check box, etc.), without synthesizing any mouse
+    // event or needing a valid on-screen point at all. Appropriate for
+    // objects you want operated semantically rather than by coordinate --
+    // e.g. a menu-bar item, whose on-screen position reliably exists but
+    // whose default action is more direct and less layout-sensitive than a
+    // synthetic click would be.
+    bool useDefaultAction = false;
+
+    // 0 (default): resolve this object once when a step starts using this
+    // region (i.e. when RandomActionEngine's current top-level step/group/
+    // task member switches to one referencing this NamedRegion) and reuse
+    // that same cached reference for every action for as long as that same
+    // step keeps running, only re-resolving if the cached reference becomes
+    // invalid (e.g. the object was destroyed -- a dialog closed, a widget
+    // was removed). This is the fast path: the tree search happens at most
+    // once per step entry, never once per action.
+    // >0: in addition to the above, force a fresh re-resolve every N
+    // actions performed against this region, to notice the object having
+    // moved (not destroyed/recreated, just repositioned by a layout change)
+    // partway through a long-running step. Trades some speed for staying
+    // current -- see SPEC.md's discussion of this tradeoff.
+    int reresolveEveryActions = 0;
+};
+
 // A named, reusable operation region: one or more rectangles (absolute
 // screen coordinates) plus mask/exclude sub-rectangles within them. Managed
 // as a pool in the "①対象選択" column (add/edit/delete, each given a name)
@@ -108,6 +172,16 @@ struct NamedRegion
     QString name;
     QList<QRect> regions;         // screen coordinates, as drawn
     QList<QRect> excludeRegions;  // mask rectangles within `regions`, screen coordinates, as drawn
+
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: when true, this
+    // NamedRegion is resolved from `objectTarget` (see its own comment)
+    // instead of the `regions`/`excludeRegions`/followsTargetWindow/
+    // anchorTopLeft fields below, which are then unused/empty. Mutually
+    // exclusive with the rectangle-based fields by construction (the
+    // registration UI offers one or the other, never both for the same
+    // NamedRegion).
+    bool isObjectTarget = false;
+    ObjectTarget objectTarget;
 
     // If true, `regions`/`excludeRegions` above are treated as having been
     // drawn while the target window's top-left corner was at
@@ -132,7 +206,7 @@ struct NamedRegion
     bool followsTargetWindow = true;
     QPoint anchorTopLeft;
 
-    bool isEmpty() const { return regions.isEmpty(); }
+    bool isEmpty() const { return isObjectTarget ? objectTarget.name.isEmpty() : regions.isEmpty(); }
 };
 
 // One step of an endurance-test run: a region (either the live target-
@@ -462,4 +536,19 @@ struct TestConfig
     // sequence of actions can be reproduced later by re-entering the seed
     // that was logged when a run stopped unexpectedly (crash/anomaly).
     quint32 rngSeed = 0;
+
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: master override, off by
+    // default. When true, RandomActionEngine::start()/startSetupOnly() call
+    // PlatformAutomation::setAccessibilityFeaturesDisabled(true) before
+    // anything else runs, which makes every accessibility-tree-based feature
+    // (context-menu item selection, dialog-button-press, and any
+    // NamedRegion::isObjectTarget region) behave exactly as if AT-SPI/
+    // Accessibility were unusable in this environment -- short-circuiting
+    // before any OS accessibility API call is even attempted, not merely
+    // discarding a found result. A step referencing an object-target region
+    // is then simply skipped (same as a region that no longer exists), so a
+    // run configured this way is guaranteed to pay zero AT-SPI/AX overhead,
+    // for users who want the fastest possible, purely coordinate-based
+    // execution regardless of what regions/steps happen to be configured.
+    bool disableAccessibilityFeatures = false;
 };

@@ -10,7 +10,10 @@
 #include <QStringList>
 #include <QTimer>
 
+#include <map>
+
 #include "TestConfig.h"
+#include "platform/PlatformAutomation.h"
 
 // Drives the actual endurance test. TestConfig::steps is an ordered list of
 // (region, enabled-action-kinds, action-count) steps; this engine walks
@@ -244,6 +247,20 @@ private:
     // is empty).
     bool resolveStepRegion(const RegionStep &step, QList<QRect> &outIncludeRegions,
                             QList<QRect> &outExcludeRegions);
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: resolveStepRegion()'s
+    // handling for a NamedRegion with isObjectTarget set -- resolves (or
+    // reuses a cached resolution of) region.objectTarget via
+    // PlatformAutomation::findAccessibleObject(), writing its current
+    // bounding box to outIncludeRegions (always exactly one rect;
+    // outExcludeRegions always cleared -- object targets don't support
+    // exclude sub-rectangles) and updating
+    // m_currentRegionUsesObjectDefaultAction/m_currentObjectHandleForAction
+    // for runOneAction()'s Click case to consult. Returns false (performing
+    // no caching changes beyond what a failed lookup already implies) if
+    // the object can't currently be resolved at all -- same "treat like any
+    // other resolution failure" contract as resolveStepRegion() itself.
+    bool resolveObjectTargetRegion(const NamedRegion &region, QList<QRect> &outIncludeRegions,
+                                    QList<QRect> &outExcludeRegions);
     // True if the action about to run (performRandomAction()'s current
     // step, or -- if it's a task -- its current taskMembers[m_currentTaskMemberIndex])
     // has targetsPopupDialog set. Used to suppress handleUnexpectedWindows()
@@ -388,6 +405,41 @@ private:
     // advanceToNextStep() (same lifecycle as m_currentTaskMemberIndex),
     // and the moment such a member's region resolves successfully.
     int m_popupDialogWaitStrikes = 0;
+
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」: per-NamedRegion cache of
+    // its last-resolved accessible object, keyed by NamedRegion::name, so a
+    // step/group-member reusing the same object-target region across many
+    // consecutive actions pays for an accessibility-tree search only once
+    // (or every ObjectTarget::reresolveEveryActions actions, if set) rather
+    // than before every single action -- see resolveObjectTargetRegion().
+    // std::map (not QMap) specifically because AccessibleObjectHandle is
+    // move-only.
+    struct CachedObjectTarget
+    {
+        PlatformAutomation::AccessibleObjectHandle handle;
+        int actionsSinceResolve = 0;
+    };
+    std::map<QString, CachedObjectTarget> m_objectTargetCache;
+    // The NamedRegion::name resolveObjectTargetRegion() was last asked to
+    // resolve, across calls -- when the next call asks for a *different*
+    // name (or this is the first object-target resolution of the run), that
+    // counts as "a step just started using this region" and forces a fresh
+    // resolve even if a cache entry already exists for it, per
+    // ObjectTarget::reresolveEveryActions' own comment ("resolve once when a
+    // step starts using this region"). Empty initially, so the very first
+    // resolution of a run is always treated as fresh.
+    QString m_lastResolvedObjectRegionName;
+    // Set by resolveObjectTargetRegion() on a successful resolution whose
+    // ObjectTarget::useDefaultAction is true, for runOneAction()'s Click
+    // case to consult immediately afterward -- non-owning (points into
+    // m_objectTargetCache, valid only until the cache is next touched, which
+    // does not happen between resolveStepRegion() and the switch in the
+    // same runOneAction() call) and reset to false/nullptr at the top of
+    // every resolveStepRegion() call so a non-object-target/failed
+    // resolution never leaves a stale pointer from a previous action lying
+    // around.
+    bool m_currentRegionUsesObjectDefaultAction = false;
+    PlatformAutomation::AccessibleObjectHandle *m_currentObjectHandleForAction = nullptr;
     qint64 m_sequenceLoopCount = 0;
     bool m_running = false;
     bool m_paused = false;

@@ -967,6 +967,42 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Invoked the named object's default action")},
         {QStringLiteral("名前付きオブジェクトの既定アクション実行に失敗しました"),
          QStringLiteral("Failed to invoke the named object's default action")},
+
+        // v0.89: デバッグモード（対象アプリをデバッガ上で動かしながらのテスト対応）
+        {QStringLiteral("デバッグモード（対象アプリをデバッガ上で動かしながらテストする）"),
+         QStringLiteral("Debug mode (testing while the target app runs under a debugger)")},
+        {QStringLiteral("対象アプリをgdb/lldb等のデバッガにアタッチした状態で実行する場合に有効にして"
+                        "ください。ブレークポイントでの一時停止を本物のハングと誤認しにくくなるよう、"
+                        "ハング確定までの猶予を大幅に延ばします（ただし本当にハングした場合は従来どおり"
+                        "いずれ検知します）。デバッガがアタッチされているのにこのオプションが無効のままだと、"
+                        "開始前と実行中に警告が表示されます。"),
+         QStringLiteral("Enable this when running the target app attached to a debugger (gdb/lldb, "
+                        "etc). It greatly extends the grace period before a hang is confirmed, so a "
+                        "breakpoint pause isn't easily mistaken for a genuine hang (a real hang is "
+                        "still eventually detected as before). If a debugger is attached while this "
+                        "option is left off, a warning appears both before starting and during the "
+                        "run.")},
+        {QStringLiteral("対象アプリにデバッガがアタッチされていることを検知しましたが、"
+                        "「デバッグモード」が無効です。ブレークポイント等での一時停止がハングと誤認され、"
+                        "意図せず停止する可能性があります"),
+         QStringLiteral("Detected that a debugger is attached to the target app, but \"Debug mode\" "
+                        "is off. A pause at a breakpoint or similar may be mistaken for a hang, "
+                        "stopping the run unintentionally")},
+        {QStringLiteral("デバッガのアタッチを検知しました"), QStringLiteral("Debugger attachment detected")},
+        {QStringLiteral("対象アプリにデバッガ（gdb/lldb等）がアタッチされているようですが、"
+                        "「デバッグモード」が無効になっています。このまま開始すると、ブレークポイントでの"
+                        "一時停止が本物のハングと誤認され、意図せず停止する可能性があります。\n\n"
+                        "⑦タイミング・制限の「デバッグモード」を有効にしてから開始することをおすすめします。"
+                        "このまま続けますか？"),
+         QStringLiteral("A debugger (gdb/lldb, etc) appears to be attached to the target app, but "
+                        "\"Debug mode\" is off. Starting as-is risks a breakpoint pause being "
+                        "mistaken for a genuine hang, stopping the run unintentionally.\n\nWe "
+                        "recommend enabling \"Debug mode\" under ⑦ Timing/limits before "
+                        "starting. Continue anyway?")},
+        {QStringLiteral("デバッガのアタッチを検知しましたが「デバッグモード」が無効です。"
+                        "ハングの誤検知に注意してください（このまま続行します）"),
+         QStringLiteral("Detected a debugger attached, but \"Debug mode\" is off. Watch out for "
+                        "false hang detections (continuing as-is)")},
     };
     return table;
 }

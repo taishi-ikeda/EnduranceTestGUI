@@ -128,6 +128,15 @@ constexpr int kSetupSafetyRetryDelayMs = 300;
 // scheduleNext(). Large enough to meaningfully reduce the load a busy
 // target sees between now and the next hang-check probe (8s, m_hangCheckTimer).
 constexpr int kAutoSlowdownIntervalMultiplier = 5;
+// TestConfig::debuggerModeEnabled: consecutive WM_PING misses required
+// before confirming a hang while the target is expected to be running under
+// a debugger, instead of the normal 2. At the 8s hang-check cadence
+// (m_hangCheckTimer) this gives roughly 2 minutes of tolerance for a
+// breakpoint pause -- long enough for a person to be mid-inspection at a
+// breakpoint without tripping a false hang-stop, while still eventually
+// catching a target that is genuinely frozen (not just paused by the
+// debugger), rather than disabling the hang-stop outright.
+constexpr int kDebuggerModeHangConfirmThreshold = 15;
 }  // namespace
 
 void RandomActionEngine::recordRecentAction(const QString &desc)
@@ -190,6 +199,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_everRespondedToPing = false;
     m_neverRespondedStrikes = 0;
     m_slowdownActive = false;
+    m_debuggerMismatchWarned = false;
     m_capturedThisRun = false;
     m_lastScreenshotStepIndex = -1;
     m_lastScreenshotIterationCount = -1;
@@ -461,8 +471,13 @@ void RandomActionEngine::checkTargetResponsiveness()
             I18n::t(QStringLiteral("対象アプリの応答確認に失敗しました（%1回連続）")).arg(m_consecutiveUnresponsive));
         // Require two consecutive misses (~2 check intervals) before
         // treating this as a real hang rather than one slow/busy moment --
-        // see the interval comment in the constructor.
-        if (m_consecutiveUnresponsive >= 2) {
+        // see the interval comment in the constructor. TestConfig::
+        // debuggerModeEnabled raises this threshold a lot further (see
+        // kDebuggerModeHangConfirmThreshold's comment), to tolerate a
+        // breakpoint pause without mistaking it for a genuine hang.
+        const int hangConfirmThreshold =
+            m_config.debuggerModeEnabled ? kDebuggerModeHangConfirmThreshold : 2;
+        if (m_consecutiveUnresponsive >= hangConfirmThreshold) {
             doStop(I18n::t(QStringLiteral("対象アプリが応答していない（ハング）ことを検知したため停止しました")),
                    /*isAnomaly=*/true);
         } else if (m_config.autoSlowdownEnabled && !m_slowdownActive) {
@@ -487,6 +502,22 @@ void RandomActionEngine::sampleResourceUsage()
 {
     if (!m_running)
         return;
+
+    // TestConfig::debuggerModeEnabled: unlike the hang-check above, this
+    // doesn't depend on checkWindowResponsive() support at all (it's a
+    // plain process-state read -- see PlatformAutomation::isBeingDebugged()),
+    // so it runs this same way on every platform, including macOS where
+    // WM_PING-based hang detection itself is Unsupported. Checked here
+    // (the 5-second resource-sampling cadence) rather than from the 8-second
+    // hang-check timer precisely because that timer stops itself entirely
+    // once checkWindowResponsive() reports Unsupported.
+    if (!m_config.debuggerModeEnabled && !m_debuggerMismatchWarned &&
+        PlatformAutomation::isBeingDebugged(m_config.targetPid)) {
+        m_debuggerMismatchWarned = true;
+        emit logMessage(I18n::t(QStringLiteral("対象アプリにデバッガがアタッチされていることを検知しましたが、"
+            "「デバッグモード」が無効です。ブレークポイント等での一時停止がハングと誤認され、"
+            "意図せず停止する可能性があります")));
+    }
 
     const ProcessStats stats = PlatformAutomation::queryProcessStats(m_config.targetPid);
     if (!stats.ok)

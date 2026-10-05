@@ -413,6 +413,25 @@ bool isProcessRunning(qint64 pid)
     return true;
 }
 
+bool isBeingDebugged(qint64 pid)
+{
+    // TracerPid is 0 when nothing is tracing this process, and the tracer's
+    // pid otherwise -- set the same way for a debugger attached with
+    // ptrace(PTRACE_ATTACH) (gdb/lldb's usual mechanism) as for one that
+    // launched the process directly under itself (`gdb ./app`), so this
+    // covers both ways of starting a debug session (same field
+    // queryProcessStats() below already parses /proc/<pid>/status for).
+    QFile statusFile(QStringLiteral("/proc/%1/status").arg(pid));
+    if (!statusFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    const QByteArray content = statusFile.readAll();
+    for (const QByteArray &line : content.split('\n')) {
+        if (line.startsWith("TracerPid:"))
+            return line.mid(10).trimmed().toLongLong() != 0;
+    }
+    return false;
+}
+
 void terminateProcess(qint64 pid)
 {
     // Best-effort/asynchronous by design (see the header comment) -- a

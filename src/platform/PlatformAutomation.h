@@ -128,6 +128,22 @@ bool activateProcess(qint64 pid);
 // having closed).
 bool isProcessRunning(qint64 pid);
 
+// True if another process (a debugger such as gdb/lldb, or an equivalent
+// tracer) is currently attached to this pid and so able to pause its
+// execution at will -- e.g. at a breakpoint. Used so RandomActionEngine can
+// tell that apart from a genuine hang before trusting a missed WM_PING
+// reply as a confirmed one (SPEC.md 10 "デバッグモード"): both look
+// identical from checkWindowResponsive()'s point of view (the target simply
+// stops answering for a while), so this is a separate, independent signal,
+// not a replacement for it. Checked via /proc/<pid>/status's TracerPid
+// field on Linux, and the BSD process flags (PROC_FLAG_TRACED) on macOS --
+// unlike checkWindowResponsive(), this needs no window/display-server
+// support, so it works the same way (and returns real answers, never
+// Unsupported) on both platforms. Best-effort: false if the pid can't be
+// read at all (treated the same as "not being debugged", never as an
+// error).
+bool isBeingDebugged(qint64 pid);
+
 // Best-effort, asynchronous request that the process exit (SIGTERM on
 // Linux/macOS) -- used by 連続実行 (SPEC.md 10 ⑤) to get rid of a leftover
 // target instance before launching a fresh one. Does not wait for the

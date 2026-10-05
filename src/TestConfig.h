@@ -505,6 +505,27 @@ struct TestConfig
     // toggles above.
     bool autoSlowdownEnabled = false;
 
+    // SPEC.md 10 「デバッグモード」: for when the target app itself is being
+    // run under a debugger (gdb/lldb) during the endurance test -- a
+    // breakpoint stop looks identical to a genuine hang from
+    // checkTargetResponsiveness()'s point of view (the target simply stops
+    // answering WM_PING for a while), so without this, stepping through a
+    // breakpoint for more than a few seconds would trip the normal 2-miss
+    // hang-stop. When true, RandomActionEngine requires many more
+    // consecutive misses (kDebuggerModeHangConfirmThreshold) before
+    // confirming a hang, trading prompt hang detection for tolerance of
+    // long breakpoint pauses -- a target that is *truly* frozen (not just
+    // paused by the debugger) still eventually trips it, just later. Off by
+    // default, like the other diagnostics toggles above: most runs aren't
+    // being debugged, and the whole point is to only relax hang detection
+    // when the user says it's actually needed. RandomActionEngine also
+    // auto-detects (PlatformAutomation::isBeingDebugged()) whether a
+    // debugger is actually attached regardless of this flag, and warns
+    // (before starting, and once during the run) if it finds one attached
+    // while this option is left off -- see MainWindow::beginRun() and
+    // RandomActionEngine::sampleResourceUsage().
+    bool debuggerModeEnabled = false;
+
     // Controls when RandomActionEngine captures its internal operation-
     // region screenshot (SPEC.md 6.2/10): once right before the first
     // action of a run, every time the current top-level step changes, or

@@ -799,6 +799,22 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                         "応答が戻れば自動的に元の間隔に戻ります。")));
     timingForm->addRow(QString(), m_autoSlowdownCheck);
 
+    // SPEC.md 10「デバッグモード」: TestConfig::debuggerModeEnabled's own
+    // comment covers the design in full. Off by default, same reasoning as
+    // the other diagnostics toggles here -- most runs aren't being
+    // debugged, so hang detection should stay at its normal sensitivity
+    // unless the user says otherwise.
+    m_debugModeCheck = new QCheckBox(
+        I18n::t(QStringLiteral("デバッグモード（対象アプリをデバッガ上で動かしながらテストする）")), m_timingGroup);
+    m_debugModeCheck->setChecked(false);
+    m_debugModeCheck->setToolTip(
+        I18n::t(QStringLiteral("対象アプリをgdb/lldb等のデバッガにアタッチした状態で実行する場合に有効にして"
+                        "ください。ブレークポイントでの一時停止を本物のハングと誤認しにくくなるよう、"
+                        "ハング確定までの猶予を大幅に延ばします（ただし本当にハングした場合は従来どおり"
+                        "いずれ検知します）。デバッガがアタッチされているのにこのオプションが無効のままだと、"
+                        "開始前と実行中に警告が表示されます。")));
+    timingForm->addRow(QString(), m_debugModeCheck);
+
     // SPEC.md 追加実装依頼「名前付きオブジェクト」: master override -- see
     // TestConfig::disableAccessibilityFeatures' own comment. Off by default
     // so existing context-menu-selection/dialog-button-press users see no
@@ -2020,6 +2036,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
     config.autoSlowdownEnabled = m_autoSlowdownCheck->isChecked();
     config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
+    config.debuggerModeEnabled = m_debugModeCheck->isChecked();
 
     ok = true;
     return config;
@@ -2062,6 +2079,7 @@ TestConfig MainWindow::buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessag
     config.rngSeed = quint32(m_rngSeedSpin->value());
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
     config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
+    config.debuggerModeEnabled = m_debugModeCheck->isChecked();
 
     ok = true;
     return config;
@@ -2178,6 +2196,34 @@ bool MainWindow::beginRun(bool interactive)
                 checkHeadlessCompletion();
             }
             return false;
+        }
+    }
+
+    // SPEC.md 10「デバッグモード」: a debugger attached to the target while
+    // this option is off means every WM_PING miss it causes (by pausing the
+    // target at a breakpoint) risks being mistaken for a genuine hang under
+    // the normal 2-miss threshold -- warn now, before that can happen mid-
+    // run, rather than let the run self-stop with a confusing "hang
+    // detected" message. Interactive runs get a chance to cancel and flip
+    // the option on first; batch/headless runs have no one to answer a
+    // dialog, so this just logs and continues (RandomActionEngine::
+    // sampleResourceUsage() repeats the same check, and the same warning,
+    // once during the run itself in case a debugger attaches later).
+    if (!config.debuggerModeEnabled && PlatformAutomation::isBeingDebugged(config.targetPid)) {
+        if (interactive) {
+            const auto choice = QMessageBox::warning(
+                this, I18n::t(QStringLiteral("デバッガのアタッチを検知しました")),
+                I18n::t(QStringLiteral("対象アプリにデバッガ（gdb/lldb等）がアタッチされているようですが、"
+                    "「デバッグモード」が無効になっています。このまま開始すると、ブレークポイントでの"
+                    "一時停止が本物のハングと誤認され、意図せず停止する可能性があります。\n\n"
+                    "⑦タイミング・制限の「デバッグモード」を有効にしてから開始することをおすすめします。"
+                    "このまま続けますか？")),
+                QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+            if (choice != QMessageBox::Yes)
+                return false;
+        } else {
+            appendLog(I18n::t(QStringLiteral("デバッガのアタッチを検知しましたが「デバッグモード」が無効です。"
+                "ハングの誤検知に注意してください（このまま続行します）")));
         }
     }
 
@@ -3086,6 +3132,7 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["enableCrashDumpCollection"] = m_crashDumpCollectionCheck->isChecked();
     timing["autoSlowdownEnabled"] = m_autoSlowdownCheck->isChecked();
     timing["disableAccessibilityFeatures"] = m_disableAccessibilityCheck->isChecked();
+    timing["debuggerModeEnabled"] = m_debugModeCheck->isChecked();
     root["timing"] = timing;
     return root;
 }
@@ -3187,6 +3234,7 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_autoSlowdownCheck->setChecked(timing["autoSlowdownEnabled"].toBool(m_autoSlowdownCheck->isChecked()));
     m_disableAccessibilityCheck->setChecked(
         timing["disableAccessibilityFeatures"].toBool(m_disableAccessibilityCheck->isChecked()));
+    m_debugModeCheck->setChecked(timing["debuggerModeEnabled"].toBool(m_debugModeCheck->isChecked()));
 
     refreshNamedRegionList();
     refreshSetupActionList();

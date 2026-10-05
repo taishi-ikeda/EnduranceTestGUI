@@ -385,8 +385,8 @@
     <h2><span class="num">7</span>Timing / limits &amp; automatic anomaly recording</h2>
     <p>The "Timing / Limits" area of panel ① sets the interval between actions (ms, or actions/sec), the max action count, max run time, and repeat count for the whole step sequence (all three are required — unlimited isn't an option), the RNG seed, and more. Scrolling down reveals the following additional settings.</p>
     <figure>
-      <img src="images/04_timing_limits.png" alt="The Timing/Limits panel scrolled down, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording and collecting crash dumps on an abnormal stop.">
-      <figcaption>Figure 4: Timing/Limits (lower part) — RNG seed, when to capture operation-region screenshots, and the recording/crash-dump options on an abnormal stop</figcaption>
+      <img src="images/04_timing_limits.png" alt="The lower part of the Timing/Limits panel, showing the RNG seed, when to capture operation-region screenshots, and the checkboxes for saving a recording, collecting crash dumps, auto-slowdown, debug mode, and disabling the accessibility API.">
+      <figcaption>Figure 4: Timing/Limits (lower part) — RNG seed, when to capture operation-region screenshots, the recording/crash-dump options on an abnormal stop, and debug mode</figcaption>
     </figure>
     <table>
       <tr><th>Setting</th><th>Description</th></tr>
@@ -395,8 +395,13 @@
       <tr><td>Save a recording of the recent screen on abnormal stop</td><td>Off by default. When enabled, keeps a rolling buffer of the screen at 0.5-second intervals (roughly the last 10 seconds) and automatically saves it as numbered PNGs on a crash</td></tr>
       <tr><td>Collect OS crash dumps/diagnostic logs on abnormal stop</td><td>On by default. Makes a best-effort search for the target app's crash report/core dump and records the path in the log if found</td></tr>
       <tr><td>Automatically slow down when the target app is slow to respond</td><td>Off by default (Linux only). If the same responsiveness check used for hang detection (polled every 8s) fails just once, the action interval is temporarily lengthened 5x (until it either recovers or is confirmed as a hang) to reduce load on the target app, and reverts automatically once it responds again. The hang-stop condition itself (two consecutive failures) is unchanged by this option</td></tr>
+      <tr><td>Debug mode (testing while the target app runs under a debugger)</td><td>Off by default (Linux only). Enable this when running the target app attached to a debugger (gdb/lldb, etc). It raises the number of consecutive response failures required to confirm a hang from 2 to 15 (roughly 2 minutes), so a breakpoint pause isn't easily mistaken for a genuine hang (a real hang is still eventually detected as before). See below for details</td></tr>
       <tr><td>Disable accessibility-API-based actions (context menu selection, dialog button press, named objects) for speed</td><td>Off by default. When enabled, no accessibility API calls are made at all (not even initialization) -- not just for steps that reference a named object (see <a href="#target">"④ ① Selecting the target app"</a>) but for context menu selection and dialog button press too. Use this when the target app doesn't support the accessibility API, or you simply want purely coordinate-based, high-speed endurance testing</td></tr>
     </table>
+    <div class="callout tip">
+      <div class="title">Forgot to turn on debug mode? The app notices for you</div>
+      Whether a debugger is actually attached to the target app is detected automatically (on Linux via <code>/proc/&lt;pid&gt;/status</code>'s <code>TracerPid</code>; on macOS via <code>PROC_FLAG_TRACED</code>). If you click "▶ Start" with a debugger attached but forgot to turn on "Debug mode", a "Debugger attachment detected" confirmation dialog appears before the run starts (continuous-run and CLI/headless runs have no one to confirm with, so they just log a warning and continue). If you proceed anyway, the same warning is also logged once during the run.
+    </div>
   </section>
 
   <section id="run">

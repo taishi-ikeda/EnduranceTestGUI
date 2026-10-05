@@ -380,6 +380,11 @@ private:
     // soon as a ping succeeds again; scheduleNext() multiplies the action
     // interval by kAutoSlowdownIntervalMultiplier while this is true.
     bool m_slowdownActive = false;
+    // See TestConfig::debuggerModeEnabled. Set the first time
+    // sampleResourceUsage() finds a debugger attached to the target while
+    // that option is off, so the mismatch is logged once per run rather
+    // than on every 5-second sample for the rest of it.
+    bool m_debuggerMismatchWarned = false;
     QElapsedTimer m_elapsed;
     qint64 m_pausedElapsedMs = 0;  // wall-clock time already consumed before the current pause/run segment
     qint64 m_iterationCount = 0;

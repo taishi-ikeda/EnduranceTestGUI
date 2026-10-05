@@ -220,6 +220,22 @@ bool isProcessRunning(qint64 pid)
     return true;
 }
 
+bool isBeingDebugged(qint64 pid)
+{
+    // PROC_FLAG_TRACED mirrors the BSD process flag set while a debugger
+    // (gdb/lldb, via ptrace/task_for_pid) is attached -- same proc_bsdinfo
+    // struct already used for the zombie check above, just a different
+    // field (pbi_flags) from it. Not independently verified on real macOS
+    // hardware (see SPEC.md 8) -- mirrors Automation_linux.cpp's
+    // isBeingDebugged() in spirit (both read a tracer-attached flag out of
+    // the OS's own per-process state), just via libproc instead of /proc.
+    struct proc_bsdinfo info;
+    const int size = proc_pidinfo((pid_t)pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (size != sizeof(info))
+        return false;
+    return (info.pbi_flags & PROC_FLAG_TRACED) != 0;
+}
+
 void terminateProcess(qint64 pid)
 {
     // Best-effort/asynchronous by design (see the header comment) -- a

@@ -575,6 +575,7 @@ private:
     QCheckBox *m_crashDumpCollectionCheck = nullptr;
     QCheckBox *m_autoSlowdownCheck = nullptr;
     QCheckBox *m_disableAccessibilityCheck = nullptr;
+    QCheckBox *m_debugModeCheck = nullptr;
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;

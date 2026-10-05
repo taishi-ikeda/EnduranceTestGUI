@@ -71,6 +71,8 @@ set(SOURCES
     src/StatisticsDialog.cpp
     src/RecordingIndicatorPanel.cpp
     src/ManualRecorder.cpp
+    src/GifEncoder.cpp
+    src/AnimationExportDialog.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -98,6 +100,8 @@ set(HEADERS
     src/StatisticsDialog.h
     src/RecordingIndicatorPanel.h
     src/ManualRecorder.h
+    src/GifEncoder.h
+    src/AnimationExportDialog.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

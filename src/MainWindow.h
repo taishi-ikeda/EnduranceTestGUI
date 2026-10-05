@@ -129,6 +129,7 @@ private slots:
     void onToggleManualRecording();
     void onManualRecordingStarted(const QString &outputDir);
     void onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason);
+    void onConvertRecordingToAnimation();
     void onActionLog(const QString &message);
     void onIterationCountChanged(qint64 count);
     void onCurrentStepChanged(int index);

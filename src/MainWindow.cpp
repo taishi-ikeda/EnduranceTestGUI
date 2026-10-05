@@ -40,6 +40,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "AnimationExportDialog.h"
 #include "DefaultActionParamsDialog.h"
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
@@ -281,10 +282,16 @@ void MainWindow::buildUi()
     m_saveRegionScreenshotButton->setEnabled(false);
     m_saveRegionScreenshotButton->setToolTip(
         I18n::t(QStringLiteral("テスト実行中に操作領域のスクリーンショットが撮影されると保存できるようになります。")));
+    // 常時録画のポスト処理: 今回起動してから一度も録画していなくても、
+    // 過去（前回以前の起動を含む）の録画フォルダを選んでいつでも変換できる
+    // -- ManualRecorder/AnimationExportDialog参照。
+    auto *convertRecordingButton =
+        new QPushButton(I18n::t(QStringLiteral("録画をアニメーションに変換...")), logGroup);
     logButtonsRow->addWidget(clearLogButton);
     logButtonsRow->addWidget(saveLogButton);
     logButtonsRow->addWidget(m_saveSummaryButton);
     logButtonsRow->addWidget(m_saveRegionScreenshotButton);
+    logButtonsRow->addWidget(convertRecordingButton);
     logButtonsRow->addStretch();
     logLayout->addLayout(logButtonsRow);
     connect(clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLog);
@@ -292,6 +299,7 @@ void MainWindow::buildUi()
     connect(m_saveSummaryButton, &QPushButton::clicked, this, &MainWindow::onSaveSummary);
     connect(m_saveRegionScreenshotButton, &QPushButton::clicked, this,
             &MainWindow::onSaveRegionScreenshot);
+    connect(convertRecordingButton, &QPushButton::clicked, this, &MainWindow::onConvertRecordingToAnimation);
 
     bottomLayout->addWidget(logGroup, 1);
     outerSplitter->addWidget(bottomWidget);
@@ -2456,6 +2464,35 @@ void MainWindow::onManualRecordingStopped(const QString &outputDir, int frameCou
     if (!reason.isEmpty())
         appendLog(reason);
     appendLog(I18n::t(QStringLiteral("常時録画を停止しました（%1フレーム）: %2")).arg(frameCount).arg(outputDir));
+
+    if (frameCount <= 0)
+        return;
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("アニメーションに変換しますか？")),
+        I18n::t(QStringLiteral("この録画（%1フレーム）をGIF等のアニメーションに変換しますか？\n"
+                                "（後からでも「録画をアニメーションに変換...」ボタンでこのフォルダを選んで変換できます）"))
+            .arg(frameCount),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (reply == QMessageBox::Yes) {
+        AnimationExportDialog dialog(outputDir, this);
+        dialog.exec();
+    }
+}
+
+void MainWindow::onConvertRecordingToAnimation()
+{
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, I18n::t(QStringLiteral("変換する録画フォルダを選択")), RandomActionEngine::anomalyArtifactsDirectory());
+    if (dir.isEmpty())
+        return;
+    if (QDir(dir).entryList(QStringList() << QStringLiteral("frame_*.png"), QDir::Files).isEmpty()) {
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("フレーム画像が見つかりません")),
+            I18n::t(QStringLiteral("選択したフォルダに frame_*.png が見つかりませんでした。")));
+        return;
+    }
+    AnimationExportDialog dialog(dir, this);
+    dialog.exec();
 }
 
 void MainWindow::onResourceUsageUpdated(double residentMemoryMB, double cpuPercent)

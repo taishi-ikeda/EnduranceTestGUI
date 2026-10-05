@@ -281,6 +281,7 @@
       <li><a href="#steps">② Creating steps (including action parameters)</a></li>
       <li><a href="#timing">Timing / limits &amp; automatic anomaly recording</a></li>
       <li><a href="#run">Starting and stopping a run</a></li>
+      <li><a href="#recording">Continuous recording &amp; animation export</a></li>
       <li><a href="#crash">Crash detection &amp; re-testing</a></li>
       <li><a href="#preset">Saving &amp; loading test settings</a></li>
       <li><a href="#lang">Switching the display language</a></li>
@@ -418,8 +419,28 @@
     <p><strong>Running from a terminal without opening the GUI (CLI/headless mode):</strong> Given a preset JSON saved with "Save test settings...", running <code>EnduranceTestGUI --run &lt;preset.json&gt; [--repeat N]</code> in a terminal runs the same test with no window shown at all. It behaves exactly like the "⟳ Continuous run" button: it terminates the target app, launches it fresh with the launch command (which must be saved in the preset), and repeats that cycle <code>--repeat</code> times (default 1). All progress, action logs, and the run summary are printed to stdout, and the process exits automatically once every repeat has finished (or once an error makes continuing impossible). The exit code is 1 if any run was anomalous (e.g. a crash) and 0 otherwise, so a shell script or CI pipeline can check success directly.</p>
   </section>
 
+  <section id="recording">
+    <h2><span class="num">9</span>Continuous recording &amp; animation export</h2>
+    <p>The <strong>"● Record"</strong> button in the run-control row is independent of "▶ Start" / "■ Stop". Regardless of whether a test is currently running, pressing it immediately starts capturing the target window as a sequence of numbered PNG frames at a 0.5&nbsp;second interval, and keeps capturing until you press it again ("■ Stop recording"). You can use it to record manual operation of the target app, to record while an endurance run is in progress, or to record straight across both.</p>
+    <div class="callout tip">
+      <div class="title">How this differs from "Save a recording of the last few seconds on an abnormal stop" in ⑦</div>
+      The recording feature under <a href="#timing">⑦ Timing / limits</a> only ever kicks in automatically, replaying roughly the last 10 seconds leading up to a crash or other abnormal stop; it only works while a test is running, and it can only be turned on or off beforehand. The "● Record" button is a separate feature: you start and stop it manually at any time, and it keeps recording indefinitely until you stop it.
+    </div>
+    <p>Starting a recording briefly raises the target window to the front once. If the target window moves or is resized while recording, the capture keeps following it. Recording files are saved as a numbered sequence like <code>frame_00001.png</code> under <code>~/Pictures/EnduranceTestGUI_Screenshots/recording_&lt;timestamp&gt;/</code>. If the target app exits or crashes mid-recording and its window can no longer be found, the recording stops safely on its own (this never crashes EnduranceTestGUI itself).</p>
+    <div class="callout warn">
+      <div class="title">If another window comes to the front during recording, it will appear in those frames</div>
+      Each frame is captured the same way as the existing screenshot feature: it's a pixel-for-pixel capture of whatever is actually visible on screen. The target window is only raised to the front once, at the start of recording — it isn't kept pinned on top for the whole duration (doing so would make the "■ Stop recording" button itself unclickable). So if another window, including EnduranceTestGUI's own, overlaps the target while recording, that window will show up in the frames captured during the overlap.
+    </div>
+    <p>Stopping a recording brings up a "Convert this recording to an animation?" confirmation. Choosing "Yes" opens the export dialog directly, and you can also open it at any later time for any past recording folder (including ones from earlier sessions) via the <strong>"Convert Recording to Animation..."</strong> button in the log area.</p>
+    <figure>
+      <img src="images/08_animation_export.png" alt="The &quot;Convert to Animation&quot; dialog. Choosing the frame count, output format (GIF/MP4/WebM), and frame interval, then clicking &quot;Export...&quot;, opens a save-location dialog followed by a progress bar during conversion.">
+      <figcaption>Figure 8: The "Convert to Animation" dialog</figcaption>
+    </figure>
+    <p>In the export dialog, choose the output format and frame interval (default 500&nbsp;ms), then click "Export...": a save-location dialog appears, followed by conversion with a progress bar (cancel at any time with "Cancel"). <strong>GIF is always available</strong> as an output format, using a self-contained encoder with no external tool required. <strong>MP4/WebM are only enabled when <code>ffmpeg</code> is installed</strong> on the machine running the app (otherwise those options are greyed out, with a hint explaining why). If the target window was resized mid-recording and frames therefore differ in size, they are automatically padded to the largest frame's size before conversion, so no content is cropped out.</p>
+  </section>
+
   <section id="crash">
-    <h2><span class="num">9</span>Crash detection &amp; re-testing</h2>
+    <h2><span class="num">10</span>Crash detection &amp; re-testing</h2>
     <p>When the target app's process is detected as gone, the run stops immediately and a dialog like the following appears.</p>
     <figure>
       <img src="images/06_crash_dialog.png" alt="A dialog titled 'Target App Crash Detected', showing which step was running when it was detected, the action count, and the RNG seed, and noting that records have been saved automatically.">
@@ -433,12 +454,12 @@
   </section>
 
   <section id="preset">
-    <h2><span class="num">10</span>Saving &amp; loading test settings</h2>
+    <h2><span class="num">11</span>Saving &amp; loading test settings</h2>
     <p>"Save Test Settings..." in the "File" menu saves the operation regions, step configuration, and timing settings assembled in ①② together into a JSON file. "Load Test Settings..." loads it back and, if the app it was targeting when saved is currently running, automatically selects it again (otherwise a message prompts you to pick it manually). This lets the same configuration be reused across sessions or across different builds, without rebuilding it from scratch each time.</p>
   </section>
 
   <section id="lang">
-    <h2><span class="num">11</span>Switching the display language</h2>
+    <h2><span class="num">12</span>Switching the display language</h2>
     <p>Choose "日本語" or "English" from the "言語 / Language" menu in the menu bar. Your choice is saved and takes effect <strong>from the next launch onward</strong> (the currently running window doesn't switch live).</p>
     <figure>
       <img src="images/07_language_menu.png" alt="The 'Language' menu open in the menu bar, showing two options: Japanese and English.">
@@ -447,7 +468,7 @@
   </section>
 
   <section id="faq">
-    <h2><span class="num">12</span>Troubleshooting</h2>
+    <h2><span class="num">13</span>Troubleshooting</h2>
     <h3>Clicking "Start" fails with a safety-check error</h3>
     <p>Check that the target window isn't covered by another window and isn't minimized. If that doesn't help, some environments (particularly certain tiling window managers on Linux) don't support the mechanism used to confirm the target app can be operated safely at all.</p>
     <h3>The target app doesn't appear in the window list</h3>
@@ -457,7 +478,7 @@
   </section>
 
   <section id="license">
-    <h2><span class="num">13</span>Licensing</h2>
+    <h2><span class="num">14</span>Licensing</h2>
     <p>EnduranceTestGUI's own source code is released under the <strong>MIT License</strong> (see <code>LICENSE</code> at the repository root). The app uses Qt (the Widgets module); the free-software edition of Qt is distributed under the GNU LGPL version 3 (some modules under the GPL). You can always check exactly which license the Qt build in use is distributed under from "Help" → "About Qt..." inside the app itself. For details on the other dynamically linked libraries, see <code>THIRD_PARTY_NOTICES.md</code> at the repository root.</p>
   </section>
 

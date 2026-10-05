@@ -30,6 +30,7 @@ class StopPanel;
 class RecordingIndicatorPanel;
 class GlobalHotkey;
 class InputRecorder;
+class ManualRecorder;
 
 // Main window, laid out (per SPEC.md 6.9, revised by 追加実装及び修正依頼)
 // as two columns:
@@ -125,6 +126,9 @@ private slots:
     void onPauseResume();
     void onEngineFinished(const QString &reason);
     void onEnginePausedChanged(bool paused);
+    void onToggleManualRecording();
+    void onManualRecordingStarted(const QString &outputDir);
+    void onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason);
     void onActionLog(const QString &message);
     void onIterationCountChanged(qint64 count);
     void onCurrentStepChanged(int index);
@@ -588,6 +592,13 @@ private:
     QPushButton *m_continuousRunButton = nullptr;
     QPushButton *m_stopButton = nullptr;
     QPushButton *m_pauseResumeButton = nullptr;
+    // 常時録画（SPEC.md 追加実装依頼「常時録画機能」）: independent of
+    // ▶開始/■停止 above -- toggled by the user at any time, including while
+    // no test is running, to continuously save the selected target window
+    // as sequential PNG frames via m_manualRecorder. Label/style switches
+    // between "● 録画" and "■ 録画停止" to reflect m_manualRecorder's state.
+    QPushButton *m_manualRecordButton = nullptr;
+    ManualRecorder *m_manualRecorder = nullptr;
     QLabel *m_statusLabel = nullptr;
     QLabel *m_elapsedLabel = nullptr;
     QLabel *m_iterationLabel = nullptr;

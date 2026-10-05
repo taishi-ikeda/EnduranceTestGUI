@@ -70,6 +70,7 @@ set(SOURCES
     src/TestStatistics.cpp
     src/StatisticsDialog.cpp
     src/RecordingIndicatorPanel.cpp
+    src/ManualRecorder.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -96,6 +97,7 @@ set(HEADERS
     src/TestStatistics.h
     src/StatisticsDialog.h
     src/RecordingIndicatorPanel.h
+    src/ManualRecorder.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

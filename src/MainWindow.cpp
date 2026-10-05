@@ -41,6 +41,7 @@
 #include <QVBoxLayout>
 
 #include "DefaultActionParamsDialog.h"
+#include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
 #include "RegionSelectorOverlay.h"
@@ -94,6 +95,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_inputRecorder = new InputRecorder(this);
     connect(m_inputRecorder, &InputRecorder::actionRecorded, this, &MainWindow::onSetupActionRecorded);
     connect(m_inputRecorder, &InputRecorder::finished, this, &MainWindow::onRecordingFinished);
+
+    // 常時録画: independent of m_engine above -- works identically whether
+    // or not a test run is in progress (see onToggleManualRecording()).
+    m_manualRecorder = new ManualRecorder(this);
+    connect(m_manualRecorder, &ManualRecorder::recordingStarted, this,
+            &MainWindow::onManualRecordingStarted);
+    connect(m_manualRecorder, &ManualRecorder::recordingStopped, this,
+            &MainWindow::onManualRecordingStopped);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -194,11 +203,20 @@ void MainWindow::buildUi()
     m_stopButton->setEnabled(false);
     m_pauseResumeButton = new QPushButton(I18n::t(QStringLiteral("‖ 一時停止")), central);
     m_pauseResumeButton->setEnabled(false);
+    // 常時録画: deliberately NOT disabled/enabled alongside m_startButton/
+    // m_stopButton above -- it works whether or not a test is running (see
+    // onToggleManualRecording()), so it stays usable the whole time a
+    // target is selected.
+    m_manualRecordButton = new QPushButton(I18n::t(QStringLiteral("● 録画")), central);
+    m_manualRecordButton->setToolTip(
+        I18n::t(QStringLiteral("対象ウィンドウを、耐久テストの実行中かどうかに関わらず連番のPNG画像として"
+                                "記録し続けます（手動操作の確認用）。")));
     m_statusLabel = new QLabel(I18n::t(QStringLiteral("待機中")), central);
     controlsRow->addWidget(m_startButton);
     controlsRow->addWidget(m_continuousRunButton);
     controlsRow->addWidget(m_stopButton);
     controlsRow->addWidget(m_pauseResumeButton);
+    controlsRow->addWidget(m_manualRecordButton);
     controlsRow->addWidget(m_statusLabel);
     controlsRow->addStretch();
 
@@ -244,6 +262,7 @@ void MainWindow::buildUi()
     connect(m_continuousRunButton, &QPushButton::clicked, this, &MainWindow::onContinuousRun);
     connect(m_stopButton, &QPushButton::clicked, this, &MainWindow::onStop);
     connect(m_pauseResumeButton, &QPushButton::clicked, this, &MainWindow::onPauseResume);
+    connect(m_manualRecordButton, &QPushButton::clicked, this, &MainWindow::onToggleManualRecording);
 
     // --- Log ---
     auto *logGroup = new QGroupBox(I18n::t(QStringLiteral("ログ")), central);
@@ -2402,6 +2421,41 @@ void MainWindow::onEnginePausedChanged(bool paused)
 {
     m_pauseResumeButton->setText(paused ? I18n::t(QStringLiteral("▶ 再開")) : I18n::t(QStringLiteral("‖ 一時停止")));
     m_statusLabel->setText(paused ? I18n::t(QStringLiteral("一時停止中")) : I18n::t(QStringLiteral("実行中")));
+}
+
+void MainWindow::onToggleManualRecording()
+{
+    if (m_manualRecorder->isRecording()) {
+        m_manualRecorder->stop();
+        return;
+    }
+
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウを取得できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してください。")));
+        return;
+    }
+    const WindowInfo &target = m_windows[idx];
+    if (!m_manualRecorder->start(target.windowId, target.pid)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("録画を開始できません")),
+                              I18n::t(QStringLiteral("対象ウィンドウの位置・サイズを取得できませんでした。")));
+    }
+}
+
+void MainWindow::onManualRecordingStarted(const QString &outputDir)
+{
+    m_manualRecordButton->setText(I18n::t(QStringLiteral("■ 録画停止")));
+    appendLog(I18n::t(QStringLiteral("常時録画を開始しました（対象ウィンドウを連番PNG画像として記録し続けます）: %1"))
+                  .arg(outputDir));
+}
+
+void MainWindow::onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason)
+{
+    m_manualRecordButton->setText(I18n::t(QStringLiteral("● 録画")));
+    if (!reason.isEmpty())
+        appendLog(reason);
+    appendLog(I18n::t(QStringLiteral("常時録画を停止しました（%1フレーム）: %2")).arg(frameCount).arg(outputDir));
 }
 
 void MainWindow::onResourceUsageUpdated(double residentMemoryMB, double cpuPercent)

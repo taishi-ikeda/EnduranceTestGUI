@@ -17,6 +17,7 @@
 
 #include "platform/PlatformAutomation.h"
 #include "I18n.h"
+#include "OverlayGeometry.h"
 
 namespace
 {
@@ -683,19 +684,7 @@ QPixmap RandomActionEngine::grabTargetWindowScreenshot() const
     QRect windowBounds;
     if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
         return QPixmap();
-
-    QScreen *screen = QGuiApplication::screenAt(windowBounds.center());
-    if (!screen)
-        screen = QGuiApplication::primaryScreen();
-    if (!screen)
-        return QPixmap();
-
-    // grabWindow(0, x, y, w, h) takes x/y relative to the given screen's own
-    // origin, not the virtual desktop's -- translate windowBounds into that
-    // screen's local coordinates before grabbing.
-    const QRect localBounds = windowBounds.translated(-screen->geometry().topLeft());
-    return screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
-                               localBounds.height());
+    return OverlayGeometry::grabWindowSnapshot(windowBounds);
 }
 
 namespace

@@ -150,4 +150,28 @@ inline QPixmap grabVirtualDesktopSnapshot()
     }
     return snapshot;
 }
+
+// Grabs just `windowBounds` (screen coordinates), e.g. a specific target
+// window's current rectangle, rather than the whole virtual desktop above.
+// Shared by RandomActionEngine::grabTargetWindowScreenshot() (operation-
+// region screenshots, the anomaly recording ring buffer) and ManualRecorder
+// (the always-on manual recording feature) -- both need the same
+// screen-lookup-then-translate-to-local-coordinates step before calling
+// QScreen::grabWindow(). Returns a null QPixmap if no screen contains
+// `windowBounds`'s center.
+inline QPixmap grabWindowSnapshot(const QRect &windowBounds)
+{
+    QScreen *screen = QGuiApplication::screenAt(windowBounds.center());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (!screen)
+        return QPixmap();
+
+    // grabWindow(0, x, y, w, h) takes x/y relative to the given screen's own
+    // origin, not the virtual desktop's -- translate windowBounds into that
+    // screen's local coordinates before grabbing.
+    const QRect localBounds = windowBounds.translated(-screen->geometry().topLeft());
+    return screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
+                               localBounds.height());
+}
 }  // namespace OverlayGeometry

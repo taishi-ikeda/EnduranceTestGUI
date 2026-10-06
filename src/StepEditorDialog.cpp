@@ -165,6 +165,13 @@ bool StepEditorDialog::targetsPopupDialog() const
 void StepEditorDialog::onActionParamsModeChanged()
 {
     const bool useDefault = m_useDefaultParamsRadio->isChecked();
+    if (useDefault) {
+        // Capture whatever is currently shown (the custom values just being
+        // edited) before overwriting the editor with the read-only default
+        // values, so switching back to "use custom" restores the edit
+        // instead of reverting to the dialog-open-time snapshot.
+        m_initialCustomActionParams = m_paramsEditor->params();
+    }
     m_paramsEditor->setParams(useDefault ? m_defaultActionParams : m_initialCustomActionParams);
 }
 

@@ -142,6 +142,14 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
     connect(m_useDefaultParamsRadio, &QRadioButton::toggled, this, [this](bool useDefault) {
         if (m_lastEditedMemberRow < 0)
             return;
+        if (useDefault) {
+            // Capture whatever is currently shown (the custom values just
+            // being edited) before overwriting the editor with the
+            // read-only default values, so switching back to "use custom"
+            // restores the edit instead of reverting to the last-flushed
+            // value.
+            m_members[m_lastEditedMemberRow].customActionParams = m_paramsEditor->params();
+        }
         m_paramsEditor->setEnabled(!useDefault);
         m_paramsEditor->setParams(useDefault ? m_defaultActionParams
                                               : m_members[m_lastEditedMemberRow].customActionParams);

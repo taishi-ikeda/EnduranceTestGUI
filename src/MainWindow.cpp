@@ -105,6 +105,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             &MainWindow::onManualRecordingStarted);
     connect(m_manualRecorder, &ManualRecorder::recordingStopped, this,
             &MainWindow::onManualRecordingStopped);
+    // SPEC.md 10, "GIFアニメーション上でのマウス操作可視化": forwards every
+    // automated click/double-click/drag to m_manualRecorder so a 常時録画
+    // recording that happens to be running at the same time can draw the
+    // same marker -- see ManualRecorder::recordMouseAction()'s own comment
+    // for why it can't know this on its own.
+    connect(m_engine, &RandomActionEngine::mouseActionPerformed, m_manualRecorder,
+            &ManualRecorder::recordMouseAction);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);

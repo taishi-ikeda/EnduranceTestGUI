@@ -73,6 +73,7 @@ set(SOURCES
     src/ManualRecorder.cpp
     src/GifEncoder.cpp
     src/AnimationExportDialog.cpp
+    src/MouseActionOverlay.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -102,6 +103,7 @@ set(HEADERS
     src/ManualRecorder.h
     src/GifEncoder.h
     src/AnimationExportDialog.h
+    src/MouseActionOverlay.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

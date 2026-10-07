@@ -4545,6 +4545,33 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
   確認）、「デフォルトに戻す」でのメッセージ表示と設定キー削除、その後の「● 録画」が
   `~/Pictures/EnduranceTestGUI_Screenshots`配下へ正しく戻って保存されることを確認した。
   -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
+- v0.94: 「gifアニメーション上でどこをクリックしたのかや、どこをドラッグ&amp;ドロップしたのか
+  などのマウス操作がわかるようにしたいです。良い案はありますか？」という相談に対し、
+  「`RandomActionEngine`がクリック/ドラッグを実行する際の座標をすでに把握しているので、
+  その座標情報を使って録画フレームに直接オーバーレイを焼き込む」という案を提示し、
+  「はい、こちらの実装で進めてください」との承認を受けて実装した。新設
+  `MouseActionOverlay.h/.cpp`に、1件のクリック/ダブルクリック/ドラッグを表す
+  `MouseActionMarker`構造体（種別・座標・ボタン・発生時刻）と、マーカーを描画する
+  `paintMouseActionMarkers()`、期限切れマーカーを間引く`pruneExpiredMarkers()`を実装。
+  `RandomActionEngine::runOneAction()`/`trySetupAction()`のClick/DoubleClick/Drag
+  各分岐（通常のステップ実行と起動時セットアップの双方）で、実際にマウスを動かした
+  直後に新設`recordMouseActionMarker()`を呼び、`m_recentMouseActions`へ追加すると同時に
+  新設シグナル`mouseActionPerformed()`を発行する。`RandomActionEngine::
+  captureRecordingFrame()`（⑦の異常停止時ローリングバッファ）と`ManualRecorder::
+  captureFrame()`（「● 録画」ボタンの常時録画、新設スロット`recordMouseAction()`で
+  `mouseActionPerformed()`を受信）の両方で、フレームを撮る直前にその時点でまだ新しい
+  （`kMarkerLingerMs`=900ms以内の）マーカーをフレーム画像へ直接描き込んでから保存する
+  ――クリック/ダブルクリックは左ボタンなら赤・右ボタンなら青の波紋が広がりながら
+  フェードアウトする輪、ドラッグは開始点から終了点へのオレンジ色の矢印として描画される。
+  900msという長さは、両者の録画間隔（0.5秒）と実際にマウス操作が起きた瞬間がほぼ確実に
+  ずれる（操作はたいてい録画の1フレームより短い間隔で起きる）ことを踏まえた、最悪の
+  タイミングのずれでも少なくとも1フレームには映るようにするための余裕。実機（Xvfb +
+  openbox）で、クリックとドラッグを有効にしたステップを約350回実行しながら「●
+  録画」で同時録画し、停止後に「録画をアニメーションに変換...」でGIFを書き出し、
+  生の録画フレームPNGを直接確認したところ、複数のクリックの赤い波紋とドラッグの
+  オレンジ色の矢印が期待通り重なって描画されていることを確認した。操作マニュアル
+  （docs/ja, docs/en の9章）にも、この可視化機能についての説明を追記した。-Wall
+  -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

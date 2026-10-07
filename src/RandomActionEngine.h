@@ -12,6 +12,7 @@
 
 #include <map>
 
+#include "MouseActionOverlay.h"
 #include "TestConfig.h"
 #include "platform/PlatformAutomation.h"
 
@@ -161,6 +162,13 @@ signals:
     // Emitted whenever a new operation-region screenshot has just been
     // captured and is available via lastRegionScreenshot() (SPEC.md 6.2/10).
     void regionScreenshotCaptured();
+    // Emitted right after a coordinate-based mouse action (click/double-
+    // click/drag) is dispatched (SPEC.md 10, "GIFアニメーション上でのマウス
+    // 操作可視化") -- MainWindow forwards this to ManualRecorder so a
+    // manual/always-on recording running independently of this engine can
+    // draw the same marker, since that recorder has no other way to learn
+    // what the engine just did.
+    void mouseActionPerformed(const MouseActionMarker &marker);
 
 private slots:
     void performRandomAction();
@@ -301,8 +309,20 @@ private:
     // renderRegionScreenshot() above and captureRecordingFrame() below, the
     // latter of which wants a faithful, unannotated view of the target
     // window as it actually appeared at that moment. Same null-on-failure
-    // contract as renderRegionScreenshot().
-    QPixmap grabTargetWindowScreenshot() const;
+    // contract as renderRegionScreenshot(). `outBounds`, if given, is
+    // filled with the window bounds (screen coordinates) the grab was
+    // taken at -- captureRecordingFrame() needs this to translate
+    // MouseActionMarker points (also screen coordinates) into the frame's
+    // own local coordinate space.
+    QPixmap grabTargetWindowScreenshot(QRect *outBounds = nullptr) const;
+    // Records one coordinate-based mouse action (SPEC.md 10) into
+    // m_recentMouseActions (for this engine's own anomaly recording
+    // buffer) and emits mouseActionPerformed() (for ManualRecorder, via
+    // MainWindow) -- called right after dispatching a Click/DoubleClick/
+    // Drag in runOneAction() or trySetupAction(). `from`==`to` for a
+    // click/double-click.
+    void recordMouseActionMarker(MouseActionMarker::Kind kind, const QPoint &from, const QPoint &to,
+                                  Qt::MouseButton button);
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
@@ -510,4 +530,13 @@ private:
     // timer (re)started only if enabled, at the top of every start().
     QTimer m_recordingTimer;
     QList<QPixmap> m_recordingFrames;
+
+    // Mouse click/drag markers (SPEC.md 10) waiting to be drawn onto the
+    // next captured frame(s) -- see MouseActionOverlay.h for the format and
+    // why they linger past the instant they happened. Pruned (and painted)
+    // in captureRecordingFrame() alongside m_recordingFrames; also handed
+    // to ManualRecorder via mouseActionPerformed() since that recorder
+    // captures independently and has no other way to know what the engine
+    // just did.
+    QList<MouseActionMarker> m_recentMouseActions;
 };

@@ -216,6 +216,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_lastScreenshotStepIndex = -1;
     m_lastScreenshotIterationCount = -1;
     m_recordingFrames.clear();
+    m_recentMouseActions.clear();
     m_recentActionDescriptions.clear();
     m_inSetupPhase = !m_config.setupActions.isEmpty();
     m_setupActionIndex = 0;
@@ -329,6 +330,7 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targ
     if (isAnomaly)
         summary.anomalyArtifactTimestamp = captureAnomalyArtifacts(reason);
     m_recordingFrames.clear();  // recording is per-run regardless of whether it just got saved above
+    m_recentMouseActions.clear();
     summary.rngSeedUsed = m_rngSeedUsed;
     summary.totalIterations = m_iterationCount;
     summary.sequenceLoopsCompleted = m_sequenceLoopCount;
@@ -437,12 +439,36 @@ void RandomActionEngine::captureRecordingFrame()
 {
     if (!m_running || m_paused)
         return;
-    const QPixmap frame = grabTargetWindowScreenshot();
+    QRect bounds;
+    QPixmap frame = grabTargetWindowScreenshot(&bounds);
     if (frame.isNull())
         return;
+
+    // SPEC.md 10: overlay any still-fresh click/drag markers before this
+    // frame is kept -- see MouseActionOverlay.h. Pruned here (rather than
+    // in a separate periodic pass) since this is the only place that both
+    // runs on a timer and knows "now".
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    MouseActionOverlay::pruneExpiredMarkers(m_recentMouseActions, now);
+    if (!m_recentMouseActions.isEmpty())
+        MouseActionOverlay::paintMouseActionMarkers(frame, bounds.topLeft(), m_recentMouseActions, now);
+
     m_recordingFrames.append(frame);
     if (m_recordingFrames.size() > kMaxRecordingFrames)
         m_recordingFrames.removeFirst();
+}
+
+void RandomActionEngine::recordMouseActionMarker(MouseActionMarker::Kind kind, const QPoint &from,
+                                                   const QPoint &to, Qt::MouseButton button)
+{
+    MouseActionMarker marker;
+    marker.kind = kind;
+    marker.from = from;
+    marker.to = to;
+    marker.button = button;
+    marker.timestampMs = QDateTime::currentMSecsSinceEpoch();
+    m_recentMouseActions.append(marker);
+    emit mouseActionPerformed(marker);
 }
 
 void RandomActionEngine::checkTargetResponsiveness()
@@ -722,11 +748,13 @@ void RandomActionEngine::maybeCaptureRegionScreenshot(const QString &stepLabel, 
     emit regionScreenshotCaptured();
 }
 
-QPixmap RandomActionEngine::grabTargetWindowScreenshot() const
+QPixmap RandomActionEngine::grabTargetWindowScreenshot(QRect *outBounds) const
 {
     QRect windowBounds;
     if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
         return QPixmap();
+    if (outBounds)
+        *outBounds = windowBounds;
     return OverlayGeometry::grabWindowSnapshot(windowBounds);
 }
 
@@ -1367,6 +1395,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const Qt::MouseButton btn = buttons[m_rng.bounded(quint32(buttons.size()))];
 
         PlatformAutomation::mouseClick(pt, btn);
+        recordMouseActionMarker(MouseActionMarker::Kind::Click, pt, pt, btn);
         desc = I18n::t(QStringLiteral("クリック(%1) at (%2, %3)"))
                    .arg(btn == Qt::RightButton ? I18n::t(QStringLiteral("右")) : I18n::t(QStringLiteral("左")))
                    .arg(pt.x())
@@ -1384,6 +1413,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
         QThread::msleep(80);
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        recordMouseActionMarker(MouseActionMarker::Kind::DoubleClick, pt, pt, Qt::LeftButton);
         desc = I18n::t(QStringLiteral("ダブルクリック at (%1, %2)")).arg(pt.x()).arg(pt.y());
         break;
     }
@@ -1424,6 +1454,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const Qt::MouseButton btn =
             (step.enableRightClick && m_rng.bounded(2u) == 0) ? Qt::RightButton : Qt::LeftButton;
         PlatformAutomation::mouseDrag(pt, to, btn, 12);
+        recordMouseActionMarker(MouseActionMarker::Kind::Drag, pt, to, btn);
         desc = I18n::t(QStringLiteral("ドラッグ (%1, %2) → (%3, %4)")).arg(pt.x()).arg(pt.y()).arg(to.x()).arg(to.y());
 
         if (btn == Qt::RightButton) {
@@ -1766,16 +1797,19 @@ bool RandomActionEngine::trySetupAction(const SetupAction &action, QString &outD
     switch (action.type) {
     case SetupActionType::Click:
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        recordMouseActionMarker(MouseActionMarker::Kind::Click, pt, pt, Qt::LeftButton);
         outDesc = I18n::t(QStringLiteral("クリック at (%1, %2)")).arg(pt.x()).arg(pt.y()) + labelSuffix;
         break;
     case SetupActionType::DoubleClick:
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
         QThread::msleep(80);
         PlatformAutomation::mouseClick(pt, Qt::LeftButton);
+        recordMouseActionMarker(MouseActionMarker::Kind::DoubleClick, pt, pt, Qt::LeftButton);
         outDesc = I18n::t(QStringLiteral("ダブルクリック at (%1, %2)")).arg(pt.x()).arg(pt.y()) + labelSuffix;
         break;
     case SetupActionType::RightClick: {
         PlatformAutomation::mouseClick(pt, Qt::RightButton);
+        recordMouseActionMarker(MouseActionMarker::Kind::Click, pt, pt, Qt::RightButton);
         QString desc = I18n::t(QStringLiteral("右クリック at (%1, %2)")).arg(pt.x()).arg(pt.y());
         // A right click may open a native context/popup menu -- always
         // dismiss it (never try to select an item: setup is meant to be a
@@ -1792,6 +1826,7 @@ bool RandomActionEngine::trySetupAction(const SetupAction &action, QString &outD
         if (PlatformAutomation::windowPidAtPoint(to) != m_config.targetPid)
             return retrySetupOrFail(stepLabel, I18n::t(QStringLiteral("ドラッグ先に対象アプリのウィンドウが見つかりません")));
         PlatformAutomation::mouseDrag(pt, to, Qt::LeftButton, 12);
+        recordMouseActionMarker(MouseActionMarker::Kind::Drag, pt, to, Qt::LeftButton);
         outDesc =
             I18n::t(QStringLiteral("ドラッグ (%1, %2) → (%3, %4)")).arg(pt.x()).arg(pt.y()).arg(to.x()).arg(to.y()) +
             labelSuffix;

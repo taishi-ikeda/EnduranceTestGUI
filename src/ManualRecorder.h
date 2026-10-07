@@ -1,10 +1,13 @@
 #pragma once
 
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QTimer>
 
 #include <cstdint>
+
+#include "MouseActionOverlay.h"
 
 // Always-on screen recording of a target window, independent of
 // RandomActionEngine: unlike TestConfig::enableScreenRecording (a short
@@ -46,6 +49,16 @@ public:
     QString outputDirectory() const { return m_outputDir; }
     int frameCount() const { return m_frameCount; }
 
+public slots:
+    // SPEC.md 10, "GIFアニメーション上でのマウス操作可視化": appends
+    // `marker` so the next captureFrame() call(s) within its linger window
+    // draw it -- this recorder has no way to know about a click/drag on
+    // its own (it's just a periodic screen grab, independent of whatever
+    // is driving the mouse), so MainWindow connects RandomActionEngine::
+    // mouseActionPerformed() here whenever an automated run is what's
+    // actually moving the mouse while this recording happens to also be on.
+    void recordMouseAction(const MouseActionMarker &marker);
+
 signals:
     void recordingStarted(const QString &outputDir);
     // `reason` is empty for a normal, user-requested stop; non-empty when
@@ -63,4 +76,5 @@ private:
     QString m_outputDir;
     int m_frameCount = 0;
     bool m_recording = false;
+    QList<MouseActionMarker> m_recentMouseActions;
 };

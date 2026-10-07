@@ -7,6 +7,7 @@
 #include <QThread>
 
 #include "I18n.h"
+#include "MouseActionOverlay.h"
 #include "OverlayGeometry.h"
 #include "RandomActionEngine.h"
 #include "platform/PlatformAutomation.h"
@@ -104,6 +105,7 @@ bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid, QStri
     m_targetPid = targetPid;
     m_frameCount = 0;
     m_recording = true;
+    m_recentMouseActions.clear();
 
     // Every frame here is a screen-composite grab (QScreen::grabWindow(0, ...),
     // same as grabTargetWindowScreenshot()/OverlayGeometry::grabWindowSnapshot()
@@ -133,7 +135,13 @@ void ManualRecorder::stop()
         return;
     m_timer.stop();
     m_recording = false;
+    m_recentMouseActions.clear();
     emit recordingStopped(m_outputDir, m_frameCount, QString());
+}
+
+void ManualRecorder::recordMouseAction(const MouseActionMarker &marker)
+{
+    m_recentMouseActions.append(marker);
 }
 
 void ManualRecorder::captureFrame()
@@ -145,14 +153,23 @@ void ManualRecorder::captureFrame()
         // tell the caller why, unlike a normal user-requested stop().
         m_timer.stop();
         m_recording = false;
+        m_recentMouseActions.clear();
         emit recordingStopped(m_outputDir, m_frameCount,
                                I18n::t(QStringLiteral("対象ウィンドウが見つからなくなったため録画を停止しました")));
         return;
     }
 
-    const QPixmap frame = OverlayGeometry::grabWindowSnapshot(bounds);
+    QPixmap frame = OverlayGeometry::grabWindowSnapshot(bounds);
     if (frame.isNull())
         return;  // transient grab failure -- try again next tick rather than aborting the recording
+
+    // SPEC.md 10, "GIFアニメーション上でのマウス操作可視化": overlay any
+    // still-fresh click/drag markers RandomActionEngine reported via
+    // recordMouseAction() -- see MouseActionOverlay.h.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    MouseActionOverlay::pruneExpiredMarkers(m_recentMouseActions, now);
+    if (!m_recentMouseActions.isEmpty())
+        MouseActionOverlay::paintMouseActionMarkers(frame, bounds.topLeft(), m_recentMouseActions, now);
 
     ++m_frameCount;
     const QString path = QStringLiteral("%1/frame_%2.png").arg(m_outputDir).arg(m_frameCount, 5, 10, QChar('0'));

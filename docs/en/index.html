@@ -442,6 +442,7 @@
       <figcaption>Figure 8: The "Convert to Animation" dialog</figcaption>
     </figure>
     <p>In the export dialog, choose the output format and frame interval (default 500&nbsp;ms), then click "Export...": a save-location dialog appears, followed by conversion with a progress bar (cancel at any time with "Cancel"). <strong>GIF is always available</strong> as an output format, using a self-contained encoder with no external tool required. <strong>MP4/WebM are only enabled when <code>ffmpeg</code> is installed</strong> on the machine running the app (otherwise those options are greyed out, with a hint explaining why). If the target window was resized mid-recording and frames therefore differ in size, they are automatically padded to the largest frame's size before conversion, so no content is cropped out.</p>
+    <p>Clicks and drag-and-drops performed during an endurance run are automatically marked on the recorded frames. A click/double-click draws as a fading, expanding red ring (blue for a right click); a drag draws as an orange arrow from its start point to its end point — each marker stays visible for a short time around the moment the action actually happened. This makes it possible to see where a run's fast, randomized operations actually landed just by watching the exported animation afterward.</p>
   </section>
 
   <section id="crash">

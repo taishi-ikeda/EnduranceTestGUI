@@ -33,6 +33,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -332,6 +333,17 @@ void MainWindow::buildMenuBar()
     m_loadPresetAction = fileMenu->addAction(I18n::t(QStringLiteral("テスト設定を読み込む...")));
     connect(m_loadPresetAction, &QAction::triggered, this, &MainWindow::onLoadPreset);
 
+    fileMenu->addSeparator();
+    // SPEC.md 10 v0.93: lets the user move RandomActionEngine::
+    // anomalyArtifactsDirectory()'s target (screenshots, manual recordings,
+    // crash artifacts) off the default ~/Pictures location -- added after a
+    // report of manual recording silently failing to start because that
+    // filesystem was full, with no way to redirect it to a drive with more
+    // space instead.
+    auto *artifactsDirectoryAction =
+        fileMenu->addAction(I18n::t(QStringLiteral("録画・クラッシュ記録の保存先を変更...")));
+    connect(artifactsDirectoryAction, &QAction::triggered, this, &MainWindow::onChangeArtifactsDirectory);
+
     // SPEC.md "多言語対応": language takes effect on next launch (I18n.h
     // explains why a live retranslate isn't done), so the handlers below
     // just persist the choice and tell the user to restart.
@@ -398,6 +410,49 @@ void MainWindow::onSelectLanguageEnglish()
     QMessageBox::information(this, QStringLiteral("言語 / Language"),
                               QStringLiteral("言語設定を保存しました。変更を反映するにはアプリを再起動してください。\n\n"
                                               "Language preference saved. Please restart the app for the change to take effect."));
+}
+
+void MainWindow::onChangeArtifactsDirectory()
+{
+    // SPEC.md 10 v0.93: RandomActionEngine::anomalyArtifactsDirectory()'s
+    // own comment covers what this controls (screenshots, manual
+    // recordings, crash artifacts) and why it exists. Read fresh each time
+    // rather than cached, so this dialog always reflects whatever
+    // QSettings currently holds (including a change made in this same
+    // dialog a moment ago, if the user reopens it).
+    const QString current = RandomActionEngine::anomalyArtifactsDirectory();
+
+    QMessageBox box(this);
+    box.setWindowTitle(I18n::t(QStringLiteral("録画・クラッシュ記録の保存先を変更")));
+    box.setText(I18n::t(QStringLiteral("録画（● 録画ボタン）・異常停止時のスクリーンショット/画面録画/"
+                                        "クラッシュダンプの保存先です。\n\n現在の保存先:\n%1"))
+                     .arg(current));
+    QPushButton *chooseButton =
+        box.addButton(I18n::t(QStringLiteral("フォルダを選択...")), QMessageBox::ActionRole);
+    QPushButton *resetButton =
+        box.addButton(I18n::t(QStringLiteral("デフォルトに戻す")), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Cancel);
+    box.exec();
+
+    QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+    if (box.clickedButton() == chooseButton) {
+        const QString chosen = QFileDialog::getExistingDirectory(
+            this, I18n::t(QStringLiteral("保存先フォルダを選択")), current);
+        if (chosen.isEmpty())
+            return;  // user cancelled the folder picker itself
+        settings.setValue(QStringLiteral("artifactsDirectoryOverride"), chosen);
+        QMessageBox::information(
+            this, I18n::t(QStringLiteral("保存先を変更しました")),
+            I18n::t(QStringLiteral("今後の録画・クラッシュ時の記録はこちらに保存されます:\n%1\n\n"
+                                    "（既存のファイルは移動されません）"))
+                .arg(chosen));
+    } else if (box.clickedButton() == resetButton) {
+        settings.remove(QStringLiteral("artifactsDirectoryOverride"));
+        QMessageBox::information(
+            this, I18n::t(QStringLiteral("デフォルトに戻しました")),
+            I18n::t(QStringLiteral("保存先をデフォルトに戻しました:\n%1"))
+                .arg(RandomActionEngine::anomalyArtifactsDirectory()));
+    }
 }
 
 QWidget *MainWindow::buildTargetColumn(QWidget *parent)

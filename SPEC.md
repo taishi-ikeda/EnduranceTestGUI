@@ -4528,6 +4528,23 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
   次回同じエラーに遭遇した際に実際の原因（ウィンドウ検出 vs フォルダ作成）をメッセージ
   だけで即座に切り分けられるようにするための診断性改善。-Wall -Wextra -Wpedantic付きの
   クリーンビルドで警告0件を維持。
+- v0.93: v0.92で原因を切り分けられるようにした結果、ユーザーから「保存先のストレージが
+  一杯なのが原因でした。動画作成などの作業ディレクトリをユーザが変更指定できるように
+  してください」との報告・依頼を受けて実装した。`RandomActionEngine::
+  anomalyArtifactsDirectory()`（録画・異常停止時のスクリーンショット/画面録画/
+  クラッシュダンプの保存先を返す、既定`~/Pictures/EnduranceTestGUI_Screenshots`）を、
+  QSettings（"asobi"/"EnduranceTestGUI"、既存の言語設定と同じ仕組み）のキー
+  `artifactsDirectoryOverride`が設定されていればそちらを優先するよう変更した。新設
+  `MainWindow::onChangeArtifactsDirectory()`を「ファイル」メニューに「録画・クラッシュ
+  記録の保存先を変更...」として追加し、現在の保存先を表示した上で「フォルダを選択...」
+  （`QFileDialog::getExistingDirectory()`で選んだパスを`artifactsDirectoryOverride`へ
+  保存。既存ファイルは移動しない旨を案内）・「デフォルトに戻す」（設定キーを削除し
+  デフォルトのパスを案内）・「キャンセル」の3択ダイアログを出す。実機（Xvfb +
+  openbox）で、メニュー項目の表示、現在の保存先表示、`/tmp/custom_recordings`への
+  変更とその後の「● 録画」での実際の保存（95フレーム、ログ・ファイルシステム双方で
+  確認）、「デフォルトに戻す」でのメッセージ表示と設定キー削除、その後の「● 録画」が
+  `~/Pictures/EnduranceTestGUI_Screenshots`配下へ正しく戻って保存されることを確認した。
+  -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

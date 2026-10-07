@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QScreen>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QThread>
 #include <QtMath>
@@ -97,6 +98,17 @@ QJsonObject RandomActionEngine::summaryToJson(const RunSummary &summary)
 
 QString RandomActionEngine::anomalyArtifactsDirectory()
 {
+    // SPEC.md 10 v0.93: a user-chosen override (MainWindow's "ファイル" menu)
+    // takes precedence when set -- same QSettings org/app as I18n's language
+    // preference. Stored as a plain directory path, used verbatim (unlike
+    // the default below, nothing is appended to it): the user is picking
+    // "the folder everything goes in" directly, not a parent to nest a
+    // fixed subfolder name under.
+    QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+    const QString overrideDir = settings.value(QStringLiteral("artifactsDirectoryOverride")).toString();
+    if (!overrideDir.isEmpty())
+        return overrideDir;
+
     return QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
            QStringLiteral("/EnduranceTestGUI_Screenshots");
 }

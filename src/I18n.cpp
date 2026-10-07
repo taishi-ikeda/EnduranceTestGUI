@@ -1008,6 +1008,28 @@ const QHash<QString, QString> &translationTable()
         // from "output folder couldn't be created" (ManualRecorder::start())
         {QStringLiteral("録画の保存先フォルダを作成できませんでした: %1"),
          QStringLiteral("Couldn't create the recording's output folder: %1")},
+
+        // v0.93: user-configurable artifacts directory (MainWindow::onChangeArtifactsDirectory())
+        {QStringLiteral("録画・クラッシュ記録の保存先を変更..."),
+         QStringLiteral("Change recording/crash artifacts folder...")},
+        {QStringLiteral("録画・クラッシュ記録の保存先を変更"),
+         QStringLiteral("Change recording/crash artifacts folder")},
+        {QStringLiteral("録画（● 録画ボタン）・異常停止時のスクリーンショット/画面録画/"
+                        "クラッシュダンプの保存先です。\n\n現在の保存先:\n%1"),
+         QStringLiteral("This is where recordings (\"● Record\"), operation-region screenshots/"
+                        "screen recordings/crash dumps on an abnormal stop are saved.\n\n"
+                        "Current location:\n%1")},
+        {QStringLiteral("フォルダを選択..."), QStringLiteral("Choose Folder...")},
+        {QStringLiteral("デフォルトに戻す"), QStringLiteral("Reset to Default")},
+        {QStringLiteral("保存先フォルダを選択"), QStringLiteral("Select Output Folder")},
+        {QStringLiteral("保存先を変更しました"), QStringLiteral("Location Changed")},
+        {QStringLiteral("今後の録画・クラッシュ時の記録はこちらに保存されます:\n%1\n\n"
+                        "（既存のファイルは移動されません）"),
+         QStringLiteral("Future recordings and crash artifacts will be saved here:\n%1\n\n"
+                        "(Existing files are not moved)")},
+        {QStringLiteral("デフォルトに戻しました"), QStringLiteral("Reset to Default")},
+        {QStringLiteral("保存先をデフォルトに戻しました:\n%1"),
+         QStringLiteral("The save location has been reset to the default:\n%1")},
     };
     return table;
 }

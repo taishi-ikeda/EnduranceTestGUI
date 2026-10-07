@@ -153,6 +153,7 @@ private slots:
     void onGlobalEmergencyStop();
     void onSelectLanguageJapanese();
     void onSelectLanguageEnglish();
+    void onChangeArtifactsDirectory();
 
 private:
     void buildUi();

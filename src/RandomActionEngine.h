@@ -76,10 +76,15 @@ public:
     };
 
     // Where captureAnomalyArtifacts() saves anomaly screenshots/recording
-    // frames, and where MainWindow saves its own anomaly-triggered
-    // artifacts (SPEC.md 6.7/10) -- a single shared location so a bug
-    // report is just "everything with this timestamp prefix in this
-    // folder".
+    // frames, where ManualRecorder saves its own recordings, and where
+    // MainWindow saves its own anomaly-triggered artifacts (SPEC.md 6.7/
+    // 6.15/10) -- a single shared location so a bug report is just
+    // "everything with this timestamp prefix in this folder". Defaults to
+    // ~/Pictures/EnduranceTestGUI_Screenshots, but a user-chosen override
+    // (MainWindow's "ファイル" menu, persisted via QSettings) takes
+    // precedence when set -- added after a report of recording silently
+    // failing because the default location's filesystem was full, with no
+    // way to point it somewhere with more space instead (SPEC.md 10 v0.93).
     static QString anomalyArtifactsDirectory();
 
     // Human-readable multi-line report of a RunSummary, in the same style

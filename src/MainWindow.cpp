@@ -2491,10 +2491,9 @@ void MainWindow::onToggleManualRecording()
         return;
     }
     const WindowInfo &target = m_windows[idx];
-    if (!m_manualRecorder->start(target.windowId, target.pid)) {
-        QMessageBox::warning(this, I18n::t(QStringLiteral("録画を開始できません")),
-                              I18n::t(QStringLiteral("対象ウィンドウの位置・サイズを取得できませんでした。")));
-    }
+    QString errorMessage;
+    if (!m_manualRecorder->start(target.windowId, target.pid, &errorMessage))
+        QMessageBox::warning(this, I18n::t(QStringLiteral("録画を開始できません")), errorMessage);
 }
 
 void MainWindow::onManualRecordingStarted(const QString &outputDir)

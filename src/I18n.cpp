@@ -1003,6 +1003,11 @@ const QHash<QString, QString> &translationTable()
                         "ハングの誤検知に注意してください（このまま続行します）"),
          QStringLiteral("Detected a debugger attached, but \"Debug mode\" is off. Watch out for "
                         "false hang detections (continuing as-is)")},
+
+        // v0.91: manual-recording start failure now distinguishes "window not found"
+        // from "output folder couldn't be created" (ManualRecorder::start())
+        {QStringLiteral("録画の保存先フォルダを作成できませんでした: %1"),
+         QStringLiteral("Couldn't create the recording's output folder: %1")},
     };
     return table;
 }

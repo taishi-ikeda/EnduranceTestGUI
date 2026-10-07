@@ -42,7 +42,7 @@ ManualRecorder::ManualRecorder(QObject *parent) : QObject(parent)
     connect(&m_timer, &QTimer::timeout, this, &ManualRecorder::captureFrame);
 }
 
-bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid)
+bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid, QString *errorOut)
 {
     if (m_recording)
         return true;
@@ -75,14 +75,30 @@ bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid)
         QThread::msleep(kRestoreRetryDelayMs);
         found = PlatformAutomation::queryWindowBounds(targetWindowId, targetPid, bounds);
     }
-    if (!found)
+    if (!found) {
+        if (errorOut)
+            *errorOut = I18n::t(QStringLiteral("対象ウィンドウの位置・サイズを取得できませんでした。"));
         return false;
+    }
 
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
     m_outputDir = QStringLiteral("%1/recording_%2")
                       .arg(RandomActionEngine::anomalyArtifactsDirectory(), timestamp);
-    if (!QDir().mkpath(m_outputDir))
+    if (!QDir().mkpath(m_outputDir)) {
+        // A completely different failure from "couldn't find the window"
+        // above -- e.g. QStandardPaths::writableLocation(PicturesLocation)
+        // (anomalyArtifactsDirectory()) returning empty or some other
+        // unwritable path in an unusual environment (no $HOME, no XDG user
+        // dirs configured, a read-only filesystem, ...). Surfacing the
+        // actual path here, rather than silently falling through to the
+        // same generic "position/size" message as the window-not-found
+        // case above, is the whole point of this branch existing
+        // separately -- see errorOut's own comment in the header.
+        if (errorOut) {
+            *errorOut = I18n::t(QStringLiteral("録画の保存先フォルダを作成できませんでした: %1")).arg(m_outputDir);
+        }
         return false;
+    }
 
     m_targetWindowId = targetWindowId;
     m_targetPid = targetPid;

@@ -30,10 +30,16 @@ public:
     // re-resolved every frame (see captureFrame()) so the recording keeps
     // following it across manual moves/resizes. First restores the target
     // if it's minimized (see the .cpp), so that alone isn't a reason this
-    // fails. Returns false (recording stays off, no signal emitted) if the
-    // window's bounds still can't be determined right now -- e.g. no
-    // target selected, or it was closed rather than just minimized.
-    bool start(std::uint32_t targetWindowId, qint64 targetPid);
+    // fails. Returns false (recording stays off, no signal emitted) on
+    // failure, with a user-displayable reason written to `errorOut` if it's
+    // non-null -- distinguishing "the window's bounds still can't be
+    // determined" (e.g. no target selected, or it was closed rather than
+    // just minimized) from "the output folder couldn't be created" (a
+    // completely different, non-window-related cause -- a caller that
+    // doesn't pass errorOut and only checks the bool return would otherwise
+    // see the exact same failure for both, which is misleading when
+    // diagnosing why this failed).
+    bool start(std::uint32_t targetWindowId, qint64 targetPid, QString *errorOut = nullptr);
     // No-op if not currently recording.
     void stop();
     bool isRecording() const { return m_recording; }

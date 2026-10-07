@@ -2849,6 +2849,11 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
   デバッガで非常に長時間（2分以上）ブレークポイント停止したままにすると、デバッグ
   モードが有効でも最終的にはハング検知で停止する——これは意図した仕様（本当に無限ループ
   した対象アプリを永遠に見逃さないための安全策）であり、不具合ではない。
+- （v0.91）`ManualRecorder::start()`の最小化ウィンドウ復元リトライ（最大15回・50ms間隔、
+  6.15節）は、Linux（openbox実機で約60msと実測）に対しては十分な余裕があるが、macOS側の
+  復元待ち時間（genieアニメーションの所要時間）は他のmacOS専用コードと同様にこの開発機
+  では実機確認ができず未検証。必要ならmacOSでの実測結果を踏まえて`kRestoreRetryAttempts`/
+  `kRestoreRetryDelayMs`（`ManualRecorder.cpp`）を調整すること。
 
 ### 8.1 耐久テストのバリエーション拡張（v0.16で全て実装済み）
 6.10節に詳細を記載。以下は当初提案として挙げていたが、全て実装済みになった:
@@ -4474,6 +4479,32 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
   のドラッグ距離を編集→「デフォルトを使う」に切替→「このステップ専用の設定を使う」に
   戻す、という操作を行い、編集値が保持されたままであることを確認した。-Wall -Wextra
   -Wpedantic付きのクリーンビルドで警告0件を維持。
+- v0.91: 「テスト対象アプリを選択して録画ボタンをおすと対象ウィンドウの位置サイズが
+  取得できなかったと言われます。考えられる原因あるいはバグなのかを確認してください」
+  という報告を受けて調査し、`ManualRecorder::start()`（6.15節）の不具合と判明した。
+  対象ウィンドウが最小化（アイコン化）された状態で「● 録画」を押すと、`PlatformAutomation::
+  queryWindowBounds()`は最小化されたウィンドウの位置・サイズを返せない（Linux実装は
+  `XGetWindowAttributes`の`map_state`が`IsViewable`であることを要求するが、最小化中は
+  `IsUnMapped`になる。macOSの`CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, ...)`
+  も同様に最小化ウィンドウを除外する）ため、録画を開始できずに「対象ウィンドウの
+  位置・サイズを取得できませんでした」と失敗していた。一方「▶ 開始」は、
+  `RandomActionEngine::start()`冒頭で`TestConfig::keepTargetActive`（既定ON）により
+  無条件に`PlatformAutomation::activateProcess()`を呼んでいるため、最小化された対象を
+  自動的に復元してから実行を続けられる——「開始」は最小化状態を許容するが「録画」は
+  許容しない、という2つのボタン間の非対称な挙動が原因だった。`activateProcess()`は
+  （macOSは`AXUIElement`で明示的に、Linuxは`XMapWindow`で）最小化ウィンドウの復元を
+  既にサポートしていたが、`ManualRecorder::start()`はこれを呼ぶより先に`queryWindowBounds()`
+  を評価してしまっていたため、復元する機会すら与えていなかった。修正: `activateProcess()`
+  の呼び出し順序を`queryWindowBounds()`より前に移動した上で、ウィンドウマネージャ/OS側の
+  復元が別プロセスの都合で非同期に行われる（Linuxではopenboxへの`_NET_ACTIVE_WINDOW`
+  メッセージへの反応が必要）ことを考慮し、`queryWindowBounds()`を最大15回・50ms間隔
+  （最悪750ms、実測ではopenboxで約60msで復元完了）でリトライするようにした。対象が
+  元から最小化されていない通常ケースでは1回目で成功するため、追加の待ち時間は発生しない。
+  実機（Xvfb + openbox）で、`xdotool windowminimize`で対象ウィンドウを最小化した状態から
+  「● 録画」を押すと従来は毎回確実に失敗することを確認した上で、修正後は対象ウィンドウが
+  自動的に復元され録画が正常に開始されることを確認した。macOS側の復元待ち時間（genie
+  アニメーションの所要時間）は、他のmacOS専用コードと同様にこの開発機では実機確認が
+  できず未検証。-Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

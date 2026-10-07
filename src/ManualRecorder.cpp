@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QPixmap>
 #include <QRect>
+#include <QThread>
 
 #include "I18n.h"
 #include "OverlayGeometry.h"
@@ -17,6 +18,22 @@ namespace
 // with ordinary manual operation without flooding the output folder with
 // files on a recording left running for a long session.
 constexpr int kManualRecordingFrameIntervalMs = 500;
+
+// start()'s retry window for a target window that was just restored from
+// minimized (see activateProcess() there): restoring the OS-level window
+// state (on Linux, the window manager mapping the window back in reaction
+// to the _NET_ACTIVE_WINDOW message activateProcess() sends; on macOS, the
+// deminiaturize animation activateProcess() there explicitly triggers)
+// happens on another process's own schedule, not synchronously with our
+// request -- measured at roughly 60ms for openbox in this project's own
+// sandbox (the macOS path is, like other macOS-specific behavior in this
+// project, unverified on real hardware -- its deminiaturize animation may
+// take longer). 15 attempts at 50ms apart (750ms worst case) leaves a
+// comfortable margin for a slower window manager/system without stalling
+// the UI noticeably on the (common) case where the window was already
+// visible and the very first attempt succeeds.
+constexpr int kRestoreRetryAttempts = 15;
+constexpr int kRestoreRetryDelayMs = 50;
 }  // namespace
 
 ManualRecorder::ManualRecorder(QObject *parent) : QObject(parent)
@@ -30,8 +47,35 @@ bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid)
     if (m_recording)
         return true;
 
+    // Restore the target first if it's minimized/iconified -- queryWindowBounds()
+    // only finds currently-mapped/viewable windows (see its own platform
+    // implementation's comments), so a minimized target would otherwise be
+    // reported as "can't find the window" below even though it's simply
+    // hidden, not actually gone. activateProcess() explicitly handles
+    // restoring a minimized window (see its own comment on each platform),
+    // mirroring RandomActionEngine::start()'s unconditional activateProcess()
+    // call at the very beginning of a run (TestConfig::keepTargetActive) --
+    // without this, "▶ 開始" tolerates a minimized target but "● 録画" did
+    // not, a user-visible inconsistency between the two (reported as
+    // ManualRecorder::start() failing with "対象ウィンドウの位置・サイズを
+    // 取得できませんでした" right after selecting a target that happened to
+    // be minimized). A no-op (false, silently ignored) if the target has no
+    // window at all -- queryWindowBounds() below still correctly fails in
+    // that case.
+    PlatformAutomation::activateProcess(targetPid);
+
+    // If the target was actually minimized, the restore above has very
+    // likely not taken effect yet the very first time bounds are checked
+    // (see kRestoreRetryAttempts' comment) -- poll briefly rather than
+    // failing immediately. A target that was never minimized (the common
+    // case) succeeds on the first attempt and never sleeps at all.
     QRect bounds;
-    if (!PlatformAutomation::queryWindowBounds(targetWindowId, targetPid, bounds))
+    bool found = PlatformAutomation::queryWindowBounds(targetWindowId, targetPid, bounds);
+    for (int attempt = 0; !found && attempt < kRestoreRetryAttempts; ++attempt) {
+        QThread::msleep(kRestoreRetryDelayMs);
+        found = PlatformAutomation::queryWindowBounds(targetWindowId, targetPid, bounds);
+    }
+    if (!found)
         return false;
 
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
@@ -53,13 +97,13 @@ bool ManualRecorder::start(std::uint32_t targetWindowId, qint64 targetPid)
     // against this by periodically re-activating the target while
     // TestConfig::keepTargetActive is set; this manual recording has no
     // such ongoing guard (it would otherwise fight the user clicking back
-    // into this app's own "■ 録画停止" button), so only bring the target
-    // to the front once, right as recording starts -- a clean starting
-    // point. If the user later brings another window (including this one)
-    // in front of the target mid-recording, the frames saved during that
-    // overlap will show that window instead, same as every other
-    // screenshot feature in this app.
-    PlatformAutomation::activateProcess(targetPid);
+    // into this app's own "■ 録画停止" button), so the activateProcess()
+    // call above (needed up front anyway, to restore a minimized target
+    // before the bounds check) is the only one for the whole recording --
+    // a clean starting point, not an ongoing guarantee. If the user later
+    // brings another window (including this one) in front of the target
+    // mid-recording, the frames saved during that overlap will show that
+    // window instead, same as every other screenshot feature in this app.
 
     m_timer.start();
     captureFrame();  // first frame immediately, not after the first interval

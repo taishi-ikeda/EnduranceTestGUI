@@ -1092,6 +1092,53 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("点列（スイープ）の始点・終点を含め、最低2つの点を追加してください。"),
          QStringLiteral("Add at least 2 points for the point sequence (sweep), including a start "
                         "and an end.")},
+
+        // v0.99: deliberate load-injection mode (SPEC.md 追加実装依頼「負荷注入モード」)
+        // -- LoadInjector launches separate CPU+memory busy-loop OS
+        // processes (loadstress_helper) alongside a run, to help reproduce
+        // load/timing-dependent target-app crashes.
+        {QStringLiteral("負荷注入（別プロセス、診断用）"), QStringLiteral("Load Injection (Separate Process, Diagnostic)")},
+        {QStringLiteral("テスト実行中に負荷注入を有効にする"), QStringLiteral("Enable load injection during the test run")},
+        {QStringLiteral("有効にすると、下記のプロセス数分のCPU+メモリ負荷専用プロセス"
+                        "（loadstress_helper、テスト対象アプリとは別の独立したプロセス）を起動します。"
+                        "同じマシン上の他ソフトウェアによる負荷を模擬し、対象アプリの複数スレッドの"
+                        "タイミングを変化させることで、負荷依存のクラッシュを再現しやすくするための"
+                        "機能です。"),
+         QStringLiteral("When enabled, launches the configured number of dedicated CPU+memory load "
+                        "processes (loadstress_helper, each a process independent of the target "
+                        "app). This simulates other software's load on the same machine, changing "
+                        "the target app's own multi-thread timing to help reproduce load-dependent "
+                        "crashes.")},
+        {QStringLiteral("プロセス数:"), QStringLiteral("Process count:")},
+        {QStringLiteral("プロセスあたりのメモリ使用量:"), QStringLiteral("Memory per process:")},
+        {QStringLiteral("テスト実行の開始・停止と連動させる"), QStringLiteral("Link to the test run's start/stop")},
+        {QStringLiteral("有効（デフォルト）の場合、▶開始でテストが始まると同時に負荷注入を自動的に"
+                        "開始し、■停止・異常停止・正常終了のいずれでも自動的に停止します。"
+                        "無効にした場合は、下の「負荷注入を今すぐ開始/停止」ボタンで手動制御してください"
+                        "（テストの開始・停止とは独立して、いつでも開始・停止できます）。"),
+         QStringLiteral("When enabled (default), load injection starts automatically the moment "
+                        "▶Start begins the test, and stops automatically whether the run stops, "
+                        "crashes, or finishes normally. When disabled, control it manually with the "
+                        "\"Start/Stop Load Injection Now\" button below instead (independent of the "
+                        "test's own start/stop, at any time).")},
+        {QStringLiteral("負荷注入を今すぐ開始"), QStringLiteral("Start Load Injection Now")},
+        {QStringLiteral("負荷注入を今すぐ停止"), QStringLiteral("Stop Load Injection Now")},
+        {QStringLiteral("停止中"), QStringLiteral("Stopped")},
+        {QStringLiteral("実行中（%1プロセス）"), QStringLiteral("Running (%1 processes)")},
+        {QStringLiteral("負荷注入を開始しました（%1プロセス、各%2MB）"),
+         QStringLiteral("Started load injection (%1 processes, %2 MB each)")},
+        {QStringLiteral("負荷注入の開始に失敗しました: %1"), QStringLiteral("Failed to start load injection: %1")},
+        {QStringLiteral("負荷注入を停止しました"), QStringLiteral("Stopped load injection")},
+        {QStringLiteral("負荷注入を手動で停止しました"), QStringLiteral("Manually stopped load injection")},
+        {QStringLiteral("負荷注入を手動で開始しました（%1プロセス、各%2MB）"),
+         QStringLiteral("Manually started load injection (%1 processes, %2 MB each)")},
+        {QStringLiteral("負荷注入を開始できません"), QStringLiteral("Can't Start Load Injection")},
+        {QStringLiteral("負荷注入プロセス(pid=%1)が予期せず終了しました（終了コード%2）"),
+         QStringLiteral("Load injection process (pid=%1) exited unexpectedly (exit code %2)")},
+        {QStringLiteral("loadstress_helper実行ファイルが見つかりません（%1 に配置されている必要があります）"),
+         QStringLiteral("Couldn't find the loadstress_helper executable (it must be placed in %1)")},
+        {QStringLiteral("負荷注入プロセスの起動に失敗しました: %1"),
+         QStringLiteral("Failed to start a load injection process: %1")},
     };
     return table;
 }

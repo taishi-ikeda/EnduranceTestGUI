@@ -74,6 +74,7 @@ set(SOURCES
     src/GifEncoder.cpp
     src/AnimationExportDialog.cpp
     src/MouseActionOverlay.cpp
+    src/LoadInjector.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -104,6 +105,7 @@ set(HEADERS
     src/GifEncoder.h
     src/AnimationExportDialog.h
     src/MouseActionOverlay.h
+    src/LoadInjector.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)
@@ -185,6 +187,18 @@ elseif(UNIX)
             "Install libatspi2.0-dev (Debian/Ubuntu) or at-spi2-core-devel (Fedora) to enable it.")
     endif()
 endif()
+
+# SPEC.md 追加実装依頼「負荷注入モード」: standalone, Qt-free CPU+memory
+# load-generator helper, launched as a separate OS process by LoadInjector
+# (see LoadInjector.h's header comment for why it must be its own process
+# rather than a thread inside EnduranceTestGUI). Placed in the same output
+# directory as EnduranceTestGUI's own binary (including, on macOS, inside
+# its .app bundle's Contents/MacOS) so LoadInjector::helperExecutablePath()
+# can find it next to QCoreApplication::applicationDirPath() at runtime.
+add_executable(loadstress_helper src/LoadStressHelperMain.cpp)
+set_target_properties(loadstress_helper PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:EnduranceTestGUI>
+)
 
 # Minimal target app for manually exercising EnduranceTestGUI against.
 add_subdirectory(testtarget)

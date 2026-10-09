@@ -32,6 +32,7 @@ class GlobalHotkey;
 class InputRecorder;
 class ManualRecorder;
 class RegionHighlightOverlay;
+class LoadInjector;
 
 // Main window, laid out (per SPEC.md 6.9, revised by 追加実装及び修正依頼)
 // as two columns:
@@ -130,6 +131,13 @@ private slots:
     void onPauseResume();
     void onEngineFinished(const QString &reason);
     void onEnginePausedChanged(bool paused);
+    // SPEC.md 追加実装依頼「負荷注入モード」: manual override for
+    // m_loadInjector, independent of whatever a run is doing with it (see
+    // m_loadInjectionLinkToRunCheck's comment) -- starts it with the
+    // currently configured process count/memory if not running, stops it if
+    // it is.
+    void onToggleLoadInjectionManual();
+    void onLoadInjectionWorkerExited(qint64 pid, int exitCode);
     void onToggleManualRecording();
     void onManualRecordingStarted(const QString &outputDir);
     void onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason);
@@ -357,6 +365,12 @@ private:
     // has selected. Called from startRunAfterLaunchWait(); a no-op if the
     // checkbox is unchecked or nothing has been saved yet.
     void applySavedWindowGeometryIfEnabled();
+    // SPEC.md 追加実装依頼「負荷注入モード」: refreshes
+    // m_loadInjectionStatusLabel/m_loadInjectionManualToggleButton's text
+    // from m_loadInjector->isRunning()/runningProcessCount() -- called after
+    // every start()/stop() of it, from any of the three call sites (auto-
+    // link in beginRun()/onEngineFinished(), or the manual toggle button).
+    void refreshLoadInjectionStatusLabel();
 
     // Target
     QComboBox *m_targetCombo = nullptr;
@@ -626,6 +640,35 @@ private:
     QCheckBox *m_autoSlowdownCheck = nullptr;
     QCheckBox *m_disableAccessibilityCheck = nullptr;
     QCheckBox *m_debugModeCheck = nullptr;
+
+    // SPEC.md 追加実装依頼「負荷注入モード」: deliberately injects CPU+メモリ
+    // load from separate OS processes alongside a run, to help reproduce
+    // load/timing-dependent ("ハイゼンバグ") target-app crashes -- see
+    // LoadInjector.h's own header comment for the full design rationale
+    // (why separate processes, why CPU affinity on Linux). Deliberately its
+    // own top-level group, *not* nested inside/disabled alongside
+    // m_timingGroup (see setControlsEnabled()): m_loadInjectionLinkToRunCheck
+    // being checked (the default) is what ties it to a run's start/stop;
+    // m_loadInjectionManualToggleButton must stay usable at any time,
+    // including mid-run, for the "手動オーバーライドも可能" requirement to
+    // actually mean something.
+    QGroupBox *m_loadInjectionGroup = nullptr;
+    QCheckBox *m_loadInjectionEnabledCheck = nullptr;
+    QSpinBox *m_loadInjectionProcessCountSpin = nullptr;
+    QSpinBox *m_loadInjectionMemoryMbSpin = nullptr;
+    // If checked (the default), beginRun() starts m_loadInjector right
+    // before m_engine->start() (only when m_loadInjectionEnabledCheck is
+    // also checked), and onEngineFinished() stops it again once the run
+    // ends for any reason -- but only if *this* run was the one that
+    // started it (m_loadInjectionStartedByRun), so a manually-started
+    // injection (via m_loadInjectionManualToggleButton, independent of any
+    // run) is never stopped out from under the user just because a run
+    // happened to finish.
+    QCheckBox *m_loadInjectionLinkToRunCheck = nullptr;
+    QPushButton *m_loadInjectionManualToggleButton = nullptr;
+    QLabel *m_loadInjectionStatusLabel = nullptr;
+    LoadInjector *m_loadInjector = nullptr;
+    bool m_loadInjectionStartedByRun = false;
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;

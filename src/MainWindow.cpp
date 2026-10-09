@@ -43,6 +43,7 @@
 
 #include "AnimationExportDialog.h"
 #include "DefaultActionParamsDialog.h"
+#include "LoadInjector.h"
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
@@ -114,6 +115,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // for why it can't know this on its own.
     connect(m_engine, &RandomActionEngine::mouseActionPerformed, m_manualRecorder,
             &ManualRecorder::recordMouseAction);
+
+    // SPEC.md 追加実装依頼「負荷注入モード」: independent of m_engine, like
+    // m_manualRecorder above -- see LoadInjector.h and
+    // m_loadInjectionLinkToRunCheck's own comments for how it's tied to (or
+    // deliberately kept independent of) a run's start/stop.
+    m_loadInjector = new LoadInjector(this);
+    connect(m_loadInjector, &LoadInjector::workerExitedUnexpectedly, this,
+            &MainWindow::onLoadInjectionWorkerExited);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -914,12 +923,68 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                                 "（設定したままでも）実行時にスキップされます。")));
     timingForm->addRow(QString(), m_disableAccessibilityCheck);
 
+    // SPEC.md 追加実装依頼「負荷注入モード」: own top-level group (not
+    // nested inside m_timingGroup) so it stays enabled, and the manual
+    // toggle usable, even while m_timingGroup itself is disabled during a
+    // run -- see m_loadInjectionGroup's own header comment in MainWindow.h.
+    m_loadInjectionGroup = new QGroupBox(I18n::t(QStringLiteral("負荷注入（別プロセス、診断用）")), container);
+    auto *loadInjectionLayout = new QVBoxLayout(m_loadInjectionGroup);
+
+    m_loadInjectionEnabledCheck =
+        new QCheckBox(I18n::t(QStringLiteral("テスト実行中に負荷注入を有効にする")), m_loadInjectionGroup);
+    m_loadInjectionEnabledCheck->setChecked(false);
+    m_loadInjectionEnabledCheck->setToolTip(
+        I18n::t(QStringLiteral("有効にすると、下記のプロセス数分のCPU+メモリ負荷専用プロセス"
+                                "（loadstress_helper、テスト対象アプリとは別の独立したプロセス）を起動します。"
+                                "同じマシン上の他ソフトウェアによる負荷を模擬し、対象アプリの複数スレッドの"
+                                "タイミングを変化させることで、負荷依存のクラッシュを再現しやすくするための"
+                                "機能です。")));
+    loadInjectionLayout->addWidget(m_loadInjectionEnabledCheck);
+
+    auto *loadInjectionParamsRow = new QHBoxLayout;
+    m_loadInjectionProcessCountSpin = new QSpinBox(m_loadInjectionGroup);
+    m_loadInjectionProcessCountSpin->setRange(1, 64);
+    m_loadInjectionProcessCountSpin->setValue(2);
+    loadInjectionParamsRow->addWidget(new QLabel(I18n::t(QStringLiteral("プロセス数:")), m_loadInjectionGroup));
+    loadInjectionParamsRow->addWidget(m_loadInjectionProcessCountSpin);
+    m_loadInjectionMemoryMbSpin = new QSpinBox(m_loadInjectionGroup);
+    m_loadInjectionMemoryMbSpin->setRange(1, 16384);
+    m_loadInjectionMemoryMbSpin->setValue(64);
+    m_loadInjectionMemoryMbSpin->setSuffix(QStringLiteral(" MB"));
+    loadInjectionParamsRow->addWidget(
+        new QLabel(I18n::t(QStringLiteral("プロセスあたりのメモリ使用量:")), m_loadInjectionGroup));
+    loadInjectionParamsRow->addWidget(m_loadInjectionMemoryMbSpin);
+    loadInjectionParamsRow->addStretch();
+    loadInjectionLayout->addLayout(loadInjectionParamsRow);
+
+    m_loadInjectionLinkToRunCheck =
+        new QCheckBox(I18n::t(QStringLiteral("テスト実行の開始・停止と連動させる")), m_loadInjectionGroup);
+    m_loadInjectionLinkToRunCheck->setChecked(true);
+    m_loadInjectionLinkToRunCheck->setToolTip(
+        I18n::t(QStringLiteral("有効（デフォルト）の場合、▶開始でテストが始まると同時に負荷注入を自動的に"
+                                "開始し、■停止・異常停止・正常終了のいずれでも自動的に停止します。"
+                                "無効にした場合は、下の「負荷注入を今すぐ開始/停止」ボタンで手動制御してください"
+                                "（テストの開始・停止とは独立して、いつでも開始・停止できます）。")));
+    loadInjectionLayout->addWidget(m_loadInjectionLinkToRunCheck);
+
+    auto *loadInjectionManualRow = new QHBoxLayout;
+    m_loadInjectionManualToggleButton =
+        new QPushButton(I18n::t(QStringLiteral("負荷注入を今すぐ開始")), m_loadInjectionGroup);
+    m_loadInjectionStatusLabel = new QLabel(I18n::t(QStringLiteral("停止中")), m_loadInjectionGroup);
+    loadInjectionManualRow->addWidget(m_loadInjectionManualToggleButton);
+    loadInjectionManualRow->addWidget(m_loadInjectionStatusLabel, 1);
+    loadInjectionLayout->addLayout(loadInjectionManualRow);
+
+    connect(m_loadInjectionManualToggleButton, &QPushButton::clicked, this,
+            &MainWindow::onToggleLoadInjectionManual);
+
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
     auto *namedRegionAndTimingRow = new QHBoxLayout;
     namedRegionAndTimingRow->addWidget(m_namedRegionGroup, 1);
     namedRegionAndTimingRow->addWidget(m_timingGroup, 1);
     layout->addLayout(namedRegionAndTimingRow);
+    layout->addWidget(m_loadInjectionGroup);
     layout->addStretch();
 
     return wrapper;
@@ -2517,6 +2582,28 @@ bool MainWindow::beginRun(bool interactive)
     else
         appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
 
+    // SPEC.md 追加実装依頼「負荷注入モード」: auto-link, only when enabled
+    // and the link checkbox is checked, and only if nothing is already
+    // running (a manual start before pressing ▶開始 is left alone -- see
+    // m_loadInjectionStartedByRun's own comment for why onEngineFinished()
+    // needs to know whether *this* beginRun() call was the one that started
+    // it).
+    m_loadInjectionStartedByRun = false;
+    if (m_loadInjectionEnabledCheck->isChecked() && m_loadInjectionLinkToRunCheck->isChecked() &&
+        !m_loadInjector->isRunning()) {
+        QString loadInjectionError;
+        if (m_loadInjector->start(m_loadInjectionProcessCountSpin->value(), m_loadInjectionMemoryMbSpin->value(),
+                                   loadInjectionError)) {
+            m_loadInjectionStartedByRun = true;
+            appendLog(I18n::t(QStringLiteral("負荷注入を開始しました（%1プロセス、各%2MB）"))
+                           .arg(m_loadInjectionProcessCountSpin->value())
+                           .arg(m_loadInjectionMemoryMbSpin->value()));
+        } else {
+            appendLog(I18n::t(QStringLiteral("負荷注入の開始に失敗しました: %1")).arg(loadInjectionError));
+        }
+        refreshLoadInjectionStatusLabel();
+    }
+
     m_engine->start(config);
     return true;
 }
@@ -2725,6 +2812,51 @@ void MainWindow::onEnginePausedChanged(bool paused)
     m_statusLabel->setText(paused ? I18n::t(QStringLiteral("一時停止中")) : I18n::t(QStringLiteral("実行中")));
 }
 
+void MainWindow::onToggleLoadInjectionManual()
+{
+    if (m_loadInjector->isRunning()) {
+        m_loadInjector->stop();
+        // A manual stop always wins, even over a run that's still in
+        // progress and thinks it's the one that started this injection --
+        // onEngineFinished() would otherwise try to stop it again (a no-op,
+        // since m_loadInjector->isRunning() is already false by then) and
+        // log a redundant "停止しました" message.
+        m_loadInjectionStartedByRun = false;
+        appendLog(I18n::t(QStringLiteral("負荷注入を手動で停止しました")));
+    } else {
+        QString errorMessage;
+        if (m_loadInjector->start(m_loadInjectionProcessCountSpin->value(), m_loadInjectionMemoryMbSpin->value(),
+                                   errorMessage)) {
+            appendLog(I18n::t(QStringLiteral("負荷注入を手動で開始しました（%1プロセス、各%2MB）"))
+                           .arg(m_loadInjectionProcessCountSpin->value())
+                           .arg(m_loadInjectionMemoryMbSpin->value()));
+        } else {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("負荷注入を開始できません")), errorMessage);
+        }
+    }
+    refreshLoadInjectionStatusLabel();
+}
+
+void MainWindow::onLoadInjectionWorkerExited(qint64 pid, int exitCode)
+{
+    appendLog(I18n::t(QStringLiteral("負荷注入プロセス(pid=%1)が予期せず終了しました（終了コード%2）"))
+                   .arg(pid)
+                   .arg(exitCode));
+    refreshLoadInjectionStatusLabel();
+}
+
+void MainWindow::refreshLoadInjectionStatusLabel()
+{
+    if (m_loadInjector->isRunning()) {
+        m_loadInjectionStatusLabel->setText(
+            I18n::t(QStringLiteral("実行中（%1プロセス）")).arg(m_loadInjector->runningProcessCount()));
+        m_loadInjectionManualToggleButton->setText(I18n::t(QStringLiteral("負荷注入を今すぐ停止")));
+    } else {
+        m_loadInjectionStatusLabel->setText(I18n::t(QStringLiteral("停止中")));
+        m_loadInjectionManualToggleButton->setText(I18n::t(QStringLiteral("負荷注入を今すぐ開始")));
+    }
+}
+
 void MainWindow::onToggleManualRecording()
 {
     if (m_manualRecorder->isRecording()) {
@@ -2801,6 +2933,17 @@ void MainWindow::onEngineFinished(const QString &reason)
     setControlsEnabled(true);
     m_statusLabel->setText(I18n::t(QStringLiteral("停止: %1")).arg(reason));
     m_uiTimer->stop();
+
+    // SPEC.md 追加実装依頼「負荷注入モード」: only stop what *this* run
+    // itself started (m_loadInjectionStartedByRun) -- an injection the user
+    // started manually, independent of any run, is left running regardless
+    // of how this run ended.
+    if (m_loadInjectionStartedByRun) {
+        m_loadInjector->stop();
+        m_loadInjectionStartedByRun = false;
+        appendLog(I18n::t(QStringLiteral("負荷注入を停止しました")));
+        refreshLoadInjectionStatusLabel();
+    }
     if (m_stopPanel) {
         m_stopPanel->close();
         m_stopPanel->deleteLater();
@@ -3380,6 +3523,11 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["autoSlowdownEnabled"] = m_autoSlowdownCheck->isChecked();
     timing["disableAccessibilityFeatures"] = m_disableAccessibilityCheck->isChecked();
     timing["debuggerModeEnabled"] = m_debugModeCheck->isChecked();
+    // SPEC.md 追加実装依頼「負荷注入モード」
+    timing["loadInjectionEnabled"] = m_loadInjectionEnabledCheck->isChecked();
+    timing["loadInjectionProcessCount"] = m_loadInjectionProcessCountSpin->value();
+    timing["loadInjectionMemoryMbPerProcess"] = m_loadInjectionMemoryMbSpin->value();
+    timing["loadInjectionLinkToRun"] = m_loadInjectionLinkToRunCheck->isChecked();
     root["timing"] = timing;
     return root;
 }
@@ -3482,6 +3630,15 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_disableAccessibilityCheck->setChecked(
         timing["disableAccessibilityFeatures"].toBool(m_disableAccessibilityCheck->isChecked()));
     m_debugModeCheck->setChecked(timing["debuggerModeEnabled"].toBool(m_debugModeCheck->isChecked()));
+    // SPEC.md 追加実装依頼「負荷注入モード」
+    m_loadInjectionEnabledCheck->setChecked(
+        timing["loadInjectionEnabled"].toBool(m_loadInjectionEnabledCheck->isChecked()));
+    m_loadInjectionProcessCountSpin->setValue(
+        timing["loadInjectionProcessCount"].toInt(m_loadInjectionProcessCountSpin->value()));
+    m_loadInjectionMemoryMbSpin->setValue(
+        timing["loadInjectionMemoryMbPerProcess"].toInt(m_loadInjectionMemoryMbSpin->value()));
+    m_loadInjectionLinkToRunCheck->setChecked(
+        timing["loadInjectionLinkToRun"].toBool(m_loadInjectionLinkToRunCheck->isChecked()));
 
     refreshNamedRegionList();
     refreshSetupActionList();

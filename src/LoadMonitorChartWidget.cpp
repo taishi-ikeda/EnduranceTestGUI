@@ -55,60 +55,85 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
     const QList<LoadSample> empty;
     const QList<LoadSample> &samples = m_monitor ? m_monitor->samples() : empty;
 
+    // 「CPUのusageとメモリ使用率を別グラフで表示してください」: two stacked
+    // plot areas (CPU% on top, memory below) instead of overlaying memory on
+    // a secondary axis of a single combined chart -- each metric gets a
+    // full-height axis of its own.
     const int marginLeft = 36;
-    const int marginRight = 36;
-    const int marginTop = 20;
-    const int marginBottom = 16;
-    const QRect plotRect(marginLeft, marginTop, size.width() - marginLeft - marginRight,
-                         size.height() - marginTop - marginBottom);
+    const int marginRight = 8;
+    const int titleHeight = 16;
+    const int gapBetweenCharts = 10;
+    const int topPadding = 2;
+    const int bottomPadding = 4;
+    const int plotWidth = size.width() - marginLeft - marginRight;
+
+    const int availableHeight = size.height() - topPadding - bottomPadding - titleHeight * 2 - gapBetweenCharts;
+    const int cpuPlotHeight = qMax(1, availableHeight / 2);
+    const int memPlotHeight = qMax(1, availableHeight - cpuPlotHeight);
+
+    const QRect cpuTitleRect(marginLeft, topPadding, plotWidth, titleHeight);
+    const QRect cpuPlotRect(marginLeft, cpuTitleRect.bottom(), plotWidth, cpuPlotHeight);
+    const QRect memTitleRect(marginLeft, cpuPlotRect.bottom() + gapBetweenCharts, plotWidth, titleHeight);
+    const QRect memPlotRect(marginLeft, memTitleRect.bottom(), plotWidth, memPlotHeight);
 
     painter.setPen(QPen(QColor(200, 200, 200)));
-    painter.drawRect(plotRect);
+    painter.drawRect(cpuPlotRect);
+    painter.drawRect(memPlotRect);
 
     if (samples.size() < 2) {
         painter.setPen(QPen(QColor(140, 140, 140)));
-        painter.drawText(plotRect, Qt::AlignCenter, I18n::t(QStringLiteral("データなし")));
+        painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, I18n::t(QStringLiteral("データなし")));
         return;
     }
 
-    // Horizontal 0/50/100% gridlines (left axis, shared by CPU% series).
-    painter.setPen(QPen(QColor(230, 230, 230)));
-    for (int pct = 0; pct <= 100; pct += 50) {
-        const int y = plotRect.bottom() - int(double(pct) / 100.0 * plotRect.height());
-        painter.drawLine(plotRect.left(), y, plotRect.right(), y);
-    }
-    painter.setPen(QPen(QColor(120, 120, 120)));
-    painter.drawText(QRect(0, plotRect.top() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("100%"));
-    painter.drawText(QRect(0, plotRect.bottom() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("0%"));
-
-    // Memory's own auto-scaled right axis (0..maxMemory, at least 1MB so a
+    // Memory's own auto-scaled axis (0..maxMemory, at least 1MB so a
     // perfectly flat 0MB run doesn't divide by zero).
     double maxMemory = 1.0;
     for (const LoadSample &s : samples)
         maxMemory = std::max(maxMemory, s.targetMemoryMb);
-    painter.drawText(QRect(plotRect.right() + 4, plotRect.top() - 6, marginRight - 4, 14), Qt::AlignLeft,
-                      QStringLiteral("%1MB").arg(maxMemory, 0, 'f', 0));
-    painter.drawText(QRect(plotRect.right() + 4, plotRect.bottom() - 6, marginRight - 4, 14), Qt::AlignLeft,
-                      QStringLiteral("0MB"));
 
-    const double xStep = samples.size() > 1 ? double(plotRect.width()) / double(samples.size() - 1) : 0.0;
-    auto xAt = [&](int index) { return plotRect.left() + int(double(index) * xStep); };
-    auto yForPercent = [&](double percent) {
-        return plotRect.bottom() - int(qBound(0.0, percent, 100.0) / 100.0 * plotRect.height());
+    const double xStep = double(plotWidth) / double(samples.size() - 1);
+    auto xAt = [&](int index) { return marginLeft + int(double(index) * xStep); };
+    auto yForCpuPercent = [&](double percent) {
+        return cpuPlotRect.bottom() - int(qBound(0.0, percent, 100.0) / 100.0 * cpuPlotRect.height());
     };
     auto yForMemory = [&](double mb) {
-        return plotRect.bottom() - int(qBound(0.0, mb, maxMemory) / maxMemory * plotRect.height());
+        return memPlotRect.bottom() - int(qBound(0.0, mb, maxMemory) / maxMemory * memPlotRect.height());
     };
 
-    // Load-injection-active shaded bands, drawn first so every line is
-    // painted on top of them, not the other way around.
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(kLoadInjectionBandColor);
-    for (int i = 0; i + 1 < samples.size(); ++i) {
-        if (!samples[i].loadInjectionActive)
-            continue;
-        painter.drawRect(QRect(QPoint(xAt(i), plotRect.top()), QPoint(xAt(i + 1), plotRect.bottom())));
+    // Gridlines + axis labels -- CPU chart (0/50/100%).
+    painter.setPen(QPen(QColor(230, 230, 230)));
+    for (int pct = 0; pct <= 100; pct += 50)
+        painter.drawLine(cpuPlotRect.left(), yForCpuPercent(pct), cpuPlotRect.right(), yForCpuPercent(pct));
+    painter.setPen(QPen(QColor(120, 120, 120)));
+    painter.drawText(QRect(0, cpuPlotRect.top() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("100%"));
+    painter.drawText(QRect(0, cpuPlotRect.bottom() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("0%"));
+
+    // Gridlines + axis labels -- memory chart (0/half/max, auto-scaled).
+    painter.setPen(QPen(QColor(230, 230, 230)));
+    for (int frac = 0; frac <= 100; frac += 50) {
+        const int y = yForMemory(maxMemory * frac / 100.0);
+        painter.drawLine(memPlotRect.left(), y, memPlotRect.right(), y);
     }
+    painter.setPen(QPen(QColor(120, 120, 120)));
+    painter.drawText(QRect(0, memPlotRect.top() - 6, marginLeft - 4, 14), Qt::AlignRight,
+                      QStringLiteral("%1MB").arg(maxMemory, 0, 'f', 0));
+    painter.drawText(QRect(0, memPlotRect.bottom() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("0MB"));
+
+    // Load-injection-active shaded bands, drawn before the series lines so
+    // every line is painted on top of them, not the other way around --
+    // shown on both charts since it's context relevant to either metric.
+    auto drawLoadInjectionBands = [&](const QRect &rect) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kLoadInjectionBandColor);
+        for (int i = 0; i + 1 < samples.size(); ++i) {
+            if (!samples[i].loadInjectionActive)
+                continue;
+            painter.drawRect(QRect(QPoint(xAt(i), rect.top()), QPoint(xAt(i + 1), rect.bottom())));
+        }
+    };
+    drawLoadInjectionBands(cpuPlotRect);
+    drawLoadInjectionBands(memPlotRect);
 
     auto drawSeries = [&](const QColor &color, auto valueOf, auto yOf) {
         QPainterPath path;
@@ -132,19 +157,20 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
         painter.drawPath(path);
     };
 
+    drawSeries(kSystemCpuColor, [](const LoadSample &s) { return s.systemCpuPercent; }, yForCpuPercent);
+    drawSeries(kTargetCpuColor, [](const LoadSample &s) { return s.targetCpuPercent; }, yForCpuPercent);
     drawSeries(kMemoryColor, [](const LoadSample &s) { return s.targetMemoryMb; }, yForMemory);
-    drawSeries(kSystemCpuColor, [](const LoadSample &s) { return s.systemCpuPercent; }, yForPercent);
-    drawSeries(kTargetCpuColor, [](const LoadSample &s) { return s.targetCpuPercent; }, yForPercent);
 
-    // Legend + latest values, top-left.
+    // Per-chart title + latest values, replacing the old single combined
+    // legend line now that CPU and memory are two separate charts.
     const LoadSample &latest = samples.last();
-    const QString legend =
-        I18n::t(QStringLiteral("対象CPU: %1%  システムCPU: %2  メモリ: %3MB"))
-            .arg(latest.targetCpuPercent, 0, 'f', 1)
-            .arg(latest.systemCpuPercent >= 0.0 ? QStringLiteral("%1%").arg(latest.systemCpuPercent, 0, 'f', 1)
-                                                 : I18n::t(QStringLiteral("(非対応)")))
-            .arg(latest.targetMemoryMb, 0, 'f', 1);
     painter.setPen(QPen(QColor(60, 60, 60)));
-    painter.drawText(QRect(marginLeft, 2, size.width() - marginLeft - marginRight, marginTop - 2), Qt::AlignLeft,
-                      legend);
+    painter.drawText(cpuTitleRect, Qt::AlignLeft | Qt::AlignVCenter,
+                      I18n::t(QStringLiteral("CPU使用率（対象: %1%  システム: %2）"))
+                          .arg(latest.targetCpuPercent, 0, 'f', 1)
+                          .arg(latest.systemCpuPercent >= 0.0
+                                   ? QStringLiteral("%1%").arg(latest.systemCpuPercent, 0, 'f', 1)
+                                   : I18n::t(QStringLiteral("(非対応)"))));
+    painter.drawText(memTitleRect, Qt::AlignLeft | Qt::AlignVCenter,
+                      I18n::t(QStringLiteral("メモリ使用量（%1MB）")).arg(latest.targetMemoryMb, 0, 'f', 1));
 }

@@ -1179,8 +1179,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"),
          QStringLiteral("Saved a graph image of the CPU/memory history leading up to the abnormal stop: %1")},
         {QStringLiteral("データなし"), QStringLiteral("No Data")},
-        {QStringLiteral("対象CPU: %1%  システムCPU: %2  メモリ: %3MB"),
-         QStringLiteral("Target CPU: %1%  System CPU: %2  Memory: %3MB")},
         {QStringLiteral("(非対応)"), QStringLiteral("(unsupported)")},
 
         // v1.02: SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・
@@ -1237,6 +1235,13 @@ const QHash<QString, QString> &translationTable()
         // ボックス単独で監視を開始/停止できるようにした。
         {QStringLiteral("負荷モニター: ①で対象アプリを選択してから有効にしてください。"),
          QStringLiteral("Load Monitor: select a target app in ① before enabling this.")},
+
+        // v1.05: 「CPUのusageとメモリ使用率を別グラフで表示してください」--
+        // 1枚の合成グラフ（メモリを右軸に重ねる方式）から、CPU使用率とメモリ
+        // 使用量それぞれ専用の全高軸を持つ2段のグラフへ分割。
+        {QStringLiteral("CPU使用率（対象: %1%  システム: %2）"),
+         QStringLiteral("CPU Usage (target: %1%  system: %2)")},
+        {QStringLiteral("メモリ使用量（%1MB）"), QStringLiteral("Memory Usage (%1MB)")},
     };
     return table;
 }

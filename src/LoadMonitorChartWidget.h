@@ -7,17 +7,21 @@
 #include "LoadMonitor.h"
 
 // Live CPU%/memory chart for the "負荷モニター" feature (SPEC.md 追加実装
-// 依頼「負荷モニター」) -- draws LoadMonitor's current ring buffer as a
-// scrolling line chart: the target process' own CPU% and (Linux only)
-// whole-system CPU% on a shared 0-100% axis, the target process' memory on
-// its own auto-scaled axis, and a light shaded band behind any stretch
-// where LoadInjector was active, so a load-injection period is visually
-// obvious against the CPU/memory curves around it. Purely a renderer: it
-// never samples anything itself, only repaints (via LoadMonitor::
-// sampleAdded()) from whatever m_monitor already holds. Kept as a small,
-// self-contained custom-painted widget rather than adding a QtCharts
-// dependency, consistent with this project's other hand-painted overlays
-// (RegionHighlightOverlay, PointHighlightOverlay, etc).
+// 依頼「負荷モニター」) -- draws LoadMonitor's current ring buffer as two
+// stacked scrolling line charts, one above the other: CPU usage (the target
+// process' own CPU% and, Linux only, whole-system CPU%, sharing a 0-100%
+// axis) on top, and the target process' memory (its own auto-scaled axis)
+// below -- separated per「CPUのusageとメモリ使用率を別グラフで表示して
+// ください」so the two metrics, which live on very different scales, each
+// get a full-height axis instead of one being squeezed onto a secondary
+// axis of the other. A light shaded band behind any stretch where
+// LoadInjector was active is drawn across both charts, so a load-injection
+// period is visually obvious against the CPU/memory curves around it in
+// either one. Purely a renderer: it never samples anything itself, only
+// repaints (via LoadMonitor::sampleAdded()) from whatever m_monitor already
+// holds. Kept as a small, self-contained custom-painted widget rather than
+// adding a QtCharts dependency, consistent with this project's other
+// hand-painted overlays (RegionHighlightOverlay, PointHighlightOverlay, etc).
 class LoadMonitorChartWidget : public QWidget
 {
     Q_OBJECT
@@ -28,8 +32,10 @@ public:
     // Non-owning; may be null (nothing is drawn -- see paintEvent()).
     void setLoadMonitor(LoadMonitor *monitor);
 
-    QSize minimumSizeHint() const override { return QSize(300, 120); }
-    QSize sizeHint() const override { return QSize(500, 160); }
+    // Taller than before the CPU/memory split (two stacked charts, each
+    // wanting a comfortable minimum height of its own).
+    QSize minimumSizeHint() const override { return QSize(300, 220); }
+    QSize sizeHint() const override { return QSize(500, 300); }
 
     // Renders the chart exactly as currently drawn into a standalone
     // QPixmap of `size` -- used both by this widget's own paintEvent() and

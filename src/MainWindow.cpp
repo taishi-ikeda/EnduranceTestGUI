@@ -3485,7 +3485,7 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
                 appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移を保存しました: %1")).arg(csvPath));
             const QString pngPath =
                 QStringLiteral("%1/anomaly_%2_loadmonitor.png").arg(baseDir, summary.anomalyArtifactTimestamp);
-            if (m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 300)).save(pngPath))
+            if (m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 500)).save(pngPath))
                 appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"))
                                .arg(pngPath));
         }
@@ -3587,7 +3587,7 @@ void MainWindow::onSaveLoadMonitorData()
     const QString csvPath = QStringLiteral("%1/loadmonitor_%2.csv").arg(dir, timestamp);
     const QString pngPath = QStringLiteral("%1/loadmonitor_%2.png").arg(dir, timestamp);
     bool ok = m_loadMonitor->saveSamplesAsCsv(csvPath);
-    ok = m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 300)).save(pngPath) && ok;
+    ok = m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 500)).save(pngPath) && ok;
     if (ok)
         appendLog(I18n::t(QStringLiteral("負荷モニターのデータを保存しました: %1 / %2")).arg(csvPath, pngPath));
     else

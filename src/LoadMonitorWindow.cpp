@@ -57,7 +57,9 @@ LoadMonitorWindow::LoadMonitorWindow(LoadMonitor *monitor, QWidget *parent) : QW
     connect(monitor, &LoadMonitor::sampleAdded, this,
             [this, monitor]() { m_saveButton->setEnabled(!monitor->samples().isEmpty()); });
 
-    resize(560, 360);
+    // CPU/メモリの2段グラフ（LoadMonitorChartWidget::sizeHint()）が窮屈に
+    // ならない高さを確保。
+    resize(560, 480);
 }
 
 bool LoadMonitorWindow::monitoringEnabled() const

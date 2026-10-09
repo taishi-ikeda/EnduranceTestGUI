@@ -46,6 +46,7 @@
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
+#include "OverlayGeometry.h"
 #include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 #include "SetupActionEditorDialog.h"
@@ -1489,25 +1490,21 @@ bool MainWindow::resolveNamedRegionForDisplay(const NamedRegion &region, QList<Q
         // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点
         // 対応」: same bounding-box-around-every-waypoint approach as
         // RandomActionEngine::resolveStepRegion()'s own isSweepTarget
-        // branch, re-added to the *current* target window position
-        // (sweepWaypoints are always window-relative, unlike the rectangle
-        // fields' anchor-based translation above -- see NamedRegion::
-        // isSweepTarget's comment).
+        // branch (both share OverlayGeometry::boundingRectOfPoints() so the
+        // two can't drift apart), re-added to the *current* target window
+        // position (sweepWaypoints are always window-relative, unlike the
+        // rectangle fields' anchor-based translation above -- see
+        // NamedRegion::isSweepTarget's comment).
         if (region.sweepWaypoints.size() < 2)
             return false;
         QPoint targetTopLeft;
         if (!currentTargetTopLeft(targetTopLeft))
             return false;
-        const QPoint first = targetTopLeft + region.sweepWaypoints.first();
-        int minX = first.x(), maxX = first.x(), minY = first.y(), maxY = first.y();
-        for (const QPoint &wp : region.sweepWaypoints) {
-            const QPoint p = targetTopLeft + wp;
-            minX = qMin(minX, p.x());
-            maxX = qMax(maxX, p.x());
-            minY = qMin(minY, p.y());
-            maxY = qMax(maxY, p.y());
-        }
-        outInclude = {QRect(QPoint(minX, minY), QPoint(maxX, maxY)).adjusted(-10, -10, 10, 10)};
+        QList<QPoint> absoluteWaypoints;
+        absoluteWaypoints.reserve(region.sweepWaypoints.size());
+        for (const QPoint &wp : region.sweepWaypoints)
+            absoluteWaypoints << (targetTopLeft + wp);
+        outInclude = {OverlayGeometry::boundingRectOfPoints(absoluteWaypoints, 10)};
         return true;
     }
 

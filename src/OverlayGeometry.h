@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QGuiApplication>
+#include <QList>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPixmap>
@@ -173,5 +174,34 @@ inline QPixmap grabWindowSnapshot(const QRect &windowBounds)
     const QRect localBounds = windowBounds.translated(-screen->geometry().topLeft());
     return screen->grabWindow(0, localBounds.x(), localBounds.y(), localBounds.width(),
                                localBounds.height());
+}
+
+// The smallest rect covering every point in `points`, inflated by
+// `paddingPx` on each side (so a perfectly horizontal/vertical set of
+// points -- most commonly a sweep-type NamedRegion's waypoints, SPEC.md
+// 追加実装依頼「操作領域を点列（スイープ）で指定」中点対応 -- isn't a
+// zero-width/height rect). Shared by RandomActionEngine::resolveStepRegion()
+// (the actual run-time include-region for a sweep-type NamedRegion) and
+// MainWindow::resolveNamedRegionForDisplay() (that same region's「操作領域を
+// 確認」preview box), so the two can't silently drift apart from
+// independently reimplementing the same min/max/inflate arithmetic. Returns
+// a null QRect if `points` is empty; callers are expected to already have
+// translated every point into the same (e.g. absolute screen) coordinate
+// space before calling this.
+inline QRect boundingRectOfPoints(const QList<QPoint> &points, int paddingPx)
+{
+    if (points.isEmpty())
+        return QRect();
+    int minX = points.first().x();
+    int maxX = minX;
+    int minY = points.first().y();
+    int maxY = minY;
+    for (const QPoint &p : points) {
+        minX = qMin(minX, p.x());
+        maxX = qMax(maxX, p.x());
+        minY = qMin(minY, p.y());
+        maxY = qMax(maxY, p.y());
+    }
+    return QRect(QPoint(minX, minY), QPoint(maxX, maxY)).adjusted(-paddingPx, -paddingPx, paddingPx, paddingPx);
 }
 }  // namespace OverlayGeometry

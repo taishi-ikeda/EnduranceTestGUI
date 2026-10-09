@@ -708,16 +708,11 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
                 m_currentRegionSweepIntervalPx = region.sweepIntervalPx;
                 m_currentRegionSweepJitterPx = region.sweepJitterPx;
                 m_currentSweepRegionKey = &region;
-                const QPoint first = windowBounds.topLeft() + region.sweepWaypoints.first();
-                int minX = first.x(), maxX = first.x(), minY = first.y(), maxY = first.y();
-                for (const QPoint &wp : region.sweepWaypoints) {
-                    const QPoint p = windowBounds.topLeft() + wp;
-                    minX = qMin(minX, p.x());
-                    maxX = qMax(maxX, p.x());
-                    minY = qMin(minY, p.y());
-                    maxY = qMax(maxY, p.y());
-                }
-                outIncludeRegions = {QRect(QPoint(minX, minY), QPoint(maxX, maxY)).adjusted(-10, -10, 10, 10)};
+                QList<QPoint> absoluteWaypoints;
+                absoluteWaypoints.reserve(region.sweepWaypoints.size());
+                for (const QPoint &wp : region.sweepWaypoints)
+                    absoluteWaypoints << (windowBounds.topLeft() + wp);
+                outIncludeRegions = {OverlayGeometry::boundingRectOfPoints(absoluteWaypoints, 10)};
                 outExcludeRegions.clear();
                 return true;
             }

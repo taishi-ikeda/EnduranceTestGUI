@@ -1134,16 +1134,20 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
                                            : I18n::t(QStringLiteral("操作領域「%1」")).arg(step.regionName));
     const QString paramsBadge =
         step.useDefaultActionParams ? QString() : I18n::t(QStringLiteral(" | [カスタム設定]"));
+    const QString sweepBadge = step.pointSelectionMode == PointSelectionMode::Sweep
+                                    ? I18n::t(QStringLiteral(" | [点列（スイープ）]"))
+                                    : QString();
     const QString runningPrefix =
         index == m_currentRunningStepIndex ? I18n::t(QStringLiteral("▶ 実行中 ")) : QString();
 
-    return I18n::t(QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7"))
+    return I18n::t(QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7%8"))
         .arg(runningPrefix)
         .arg(index + 1)
         .arg(regionDesc)
         .arg(actions.isEmpty() ? I18n::t(QStringLiteral("(なし)")) : actions.join(QStringLiteral(", ")))
         .arg(step.actionCount)
         .arg(paramsBadge)
+        .arg(sweepBadge)
         .arg(crashBadge);
 }
 
@@ -1708,8 +1712,10 @@ void MainWindow::onAddStep()
     // column gone, this dialog is now the only place to configure a new
     // step's action kinds/params at all, so it needs a sensible starting
     // point rather than an entirely blank RegionStep().
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
     StepEditorDialog dialog(m_defaultActionKinds, m_namedRegions, this, /*allowPopupDialogTarget=*/false,
-                            /*includeActionParams=*/true, m_defaultActionParams);
+                            /*includeActionParams=*/true, m_defaultActionParams, targetTopLeft, hasTarget);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -1717,11 +1723,17 @@ void MainWindow::onAddStep()
                               I18n::t(QStringLiteral("操作領域が選択されていません。")));
         return;
     }
+    if (!dialog.sweepPointsValid()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("点列（スイープ）の開始位置・終了位置の両方を選択してください。")));
+        return;
+    }
 
     RegionStep step = m_defaultActionKinds;
     step.useWholeWindow = dialog.useWholeWindow();
     step.regionName = dialog.regionName();
     dialog.applyActionKindsTo(step);
+    dialog.applySweepTo(step);
     step.useDefaultActionParams = dialog.useDefaultActionParams();
     if (!step.useDefaultActionParams)
         step.customActionParams = dialog.customActionParams();
@@ -1787,13 +1799,20 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    QPoint targetTopLeft;
+    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
     StepEditorDialog dialog(m_steps[row], m_namedRegions, this, /*allowPopupDialogTarget=*/false,
-                            /*includeActionParams=*/true, m_defaultActionParams);
+                            /*includeActionParams=*/true, m_defaultActionParams, targetTopLeft, hasTarget);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
                               I18n::t(QStringLiteral("操作領域が選択されていません。")));
+        return;
+    }
+    if (!dialog.sweepPointsValid()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("ステップの設定エラー")),
+                              I18n::t(QStringLiteral("点列（スイープ）の開始位置・終了位置の両方を選択してください。")));
         return;
     }
 
@@ -1804,6 +1823,7 @@ void MainWindow::onEditSelectedStep()
     m_steps[row].useWholeWindow = dialog.useWholeWindow();
     m_steps[row].regionName = dialog.regionName();
     dialog.applyActionKindsTo(m_steps[row]);
+    dialog.applySweepTo(m_steps[row]);
     m_steps[row].useDefaultActionParams = dialog.useDefaultActionParams();
     if (!m_steps[row].useDefaultActionParams)
         m_steps[row].customActionParams = dialog.customActionParams();

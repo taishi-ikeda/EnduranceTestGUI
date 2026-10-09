@@ -26,6 +26,21 @@ DragDirectionMode dragDirectionFromString(const QString &s)
     return DragDirectionMode::Random;
 }
 
+QString pointSelectionModeToString(PointSelectionMode mode)
+{
+    switch (mode) {
+    case PointSelectionMode::Sweep: return QStringLiteral("sweep");
+    case PointSelectionMode::Random:
+    default: return QStringLiteral("random");
+    }
+}
+
+PointSelectionMode pointSelectionModeFromString(const QString &s)
+{
+    if (s == QStringLiteral("sweep")) return PointSelectionMode::Sweep;
+    return PointSelectionMode::Random;
+}
+
 QString setupActionTypeToString(SetupActionType type)
 {
     switch (type) {
@@ -255,6 +270,13 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["waitDurationMs"] = s.waitDurationMs;
     o["useWholeWindow"] = s.useWholeWindow;
     o["regionName"] = s.regionName;
+    o["pointSelectionMode"] = pointSelectionModeToString(s.pointSelectionMode);
+    o["sweepStartX"] = s.sweepStart.x();
+    o["sweepStartY"] = s.sweepStart.y();
+    o["sweepEndX"] = s.sweepEnd.x();
+    o["sweepEndY"] = s.sweepEnd.y();
+    o["sweepIntervalPx"] = s.sweepIntervalPx;
+    o["sweepJitterPx"] = s.sweepJitterPx;
     o["enableClick"] = s.enableClick;
     o["enableLeftClick"] = s.enableLeftClick;
     o["enableRightClick"] = s.enableRightClick;
@@ -303,6 +325,11 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.waitDurationMs = o["waitDurationMs"].toInt(s.waitDurationMs);
     s.useWholeWindow = o["useWholeWindow"].toBool(s.useWholeWindow);
     s.regionName = o["regionName"].toString();
+    s.pointSelectionMode = pointSelectionModeFromString(o["pointSelectionMode"].toString());
+    s.sweepStart = QPoint(o["sweepStartX"].toInt(), o["sweepStartY"].toInt());
+    s.sweepEnd = QPoint(o["sweepEndX"].toInt(), o["sweepEndY"].toInt());
+    s.sweepIntervalPx = o["sweepIntervalPx"].toInt(s.sweepIntervalPx);
+    s.sweepJitterPx = o["sweepJitterPx"].toInt(s.sweepJitterPx);
     s.enableClick = o["enableClick"].toBool(s.enableClick);
     s.enableLeftClick = o["enableLeftClick"].toBool(s.enableLeftClick);
     s.enableRightClick = o["enableRightClick"].toBool(s.enableRightClick);

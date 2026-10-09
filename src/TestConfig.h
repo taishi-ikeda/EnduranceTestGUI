@@ -11,6 +11,20 @@ enum class DragDirectionMode { Random, Up, Down, Left, Right };
 
 enum class ContextMenuSelectionMode { ByName, ByIndex };
 
+// How a step picks each action's target point within its resolved region
+// (SPEC.md 10, 「操作領域の下から適当な間隔で上にマウスを動かしながら
+// 順番にクリックする」). Random (default, original behavior): a uniform-
+// random point, independently chosen for every action. Sweep: a fixed
+// sequence of evenly spaced points from RegionStep::sweepStart to
+// sweepEnd (sweepIntervalPx apart), visited in order and wrapping back to
+// the start once the sequence is exhausted -- for exercising a region
+// systematically (e.g. a vertical list of rows or controls) instead of
+// purely at random, without hand-building a separate named region/task
+// member for every point. sweepJitterPx adds up to that many px of
+// independent random offset in x and y to each visited point, so
+// repeated passes don't land on the exact same pixel every time.
+enum class PointSelectionMode { Random, Sweep };
+
 // When RandomActionEngine captures an internal screenshot of the current
 // step's operation region (region boundary drawn on top, for later
 // inspection via MainWindow's "操作領域画像を保存..." button -- SPEC.md
@@ -235,6 +249,20 @@ struct RegionStep
     // rectangles).
     bool useWholeWindow = true;
     QString regionName;  // used when useWholeWindow == false
+
+    // See PointSelectionMode's own comment. sweepStart/sweepEnd are stored
+    // as window-relative offsets from the target window's top-left corner
+    // (same convention as SetupAction::point), picked via the same
+    // on-screen overlay, so they stay correct if the window later moves.
+    // Meaningless (and left at their defaults) when pointSelectionMode is
+    // Random. Only ever set on a top-level step -- a group/task member's
+    // point selection is always Random (StepEditorDialog only exposes
+    // this when constructed for a top-level step).
+    PointSelectionMode pointSelectionMode = PointSelectionMode::Random;
+    QPoint sweepStart;
+    QPoint sweepEnd;
+    int sweepIntervalPx = 50;
+    int sweepJitterPx = 0;
 
     bool enableClick = true;
     bool enableLeftClick = true;

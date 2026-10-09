@@ -326,6 +326,27 @@ private:
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
+    // RegionStep::PointSelectionMode::Sweep counterpart to pickRandomPoint()
+    // above (SPEC.md 10): advances through step's evenly spaced sweepStart→
+    // sweepEnd sequence (see sweepPointSequence()) one point per call,
+    // wrapping back to the start once exhausted, adding up to
+    // step.sweepJitterPx of random offset in x/y to the point actually
+    // returned. `step`'s own address is used as the key into
+    // m_sweepPointIndex to remember each sweep-mode step's (or group/task
+    // member's) position independently -- valid for as long as m_config
+    // itself isn't replaced, i.e. the whole run (see start()'s reset of
+    // m_sweepPointIndex). Skips (advances past, without returning) any
+    // point that lands in `excludeRegions`, up to once around the whole
+    // sequence; `ok` is false (and the return value meaningless) only if
+    // every point in the sequence is excluded.
+    QPoint pickSweepPoint(const RegionStep &step, const QList<QRect> &excludeRegions, bool &ok);
+    // The fixed sequence of window-relative points pickSweepPoint() steps
+    // through: start and end inclusive, evenly spaced roughly
+    // step.sweepIntervalPx apart (the exact spacing is adjusted slightly so
+    // the end point is always included exactly, rather than possibly
+    // falling short by less than one interval). A degenerate sweep (start
+    // == end, or sweepIntervalPx <= 0) returns a single-point sequence.
+    QList<QPoint> sweepPointSequence(const RegionStep &step) const;
     ActionKind pickWeightedActionKind(const RegionStep &step);
     // Called right after a right-button mouse action (Click or Drag) that
     // may have opened a native context/popup menu: resolves it (selects a
@@ -539,4 +560,10 @@ private:
     // captures independently and has no other way to know what the engine
     // just did.
     QList<MouseActionMarker> m_recentMouseActions;
+
+    // pickSweepPoint()'s per-step (or per-group/task-member) position
+    // within its own sweepStart→sweepEnd sequence, keyed by that
+    // RegionStep's address (stable for the whole run -- see
+    // pickSweepPoint()'s own comment). Reset at the top of every start().
+    QMap<const RegionStep *, int> m_sweepPointIndex;
 };

@@ -1,13 +1,18 @@
 #pragma once
 
 #include <QDialog>
+#include <QPoint>
 
 #include "TestConfig.h"
 
 class QRadioButton;
 class QComboBox;
+class QPushButton;
+class QLabel;
+class QSpinBox;
 class ActionKindEditor;
 class ActionParamsEditor;
+class PointHighlightOverlay;
 
 // Small modal dialog for picking which region a step operates in -- either
 // the live target-window bounds, or one of the named operation regions
@@ -41,10 +46,20 @@ public:
     // (to display what "デフォルトを使う" resolves to, and to seed the
     // custom-params editor the first time the user switches to "このステップ
     // 専用の設定を使う"); ignored otherwise.
+    //
+    // `targetTopLeft`/`hasTarget`: the currently-selected target window's
+    // top-left corner at the moment this dialog was opened -- used only
+    // when includeActionParams is true, for the sweep start/end point
+    // pickers (RegionStep::sweepStart/sweepEnd are stored window-relative,
+    // same convention as SetupAction::point -- see TestConfig.h). If no
+    // target is currently selectable (hasTarget == false), point picking
+    // is disabled and a warning is shown instead, same as
+    // SetupActionEditorDialog.
     StepEditorDialog(const RegionStep &initial, const QList<NamedRegion> &availableRegions,
                       QWidget *parent = nullptr, bool allowPopupDialogTarget = false,
                       bool includeActionParams = false,
-                      const ActionParams &defaultActionParams = ActionParams());
+                      const ActionParams &defaultActionParams = ActionParams(),
+                      const QPoint &targetTopLeft = QPoint(), bool hasTarget = false);
 
     bool useWholeWindow() const;
     QString regionName() const;
@@ -59,9 +74,25 @@ public:
     bool useDefaultActionParams() const;
     ActionParams customActionParams() const;
 
+    // Point-selection-mode (SPEC.md 10, "下から上へ順にクリック") -- also
+    // only meaningful when constructed with includeActionParams=true
+    // (Random otherwise, since no UI for it exists in that case).
+    PointSelectionMode pointSelectionMode() const;
+    // True if pointSelectionMode() is Random, or it's Sweep and both the
+    // start and end points have been picked. Callers should refuse to
+    // accept the step (same pattern as the external useWholeWindow()/
+    // regionName() check) when this is false.
+    bool sweepPointsValid() const;
+    // Writes pointSelectionMode/sweepStart/sweepEnd/sweepIntervalPx/
+    // sweepJitterPx into step; leaves every other field untouched.
+    void applySweepTo(RegionStep &step) const;
+
 private slots:
     void onModeChanged();
     void onActionParamsModeChanged();
+    void onPointSelectionModeChanged();
+    void onPickSweepStart();
+    void onPickSweepEnd();
 
 private:
     QRadioButton *m_wholeWindowRadio = nullptr;
@@ -76,4 +107,27 @@ private:
     ActionParamsEditor *m_paramsEditor = nullptr;
     ActionParams m_defaultActionParams;
     ActionParams m_initialCustomActionParams;
+
+    // Sweep point-selection UI -- null unless constructed with
+    // includeActionParams=true.
+    QRadioButton *m_randomPointRadio = nullptr;
+    QRadioButton *m_sweepPointRadio = nullptr;
+    QPushButton *m_pickSweepStartButton = nullptr;
+    QLabel *m_sweepStartValueLabel = nullptr;
+    QPushButton *m_pickSweepEndButton = nullptr;
+    QLabel *m_sweepEndValueLabel = nullptr;
+    QSpinBox *m_sweepIntervalSpin = nullptr;
+    QSpinBox *m_sweepJitterSpin = nullptr;
+
+    void pickSweepPointInto(QPoint &target, bool &pickedFlag);
+    void refreshSweepLabels();
+    void updateSweepHighlight();
+
+    QPoint m_sweepStart;
+    QPoint m_sweepEnd;
+    bool m_sweepStartPicked = false;
+    bool m_sweepEndPicked = false;
+    QPoint m_targetTopLeft;
+    bool m_hasTarget = false;
+    PointHighlightOverlay *m_highlightOverlay = nullptr;
 };

@@ -217,6 +217,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_lastScreenshotIterationCount = -1;
     m_recordingFrames.clear();
     m_recentMouseActions.clear();
+    m_sweepPointIndex.clear();
     m_recentActionDescriptions.clear();
     m_inSetupPhase = !m_config.setupActions.isEmpty();
     m_setupActionIndex = 0;
@@ -875,6 +876,58 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
     return {};
 }
 
+QList<QPoint> RandomActionEngine::sweepPointSequence(const RegionStep &step) const
+{
+    const QPoint start = step.sweepStart;
+    const QPoint end = step.sweepEnd;
+    const double dx = end.x() - start.x();
+    const double dy = end.y() - start.y();
+    const double dist = qSqrt(dx * dx + dy * dy);
+    if (dist < 1.0)
+        return {start};
+
+    const int interval = qMax(1, step.sweepIntervalPx);
+    const int segments = qMax(1, qRound(dist / interval));
+    QList<QPoint> points;
+    points.reserve(segments + 1);
+    for (int i = 0; i <= segments; ++i) {
+        const double t = double(i) / double(segments);
+        points << QPoint(qRound(start.x() + dx * t), qRound(start.y() + dy * t));
+    }
+    return points;
+}
+
+QPoint RandomActionEngine::pickSweepPoint(const RegionStep &step, const QList<QRect> &excludeRegions, bool &ok)
+{
+    ok = false;
+    QRect windowBounds;
+    if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
+        return {};
+
+    const QList<QPoint> points = sweepPointSequence(step);
+    if (points.isEmpty())
+        return {};
+
+    int &index = m_sweepPointIndex[&step];
+    if (index < 0 || index >= points.size())
+        index = 0;
+
+    const int jitter = qMax(0, step.sweepJitterPx);
+    for (int attempt = 0; attempt < points.size(); ++attempt) {
+        QPoint pt = windowBounds.topLeft() + points[index];
+        if (jitter > 0) {
+            pt += QPoint(int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter,
+                         int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter);
+        }
+        index = (index + 1) % points.size();
+        if (!pointExcluded(pt, excludeRegions)) {
+            ok = true;
+            return pt;
+        }
+    }
+    return {};
+}
+
 const ActionParams &RandomActionEngine::effectiveParams(const RegionStep &step) const
 {
     return step.useDefaultActionParams ? m_config.defaultActionParams : step.customActionParams;
@@ -1325,7 +1378,9 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     const ActionKind kind = pickWeightedActionKind(step);
 
     bool ok = false;
-    const QPoint pt = pickRandomPoint(includeRegions, excludeRegions, ok);
+    const QPoint pt = (step.pointSelectionMode == PointSelectionMode::Sweep)
+                           ? pickSweepPoint(step, excludeRegions, ok)
+                           : pickRandomPoint(includeRegions, excludeRegions, ok);
     const bool kindNeedsPoint = kind == ActionKind::Click || kind == ActionKind::DoubleClick ||
                                  kind == ActionKind::Drag || kind == ActionKind::ScrollUp ||
                                  kind == ActionKind::ScrollDown || kind == ActionKind::ScrollHorizontal;

@@ -26,7 +26,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral(" 秒"), QStringLiteral(" sec")},
         {QStringLiteral("%1/操作領域_%2_%3_%4.png"), QStringLiteral("%1/region_%2_%3_%4.png")},
         {QStringLiteral("%1に有効な操作がありません"), QStringLiteral("%1 has no enabled actions")},
-        {QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7"), QStringLiteral("%1Step %2: %3 | Action: %4 | Count: %5%6%7")},
+        {QStringLiteral("%1ステップ%2: %3 | 操作: %4 | 回数: %5%6%7%8"),
+         QStringLiteral("%1Step %2: %3 | Action: %4 | Count: %5%6%7%8")},
         {QStringLiteral("%1ステップ%2: グループ（%3個のステップ、合計呼び出し%4回）%5"),
          QStringLiteral("%1Step %2: Group (%3 steps, %4 total calls)%5")},
         {QStringLiteral("%1ステップ%2: 待機（%3 ms）%4"), QStringLiteral("%1Step %2: Wait (%3 ms)%4")},
@@ -1030,6 +1031,25 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("デフォルトに戻しました"), QStringLiteral("Reset to Default")},
         {QStringLiteral("保存先をデフォルトに戻しました:\n%1"),
          QStringLiteral("The save location has been reset to the default:\n%1")},
+
+        // v0.95: sweep point-selection mode for a step (RegionStep::PointSelectionMode) --
+        // StepEditorDialog's new "操作位置の選び方" group.
+        {QStringLiteral("操作位置の選び方"), QStringLiteral("How to Pick the Operation Position")},
+        {QStringLiteral("点列（スイープ）"), QStringLiteral("Point Sequence (Sweep)")},
+        {QStringLiteral("「点列（スイープ）」では、開始位置から終了位置まで指定した間隔で並んだ"
+                        "点を順番に操作します（最後まで行くと開始位置に戻って繰り返します）。"),
+         QStringLiteral("With \"Point Sequence (Sweep)\", points evenly spaced from the start position "
+                        "to the end position are operated on in order (wrapping back to the start once "
+                        "the end is reached).")},
+        {QStringLiteral("間隔 (px):"), QStringLiteral("Interval (px):")},
+        {QStringLiteral("ランダム幅 (px):"), QStringLiteral("Random Offset (px):")},
+        {QStringLiteral("※各点を実際に操作する際、上下左右にこの範囲内でランダムにずらします"
+                        "（0なら常に同じ位置）。"),
+         QStringLiteral("Each point is randomly offset up/down/left/right within this range when it's "
+                        "actually operated on (0 always uses the exact same position).")},
+        {QStringLiteral("点列（スイープ）の開始位置・終了位置の両方を選択してください。"),
+         QStringLiteral("Select both the start and end positions for the point sequence (sweep).")},
+        {QStringLiteral(" | [点列（スイープ）]"), QStringLiteral(" | [Point Sequence (Sweep)]")},
     };
     return table;
 }

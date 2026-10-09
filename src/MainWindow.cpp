@@ -46,6 +46,7 @@
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
+#include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 #include "SetupActionEditorDialog.h"
 #include "StatisticsDialog.h"
@@ -702,11 +703,29 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     namedRegionButtonsRow->addWidget(m_removeNamedRegionButton);
     namedRegionLayout->addLayout(namedRegionButtonsRow);
 
+    // SPEC.md 10「操作領域を確認するボタン」: a toggle, separate row from
+    // 追加/編集/削除 above since it acts on every registered region at
+    // once rather than the one currently selected in the list.
+    m_showAllRegionsButton =
+        new QPushButton(I18n::t(QStringLiteral("操作領域を確認")), m_namedRegionGroup);
+    namedRegionLayout->addWidget(m_showAllRegionsButton);
+
+    // See m_allRegionsAutoHideTimer's declaration in MainWindow.h: fires
+    // onToggleShowAllRegions() again after a fixed delay as a safety net,
+    // which hides the overlay since m_showingAllRegions is still true at
+    // that point -- the same handler the button itself calls.
+    m_allRegionsAutoHideTimer = new QTimer(this);
+    m_allRegionsAutoHideTimer->setSingleShot(true);
+    m_allRegionsAutoHideTimer->setInterval(12000);
+    connect(m_allRegionsAutoHideTimer, &QTimer::timeout, this, &MainWindow::onToggleShowAllRegions);
+
     connect(m_addNamedRegionButton, &QPushButton::clicked, this, &MainWindow::onAddNamedRegion);
     connect(m_editNamedRegionButton, &QPushButton::clicked, this,
             &MainWindow::onEditSelectedNamedRegion);
     connect(m_removeNamedRegionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedNamedRegion);
+    connect(m_showAllRegionsButton, &QPushButton::clicked, this,
+            &MainWindow::onToggleShowAllRegions);
 
     // --- Timing group ---
     m_timingGroup = new QGroupBox(I18n::t(QStringLiteral("タイミング・制限")), container);
@@ -1171,6 +1190,12 @@ QString MainWindow::describeNamedRegion(const NamedRegion &region) const
             .arg(region.objectTarget.useDefaultAction ? I18n::t(QStringLiteral(" [既定アクション実行]"))
                                                         : QString());
     }
+    if (region.isSweepTarget) {
+        // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」
+        return I18n::t(QStringLiteral("%1（点列（スイープ）: 間隔%2px）"))
+            .arg(region.name)
+            .arg(region.sweepIntervalPx);
+    }
     return I18n::t(QStringLiteral("%1（矩形%2個・除外%3個）%4"))
         .arg(region.name)
         .arg(region.regions.size())
@@ -1441,8 +1466,143 @@ void MainWindow::refreshSavedWindowPosLabel()
     }
 }
 
+bool MainWindow::resolveNamedRegionForDisplay(const NamedRegion &region, QList<QRect> &outInclude,
+                                               QList<QRect> &outExclude) const
+{
+    outInclude.clear();
+    outExclude.clear();
+
+    if (region.isObjectTarget) {
+        const qint64 pid = currentTargetPidOrInvalid();
+        if (pid < 0)
+            return false;
+        PlatformAutomation::AccessibleObjectHandle handle = PlatformAutomation::findAccessibleObject(
+            pid, region.objectTarget.role, region.objectTarget.name, region.objectTarget.occurrenceIndex);
+        QRect bounds;
+        if (!handle.isValid() || !handle.currentBounds(bounds))
+            return false;
+        outInclude = {bounds};
+        return true;
+    }
+
+    if (region.isSweepTarget) {
+        // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点
+        // 対応」: same bounding-box-around-every-waypoint approach as
+        // RandomActionEngine::resolveStepRegion()'s own isSweepTarget
+        // branch, re-added to the *current* target window position
+        // (sweepWaypoints are always window-relative, unlike the rectangle
+        // fields' anchor-based translation above -- see NamedRegion::
+        // isSweepTarget's comment).
+        if (region.sweepWaypoints.size() < 2)
+            return false;
+        QPoint targetTopLeft;
+        if (!currentTargetTopLeft(targetTopLeft))
+            return false;
+        const QPoint first = targetTopLeft + region.sweepWaypoints.first();
+        int minX = first.x(), maxX = first.x(), minY = first.y(), maxY = first.y();
+        for (const QPoint &wp : region.sweepWaypoints) {
+            const QPoint p = targetTopLeft + wp;
+            minX = qMin(minX, p.x());
+            maxX = qMax(maxX, p.x());
+            minY = qMin(minY, p.y());
+            maxY = qMax(maxY, p.y());
+        }
+        outInclude = {QRect(QPoint(minX, minY), QPoint(maxX, maxY)).adjusted(-10, -10, 10, 10)};
+        return true;
+    }
+
+    if (region.regions.isEmpty())
+        return false;
+    outInclude = region.regions;
+    outExclude = region.excludeRegions;
+
+    // Same follow-window translation as RandomActionEngine::
+    // resolveStepRegion()'s named-region branch: a region drawn with
+    // "対象ウィンドウの移動に追従させる" is stored relative to where the
+    // window's top-left was at save time (region.anchorTopLeft), so shift
+    // by how far it's moved since. Falls back to the as-drawn coordinates,
+    // same as that engine code, if no target is currently selectable.
+    if (region.followsTargetWindow) {
+        QPoint targetTopLeft;
+        if (currentTargetTopLeft(targetTopLeft)) {
+            const QPoint delta = targetTopLeft - region.anchorTopLeft;
+            if (!delta.isNull()) {
+                for (QRect &r : outInclude)
+                    r.translate(delta);
+                for (QRect &r : outExclude)
+                    r.translate(delta);
+            }
+        }
+    }
+    return true;
+}
+
+bool MainWindow::refreshAllRegionsHighlight()
+{
+    QList<RegionHighlightEntry> entries;
+    for (const NamedRegion &region : m_namedRegions) {
+        QList<QRect> include, exclude;
+        if (resolveNamedRegionForDisplay(region, include, exclude))
+            entries.append(RegionHighlightEntry{region.name, include, exclude});
+    }
+
+    if (entries.isEmpty()) {
+        if (m_allRegionsHighlightOverlay)
+            m_allRegionsHighlightOverlay->hide();
+        m_allRegionsAutoHideTimer->stop();
+        m_showingAllRegions = false;
+        m_showAllRegionsButton->setText(I18n::t(QStringLiteral("操作領域を確認")));
+        return false;
+    }
+
+    if (!m_allRegionsHighlightOverlay)
+        m_allRegionsHighlightOverlay = new RegionHighlightOverlay(this);
+    m_allRegionsHighlightOverlay->showRegions(entries);
+    // (Re)start the auto-hide safety timer -- see its declaration in
+    // MainWindow.h for why this exists: without it, a window manager that
+    // doesn't honor this click-through highlight correctly could leave the
+    // user with no way to dismiss it.
+    m_allRegionsAutoHideTimer->start();
+    return true;
+}
+
+void MainWindow::onToggleShowAllRegions()
+{
+    if (m_showingAllRegions) {
+        if (m_allRegionsHighlightOverlay)
+            m_allRegionsHighlightOverlay->hide();
+        m_allRegionsAutoHideTimer->stop();
+        m_showingAllRegions = false;
+        m_showAllRegionsButton->setText(I18n::t(QStringLiteral("操作領域を確認")));
+        return;
+    }
+
+    if (m_namedRegions.isEmpty()) {
+        QMessageBox::information(this, I18n::t(QStringLiteral("操作領域がありません")),
+                                  I18n::t(QStringLiteral("①で操作領域を追加してから確認してください。")));
+        return;
+    }
+
+    m_showingAllRegions = true;
+    if (!refreshAllRegionsHighlight()) {
+        QMessageBox::information(
+            this, I18n::t(QStringLiteral("操作領域を表示できません")),
+            I18n::t(QStringLiteral("現在表示できる操作領域がありません"
+                                    "（オブジェクト指定の対象が見つからない可能性があります）。")));
+        return;
+    }
+    m_showAllRegionsButton->setText(I18n::t(QStringLiteral("非表示にする")));
+}
+
 void MainWindow::onAddNamedRegion()
 {
+    // Avoid two overlays competing for the same screen space: the dialog
+    // about to open shows its own single-region highlight while it's up
+    // (NamedRegionEditorDialog, see its own comment), so hide the "show
+    // all" overlay first rather than leaving it layered underneath.
+    if (m_showingAllRegions)
+        onToggleShowAllRegions();
+
     NamedRegion initial;
     initial.name = generateDefaultRegionName();
     QPoint targetTopLeft;
@@ -1472,6 +1632,10 @@ void MainWindow::onEditSelectedNamedRegion()
     if (row < 0 || row >= m_namedRegions.size())
         return;
     const QString oldName = m_namedRegions[row].name;
+
+    // See onAddNamedRegion()'s identical comment.
+    if (m_showingAllRegions)
+        onToggleShowAllRegions();
 
     QPoint targetTopLeft;
     const bool hasTarget = currentTargetTopLeft(targetTopLeft);
@@ -1527,6 +1691,11 @@ void MainWindow::onRemoveSelectedNamedRegion()
 
     m_namedRegions.removeAt(row);
     refreshNamedRegionList();
+    // Drop the removed region from the "show all" overlay too, if it's
+    // currently up, rather than leaving a stale rectangle on screen for a
+    // region that no longer exists.
+    if (m_showingAllRegions)
+        refreshAllRegionsHighlight();
 }
 
 void MainWindow::onAddSetupAction()

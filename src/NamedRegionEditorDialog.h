@@ -14,6 +14,7 @@ class QRadioButton;
 class QSpinBox;
 class QWidget;
 class RegionHighlightOverlay;
+class PointHighlightOverlay;
 
 // Modal dialog for creating/editing one NamedRegion: a name, one or more
 // rectangles drawn via RegionSelectorOverlay, and optional mask/exclude
@@ -53,6 +54,8 @@ private slots:
     void onRemoveSelectedExcludeRegion();
     void onModeChanged();
     void onPickObject();
+    void onAddSweepWaypoint();
+    void onRemoveSelectedSweepWaypoint();
     void onAccept();
 
 private:
@@ -60,19 +63,26 @@ private:
     void refreshExcludeList();
     void updateHighlight();
     void updateObjectInfoLabel();
+    void refreshSweepWaypointList();
+    void updateSweepHighlight();
 
     QLineEdit *m_nameEdit = nullptr;
 
-    // SPEC.md 追加実装依頼「名前付きオブジェクト」: "矩形を描画" (existing,
-    // rectangle-based) vs "画面上の部品を指定" (new, accessibility-tree-
-    // based) -- mutually exclusive, toggled via onModeChanged(), which
-    // simply shows/hides m_rectModeGroup vs m_objectModeGroup rather than
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」/「操作領域を点列
+    // （スイープ）で指定」: "矩形を描画" (existing, rectangle-based) vs
+    // "画面上の部品を指定" (accessibility-tree-based) vs "点列（スイープ）
+    // で指定" (a fixed start->end point sequence, same generation rule as
+    // RegionStep's own sweep mode -- see NamedRegion::isSweepTarget) --
+    // mutually exclusive, toggled via onModeChanged(), which simply shows/
+    // hides m_rectModeGroup/m_objectModeGroup/m_sweepModeGroup rather than
     // tearing anything down, so switching back and forth during one editing
     // session doesn't lose whichever side's state was entered.
     QRadioButton *m_rectModeRadio = nullptr;
     QRadioButton *m_objectModeRadio = nullptr;
+    QRadioButton *m_sweepModeRadio = nullptr;
     QWidget *m_rectModeGroup = nullptr;
     QWidget *m_objectModeGroup = nullptr;
+    QWidget *m_sweepModeGroup = nullptr;
 
     QListWidget *m_regionListWidget = nullptr;
     QPushButton *m_drawButton = nullptr;
@@ -115,4 +125,23 @@ private:
     // m_highlightOverlay as a one-time (not live-tracking) confirmation --
     // see updateHighlight().
     QRect m_lastPickedBounds;
+
+    // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点
+    // 対応」: an ordered list of window-relative waypoints (first = start,
+    // last = end, any number of entries in between = midpoints), picked one
+    // at a time via PointPickerOverlay -- same list-based UI pattern as
+    // m_regionListWidget/m_drawButton/m_removeRegionButton above, rather
+    // than StepEditorDialog's fixed pair of "開始位置を選択.../終了位置を
+    // 選択..." buttons, since the number of points here isn't fixed at two.
+    QListWidget *m_sweepWaypointListWidget = nullptr;
+    QPushButton *m_addSweepWaypointButton = nullptr;
+    QPushButton *m_removeSweepWaypointButton = nullptr;
+    QSpinBox *m_sweepIntervalSpin = nullptr;
+    QSpinBox *m_sweepJitterSpin = nullptr;
+    QList<QPoint> m_sweepWaypoints;
+    // Separate from m_highlightOverlay (rectangle-mode only, started/
+    // stopped by RegionHighlightOverlay) since a sweep has no rectangle to
+    // show -- just the picked waypoints connected in order, via the same
+    // point-highlight mechanism StepEditorDialog uses for its own sweep UI.
+    PointHighlightOverlay *m_sweepHighlightOverlay = nullptr;
 };

@@ -14,6 +14,8 @@
 #include <QVBoxLayout>
 
 #include "ObjectPickerOverlay.h"
+#include "PointHighlightOverlay.h"
+#include "PointPickerOverlay.h"
 #include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
 #include "I18n.h"
@@ -44,7 +46,8 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
       m_existingAnchorTopLeft(initial.anchorTopLeft),
       m_hadExistingAnchor(initial.followsTargetWindow),
       m_objectTarget(initial.objectTarget),
-      m_objectPicked(initial.isObjectTarget && !initial.objectTarget.name.isEmpty())
+      m_objectPicked(initial.isObjectTarget && !initial.objectTarget.name.isEmpty()),
+      m_sweepWaypoints(initial.sweepWaypoints)
 {
     setWindowTitle(I18n::t(QStringLiteral("操作領域の設定")));
     // RegionHighlightOverlay's per-screen windows (shown continuously while
@@ -66,23 +69,32 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     nameRow->addWidget(m_nameEdit, 1);
     layout->addLayout(nameRow);
 
-    // SPEC.md 追加実装依頼「名前付きオブジェクト」: how this region's
-    // on-screen location is determined -- a fixed rectangle (existing) or
-    // an accessibility-tree object resolved by role+name every time it's
-    // used (new). Mutually exclusive; onModeChanged() shows/hides the two
-    // groups built below accordingly.
+    // SPEC.md 追加実装依頼「名前付きオブジェクト」/「操作領域を点列
+    // （スイープ）で指定」: how this region's on-screen location is
+    // determined -- a fixed rectangle (existing), an accessibility-tree
+    // object resolved by role+name every time it's used, or a fixed
+    // start->end point sequence visited in order (same generation rule as
+    // RegionStep's own sweep mode). Mutually exclusive; onModeChanged()
+    // shows/hides the three groups built below accordingly.
     auto *modeRow = new QHBoxLayout;
     m_rectModeRadio = new QRadioButton(I18n::t(QStringLiteral("矩形を描画")), this);
     m_objectModeRadio = new QRadioButton(I18n::t(QStringLiteral("画面上の部品を指定")), this);
+    m_sweepModeRadio = new QRadioButton(I18n::t(QStringLiteral("点列（スイープ）で指定")), this);
     auto *modeGroup = new QButtonGroup(this);
     modeGroup->addButton(m_rectModeRadio);
     modeGroup->addButton(m_objectModeRadio);
-    (initial.isObjectTarget ? m_objectModeRadio : m_rectModeRadio)->setChecked(true);
+    modeGroup->addButton(m_sweepModeRadio);
+    (initial.isObjectTarget   ? m_objectModeRadio
+     : initial.isSweepTarget ? m_sweepModeRadio
+                              : m_rectModeRadio)
+        ->setChecked(true);
     modeRow->addWidget(m_rectModeRadio);
     modeRow->addWidget(m_objectModeRadio);
+    modeRow->addWidget(m_sweepModeRadio);
     modeRow->addStretch();
     layout->addLayout(modeRow);
     connect(m_rectModeRadio, &QRadioButton::toggled, this, &NamedRegionEditorDialog::onModeChanged);
+    connect(m_sweepModeRadio, &QRadioButton::toggled, this, &NamedRegionEditorDialog::onModeChanged);
 
     m_rectModeGroup = new QWidget(this);
     auto *rectLayout = new QVBoxLayout(m_rectModeGroup);
@@ -191,6 +203,65 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
 
     layout->addWidget(m_objectModeGroup);
 
+    // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点
+    // 対応」: the sweep-mode counterpart to the rectangle/object groups
+    // above, for a NamedRegion rather than one RegionStep: see result()/
+    // NamedRegion::isSweepTarget for how this feeds into the saved region.
+    // Unlike StepEditorDialog's fixed start/end button pair, an arbitrary
+    // number of waypoints is supported here (始点・中点(複数可)・終点),
+    // via the same list+add+remove pattern as m_regionListWidget above
+    // rather than two fixed buttons.
+    m_sweepModeGroup = new QWidget(this);
+    auto *sweepLayout = new QVBoxLayout(m_sweepModeGroup);
+    sweepLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *sweepHint = new QLabel(
+        I18n::t(QStringLiteral("始点・中点（いくつでも追加可）・終点の順に画面上の点を追加してください。"
+                                "それらを順番に結んだ経路上を、指定した間隔で並んだ点として巡回操作します"
+                                "（最後まで行くと始点に戻って繰り返します）。")),
+        m_sweepModeGroup);
+    sweepHint->setWordWrap(true);
+    sweepLayout->addWidget(sweepHint);
+
+    m_sweepWaypointListWidget = new QListWidget(m_sweepModeGroup);
+    m_sweepWaypointListWidget->setMaximumHeight(100);
+    sweepLayout->addWidget(m_sweepWaypointListWidget);
+    auto *sweepWaypointButtonsRow = new QHBoxLayout;
+    m_addSweepWaypointButton = new QPushButton(I18n::t(QStringLiteral("点を追加...")), m_sweepModeGroup);
+    m_removeSweepWaypointButton = new QPushButton(I18n::t(QStringLiteral("選択を削除")), m_sweepModeGroup);
+    sweepWaypointButtonsRow->addWidget(m_addSweepWaypointButton);
+    sweepWaypointButtonsRow->addWidget(m_removeSweepWaypointButton);
+    sweepLayout->addLayout(sweepWaypointButtonsRow);
+    m_addSweepWaypointButton->setEnabled(m_hasTarget);
+    connect(m_addSweepWaypointButton, &QPushButton::clicked, this,
+            &NamedRegionEditorDialog::onAddSweepWaypoint);
+    connect(m_removeSweepWaypointButton, &QPushButton::clicked, this,
+            &NamedRegionEditorDialog::onRemoveSelectedSweepWaypoint);
+
+    auto *sweepIntervalRow = new QHBoxLayout;
+    sweepIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("間隔 (px):")), m_sweepModeGroup));
+    m_sweepIntervalSpin = new QSpinBox(m_sweepModeGroup);
+    m_sweepIntervalSpin->setRange(1, 5000);
+    m_sweepIntervalSpin->setValue(initial.sweepIntervalPx > 0 ? initial.sweepIntervalPx : 50);
+    sweepIntervalRow->addWidget(m_sweepIntervalSpin, 1);
+    sweepLayout->addLayout(sweepIntervalRow);
+
+    auto *sweepJitterRow = new QHBoxLayout;
+    sweepJitterRow->addWidget(new QLabel(I18n::t(QStringLiteral("ランダム幅 (px):")), m_sweepModeGroup));
+    m_sweepJitterSpin = new QSpinBox(m_sweepModeGroup);
+    m_sweepJitterSpin->setRange(0, 1000);
+    m_sweepJitterSpin->setValue(qMax(0, initial.sweepJitterPx));
+    sweepJitterRow->addWidget(m_sweepJitterSpin, 1);
+    sweepLayout->addLayout(sweepJitterRow);
+    auto *sweepJitterHint = new QLabel(
+        I18n::t(QStringLiteral("※各点を実際に操作する際、上下左右にこの範囲内でランダムにずらします"
+                                "（0なら常に同じ位置）。")),
+        m_sweepModeGroup);
+    sweepJitterHint->setWordWrap(true);
+    sweepLayout->addWidget(sweepJitterHint);
+
+    layout->addWidget(m_sweepModeGroup);
+
     auto *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &NamedRegionEditorDialog::onAccept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -203,6 +274,8 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     connect(this, &QDialog::finished, this, [this](int) {
         if (m_highlightOverlay)
             m_highlightOverlay->hide();
+        if (m_sweepHighlightOverlay)
+            m_sweepHighlightOverlay->hide();
     });
     // Keep the on-screen highlight's name label in sync while typing, not
     // just after a rectangle add/remove.
@@ -214,13 +287,23 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
         updateObjectInfoLabel();
     else
         m_objectInfoLabel->setText(I18n::t(QStringLiteral("（まだ指定されていません）")));
+    refreshSweepWaypointList();
     onModeChanged();  // sets initial group visibility from the radio state seeded above
     updateHighlight();
-    resize(460, 620);
+    resize(460, 660);
 }
 
 void NamedRegionEditorDialog::updateHighlight()
 {
+    if (m_sweepModeRadio->isChecked()) {
+        // Sweep mode has no rectangle to show via RegionHighlightOverlay --
+        // see updateSweepHighlight() below, called separately everywhere
+        // this function already is.
+        if (m_highlightOverlay)
+            m_highlightOverlay->hide();
+        return;
+    }
+
     if (!m_highlightOverlay)
         m_highlightOverlay = new RegionHighlightOverlay(this);
     if (m_objectModeRadio->isChecked()) {
@@ -245,12 +328,46 @@ void NamedRegionEditorDialog::updateHighlight()
     activateWindow();
 }
 
+void NamedRegionEditorDialog::updateSweepHighlight()
+{
+    if (!m_sweepModeRadio->isChecked()) {
+        if (m_sweepHighlightOverlay)
+            m_sweepHighlightOverlay->hide();
+        return;
+    }
+    QList<QPoint> points;
+    QList<QString> labels;
+    for (int i = 0; i < m_sweepWaypoints.size(); ++i) {
+        points << (m_sweepWaypoints[i] + m_targetTopLeft);
+        if (i == 0)
+            labels << I18n::t(QStringLiteral("始点"));
+        else if (i == m_sweepWaypoints.size() - 1)
+            labels << I18n::t(QStringLiteral("終点"));
+        else
+            labels << I18n::t(QStringLiteral("中点%1")).arg(i);
+    }
+    if (points.isEmpty()) {
+        if (m_sweepHighlightOverlay)
+            m_sweepHighlightOverlay->hide();
+        return;
+    }
+    if (!m_sweepHighlightOverlay)
+        m_sweepHighlightOverlay = new PointHighlightOverlay(this);
+    m_sweepHighlightOverlay->showPoints(points, labels);
+    // See updateHighlight()'s identical comment.
+    raise();
+    activateWindow();
+}
+
 void NamedRegionEditorDialog::onModeChanged()
 {
     const bool objectMode = m_objectModeRadio->isChecked();
-    m_rectModeGroup->setVisible(!objectMode);
+    const bool sweepMode = m_sweepModeRadio->isChecked();
+    m_rectModeGroup->setVisible(!objectMode && !sweepMode);
     m_objectModeGroup->setVisible(objectMode);
+    m_sweepModeGroup->setVisible(sweepMode);
     updateHighlight();
+    updateSweepHighlight();
 }
 
 void NamedRegionEditorDialog::onPickObject()
@@ -304,6 +421,57 @@ void NamedRegionEditorDialog::updateObjectInfoLabel()
             .arg(m_objectTarget.role.isEmpty() ? I18n::t(QStringLiteral("(役割不明)")) : m_objectTarget.role)
             .arg(m_objectTarget.name.isEmpty() ? I18n::t(QStringLiteral("(名前なし)")) : m_objectTarget.name)
             .arg(m_objectTarget.occurrenceIndex + 1));
+}
+
+void NamedRegionEditorDialog::onAddSweepWaypoint()
+{
+    if (!m_hasTarget) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("対象ウィンドウ未選択")),
+                              I18n::t(QStringLiteral("対象ウィンドウを選択してから位置を指定してください。")));
+        return;
+    }
+    // Hide the persistent point highlight while PointPickerOverlay (which
+    // draws its own live crosshair) is up, same rationale as onDrawRegions()
+    // hiding m_highlightOverlay around RegionSelectorOverlay.
+    if (m_sweepHighlightOverlay)
+        m_sweepHighlightOverlay->hide();
+    QPoint picked;
+    if (PointPickerOverlay::run(picked)) {
+        m_sweepWaypoints.append(picked - m_targetTopLeft);
+        refreshSweepWaypointList();
+    }
+    updateSweepHighlight();
+}
+
+void NamedRegionEditorDialog::onRemoveSelectedSweepWaypoint()
+{
+    const int row = m_sweepWaypointListWidget->currentRow();
+    if (row >= 0 && row < m_sweepWaypoints.size()) {
+        m_sweepWaypoints.removeAt(row);
+        refreshSweepWaypointList();
+        updateSweepHighlight();
+    }
+}
+
+void NamedRegionEditorDialog::refreshSweepWaypointList()
+{
+    if (!m_sweepWaypointListWidget)
+        return;
+    m_sweepWaypointListWidget->clear();
+    // First entry = 始点 (start), last = 終点 (end), anything between =
+    // 中点N (midpoint N) -- matching updateSweepHighlight()'s labels below.
+    for (int i = 0; i < m_sweepWaypoints.size(); ++i) {
+        QString label;
+        if (i == 0)
+            label = I18n::t(QStringLiteral("始点"));
+        else if (i == m_sweepWaypoints.size() - 1)
+            label = I18n::t(QStringLiteral("終点"));
+        else
+            label = I18n::t(QStringLiteral("中点%1")).arg(i);
+        const QPoint &p = m_sweepWaypoints[i];
+        m_sweepWaypointListWidget->addItem(
+            QStringLiteral("%1: (%2, %3)").arg(label).arg(p.x()).arg(p.y()));
+    }
 }
 
 void NamedRegionEditorDialog::onDrawRegions()
@@ -392,6 +560,13 @@ void NamedRegionEditorDialog::onAccept()
                                   I18n::t(QStringLiteral("「オブジェクトを指定...」で部品を選択してください。")));
             return;
         }
+    } else if (m_sweepModeRadio->isChecked()) {
+        if (m_sweepWaypoints.size() < 2) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("入力エラー")),
+                I18n::t(QStringLiteral("点列（スイープ）の始点・終点を含め、最低2つの点を追加してください。")));
+            return;
+        }
     } else if (m_regions.isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
                               I18n::t(QStringLiteral("領域を最低1つ描画してください。")));
@@ -414,6 +589,21 @@ NamedRegion NamedRegionEditorDialog::result() const
         region.objectTarget = m_objectTarget;
         region.objectTarget.useDefaultAction = m_useDefaultActionCheck->isChecked();
         region.objectTarget.reresolveEveryActions = m_reresolveIntervalSpin->value();
+        return region;
+    }
+
+    region.isSweepTarget = m_sweepModeRadio->isChecked();
+    if (region.isSweepTarget) {
+        // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点
+        // 対応」: regions/excludeRegions/followsTargetWindow/anchorTopLeft
+        // are left at their just-default-constructed values -- unused for a
+        // sweep-target region (its window-relative sweepWaypoints are
+        // re-added to the *current* target window position every time, so
+        // there is no separate anchor to track -- see NamedRegion::
+        // isSweepTarget's own comment).
+        region.sweepWaypoints = m_sweepWaypoints;
+        region.sweepIntervalPx = m_sweepIntervalSpin->value();
+        region.sweepJitterPx = m_sweepJitterSpin->value();
         return region;
     }
 

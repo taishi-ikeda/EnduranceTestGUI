@@ -220,7 +220,45 @@ struct NamedRegion
     bool followsTargetWindow = true;
     QPoint anchorTopLeft;
 
-    bool isEmpty() const { return isObjectTarget ? objectTarget.name.isEmpty() : regions.isEmpty(); }
+    // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点対応」:
+    // when true, this NamedRegion is resolved as a fixed sequence of evenly
+    // spaced points walking through every consecutive pair in
+    // `sweepWaypoints` in order (sweepWaypoints[0] -> [1] -> ... ->
+    // last, each consecutive pair subdivided sweepIntervalPx apart -- see
+    // RandomActionEngine::sweepPointSequence()), visited in order and
+    // wrapping back to the first waypoint once exhausted, one point per
+    // action against this region -- rather than a rectangle a point is
+    // picked randomly within. At least 2 waypoints (a start and an end;
+    // any number of midpoints may sit between them) are required for this
+    // region to be usable. Mutually exclusive with isObjectTarget and with
+    // the regions/excludeRegions/followsTargetWindow/anchorTopLeft fields
+    // above by construction (the registration UI offers exactly one of the
+    // three), which are then unused/empty. Defining the sweep at the
+    // NamedRegion level (rather than only per-RegionStep, which remains
+    // available for a one-off two-point sweep not worth naming) lets the
+    // same point sequence be reused by name across multiple steps, the same
+    // way a drawn rectangle or a named object can be.
+    //
+    // Each waypoint is stored as a window-relative offset from the target
+    // window's top-left corner (same convention as RegionStep's own
+    // sweepStart/sweepEnd and SetupAction::point), so -- unlike the
+    // rectangle fields above -- they always track the target window moving
+    // without needing a separate "follow" opt-in/anchor: RandomActionEngine
+    // re-adds the *current* window top-left at pick time instead of
+    // translating by how far it's moved since some earlier anchor.
+    bool isSweepTarget = false;
+    QList<QPoint> sweepWaypoints;
+    int sweepIntervalPx = 50;
+    int sweepJitterPx = 0;
+
+    bool isEmpty() const
+    {
+        if (isObjectTarget)
+            return objectTarget.name.isEmpty();
+        if (isSweepTarget)
+            return sweepWaypoints.size() < 2;
+        return regions.isEmpty();
+    }
 };
 
 // One step of an endurance-test run: a region (either the live target-

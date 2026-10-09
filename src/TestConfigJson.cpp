@@ -105,6 +105,32 @@ QList<QRect> rectListFromJson(const QJsonArray &arr)
     return rects;
 }
 
+// SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」(中点対応版):
+// NamedRegion::sweepWaypoints -- an ordered list of window-relative points
+// (start, any number of midpoints, end), as opposed to rectListToJson()'s
+// unordered rectangles above.
+QJsonArray pointListToJson(const QList<QPoint> &points)
+{
+    QJsonArray arr;
+    for (const QPoint &p : points) {
+        QJsonObject o;
+        o["x"] = p.x();
+        o["y"] = p.y();
+        arr.append(o);
+    }
+    return arr;
+}
+
+QList<QPoint> pointListFromJson(const QJsonArray &arr)
+{
+    QList<QPoint> points;
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        points.append(QPoint(o["x"].toInt(), o["y"].toInt()));
+    }
+    return points;
+}
+
 QJsonArray stringListToJson(const QStringList &list)
 {
     QJsonArray arr;
@@ -246,6 +272,16 @@ QJsonObject namedRegionToJson(const NamedRegion &r)
     o["isObjectTarget"] = r.isObjectTarget;
     if (r.isObjectTarget)
         o["objectTarget"] = objectTargetToJson(r.objectTarget);
+    // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点対応」:
+    // same old-preset compatibility rationale as isObjectTarget above -- a
+    // preset predating this field has none of these keys, which
+    // namedRegionFromJson() reads back as isSweepTarget == false.
+    o["isSweepTarget"] = r.isSweepTarget;
+    if (r.isSweepTarget) {
+        o["sweepWaypoints"] = pointListToJson(r.sweepWaypoints);
+        o["sweepIntervalPx"] = r.sweepIntervalPx;
+        o["sweepJitterPx"] = r.sweepJitterPx;
+    }
     return o;
 }
 
@@ -260,6 +296,10 @@ NamedRegion namedRegionFromJson(const QJsonObject &o)
     r.isObjectTarget = o["isObjectTarget"].toBool(false);
     if (o.contains("objectTarget"))
         r.objectTarget = objectTargetFromJson(o["objectTarget"].toObject());
+    r.isSweepTarget = o["isSweepTarget"].toBool(false);
+    r.sweepWaypoints = pointListFromJson(o["sweepWaypoints"].toArray());
+    r.sweepIntervalPx = o["sweepIntervalPx"].toInt(50);
+    r.sweepJitterPx = o["sweepJitterPx"].toInt(0);
     return r;
 }
 

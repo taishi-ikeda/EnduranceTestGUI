@@ -1050,6 +1050,48 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("点列（スイープ）の開始位置・終了位置の両方を選択してください。"),
          QStringLiteral("Select both the start and end positions for the point sequence (sweep).")},
         {QStringLiteral(" | [点列（スイープ）]"), QStringLiteral(" | [Point Sequence (Sweep)]")},
+
+        // v0.96: "操作領域を確認" button -- shows every registered named
+        // region on screen at once (MainWindow::onToggleShowAllRegions()).
+        {QStringLiteral("操作領域を確認"), QStringLiteral("Show All Operation Regions")},
+        {QStringLiteral("非表示にする"), QStringLiteral("Hide")},
+        {QStringLiteral("操作領域がありません"), QStringLiteral("No Operation Regions")},
+        {QStringLiteral("①で操作領域を追加してから確認してください。"),
+         QStringLiteral("Add an operation region in ① first, then check it here.")},
+        {QStringLiteral("操作領域を表示できません"), QStringLiteral("Can't Show Operation Regions")},
+        {QStringLiteral("現在表示できる操作領域がありません"
+                        "（オブジェクト指定の対象が見つからない可能性があります）。"),
+         QStringLiteral("There are no operation regions that can currently be shown "
+                        "(an object-target region's target may not be found right now).")},
+
+        // v0.97: operation regions can themselves be defined as a sweep
+        // point sequence (NamedRegion::isSweepTarget), not just drawn as a
+        // rectangle or picked as an accessibility-tree object --
+        // NamedRegionEditorDialog's new third mode radio.
+        {QStringLiteral("点列（スイープ）で指定"), QStringLiteral("Specify as Point Sequence (Sweep)")},
+        {QStringLiteral("%1（点列（スイープ）: 間隔%2px）"),
+         QStringLiteral("%1 (Point Sequence (Sweep): %2px interval)")},
+
+        // v0.98: the operation-region sweep above supports any number of
+        // waypoints (start, any number of midpoints, end) walked in order,
+        // not just a fixed start/end pair -- NamedRegionEditorDialog's
+        // "点を追加.../選択を削除" list replacing the old fixed two-button
+        // pair, and PointHighlightOverlay drawing a connected polyline
+        // through all of them instead of just a single start-end line.
+        {QStringLiteral("始点・中点（いくつでも追加可）・終点の順に画面上の点を追加してください。"
+                        "それらを順番に結んだ経路上を、指定した間隔で並んだ点として巡回操作します"
+                        "（最後まで行くと始点に戻って繰り返します）。"),
+         QStringLiteral("Add points on screen in order: start, any number of midpoints, then end. "
+                        "The path connecting them in that order is walked as a sequence of points "
+                        "evenly spaced at the given interval (wrapping back to the start once the "
+                        "end is reached).")},
+        {QStringLiteral("点を追加..."), QStringLiteral("Add Point...")},
+        {QStringLiteral("始点"), QStringLiteral("Start")},
+        {QStringLiteral("終点"), QStringLiteral("End")},
+        {QStringLiteral("中点%1"), QStringLiteral("Midpoint %1")},
+        {QStringLiteral("点列（スイープ）の始点・終点を含め、最低2つの点を追加してください。"),
+         QStringLiteral("Add at least 2 points for the point sequence (sweep), including a start "
+                        "and an end.")},
     };
     return table;
 }

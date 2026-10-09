@@ -59,12 +59,17 @@ protected:
 
         p.drawPixmap(0, 0, m_background);
 
-        if (m_points.size() == 2) {
+        if (m_points.size() >= 2) {
             // Rects that don't overlap this screen still draw fine here --
             // the line/markers simply land (partially or fully) outside
-            // the widget's own bounds, where QPainter clips them away.
+            // the widget's own bounds, where QPainter clips them away. A
+            // line per consecutive pair (not just points[0]-points[1]) so
+            // an N-point sweep (SPEC.md 追加実装依頼「操作領域を点列
+            // （スイープ）で指定」中点対応) draws as one connected path
+            // through every waypoint in order, not just its endpoints.
             p.setPen(QPen(QColor(255, 140, 0), 2, Qt::DashLine));
-            p.drawLine(m_points[0] - m_origin, m_points[1] - m_origin);
+            for (int i = 0; i + 1 < m_points.size(); ++i)
+                p.drawLine(m_points[i] - m_origin, m_points[i + 1] - m_origin);
         }
 
         for (int i = 0; i < m_points.size(); ++i) {

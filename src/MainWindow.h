@@ -31,6 +31,7 @@ class RecordingIndicatorPanel;
 class GlobalHotkey;
 class InputRecorder;
 class ManualRecorder;
+class RegionHighlightOverlay;
 
 // Main window, laid out (per SPEC.md 6.9, revised by 追加実装及び修正依頼)
 // as two columns:
@@ -80,6 +81,9 @@ private slots:
     void onAddNamedRegion();
     void onEditSelectedNamedRegion();
     void onRemoveSelectedNamedRegion();
+    // SPEC.md 10「操作領域を確認するボタン」: toggles m_allRegionsHighlightOverlay
+    // showing every entry in m_namedRegions at once, or hides it again.
+    void onToggleShowAllRegions();
 
     void onAddSetupAction();
     void onEditSelectedSetupAction();
@@ -175,6 +179,27 @@ private:
     // "画面上の部品を指定" mode's accessibility-tree lookups (SPEC.md
     // 追加実装依頼「名前付きオブジェクト」).
     qint64 currentTargetPidOrInvalid() const;
+    // Resolves one NamedRegion's current on-screen include/exclude
+    // rectangles for display by onToggleShowAllRegions() (SPEC.md 10) --
+    // the same logic as RandomActionEngine::resolveStepRegion()'s named-
+    // region branch (follow-window translation via currentTargetTopLeft())
+    // and resolveObjectTargetRegion() (a fresh, uncached
+    // PlatformAutomation::findAccessibleObject() lookup, fine for a one-off
+    // preview), reimplemented here since that engine logic is private and
+    // only runs against a started/running engine. Returns false (outInclude/
+    // outExclude left unset) if the region can't currently be resolved at
+    // all (no rectangles saved yet, or an object-target whose object can't
+    // currently be found) -- not fatal, just skipped by the caller.
+    bool resolveNamedRegionForDisplay(const NamedRegion &region, QList<QRect> &outInclude,
+                                       QList<QRect> &outExclude) const;
+    // Rebuilds m_allRegionsHighlightOverlay's content from the current
+    // m_namedRegions (SPEC.md 10) -- called by onToggleShowAllRegions() to
+    // turn it on, and by the add/edit/remove handlers above to keep it in
+    // sync while it's already showing. Hides the overlay and resets
+    // m_showingAllRegions/the button's label back to "off" (returning
+    // false) if no region can currently be resolved at all; returns true
+    // otherwise.
+    bool refreshAllRegionsHighlight();
     // Live bounds of whatever target is currently selected in m_targetCombo,
     // if any -- used by the saved window size/position feature below
     // (SPEC.md 10 追加実装及び修正依頼). Returns false (outBounds left
@@ -421,6 +446,30 @@ private:
     QPushButton *m_editNamedRegionButton = nullptr;
     QPushButton *m_removeNamedRegionButton = nullptr;
     QList<NamedRegion> m_namedRegions;
+
+    // SPEC.md 10「操作領域を確認するボタン」: toggleable on-screen preview
+    // of every registered named region at once (as opposed to
+    // NamedRegionEditorDialog's own RegionHighlightOverlay, which only ever
+    // shows the single region currently being authored). m_allRegionsHighlightOverlay
+    // is created lazily on first use and reused thereafter (see
+    // RegionHighlightOverlay's own reuse rationale); m_showingAllRegions
+    // tracks whether it's currently visible so the button can toggle
+    // between "操作領域を確認"/"非表示にする" and so other region-list
+    // changes (add/edit/remove) know to refresh instead of leaving a stale
+    // overlay up.
+    QPushButton *m_showAllRegionsButton = nullptr;
+    RegionHighlightOverlay *m_allRegionsHighlightOverlay = nullptr;
+    bool m_showingAllRegions = false;
+    // Safety net: the highlight windows are borderless/always-on-top and
+    // span each whole screen, including wherever this window itself sits.
+    // On a Linux desktop without a compositor, their click-through
+    // (Qt::WA_TransparentForMouseEvents) is not reliably honored by every
+    // window manager, which can leave mouse *and* keyboard input to this
+    // window blocked with no way to click "非表示にする" to recover. This
+    // timer auto-hides the overlay a fixed time after it's shown so a
+    // click-through failure can't strand the user; onToggleShowAllRegions()
+    // restarts it on every show and stops it on every hide.
+    QTimer *m_allRegionsAutoHideTimer = nullptr;
 
     // Startup setup macro (SPEC.md 6.x "起動時セットアップ"): a fixed,
     // deterministic sequence run once, in order, right after the target is

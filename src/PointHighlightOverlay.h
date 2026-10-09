@@ -29,7 +29,10 @@ public:
     ~PointHighlightOverlay() override;
 
     // `points` and `labels` must be the same size: 0 (nothing shown), 1
-    // (a single picked point, e.g. Click), or 2 (a drag's start+end).
+    // (a single picked point, e.g. Click), 2 (a drag's start+end, or a
+    // two-point sweep), or more (an N-point sweep -- SPEC.md 追加実装依頼
+    // 「操作領域を点列（スイープ）で指定」中点対応 -- drawn as one dashed
+    // polyline through every point in order, each with its own label).
     void showPoints(const QList<QPoint> &points, const QList<QString> &labels);
     void hide();
 

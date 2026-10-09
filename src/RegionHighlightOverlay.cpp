@@ -51,13 +51,10 @@ public:
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
 
-    void setContent(QScreen *screen, const QString &name, const QList<QRect> &includeRegions,
-                     const QList<QRect> &excludeRegions)
+    void setContent(QScreen *screen, const QList<RegionHighlightEntry> &entries)
     {
         m_screen = screen;
-        m_name = name;
-        m_includeRegions = includeRegions;
-        m_excludeRegions = excludeRegions;
+        m_entries = entries;
         // Only re-grab the screen if this window isn't already showing on
         // top of it: once it's visible, grabbing would just capture our
         // own window (whatever we last painted) instead of the real
@@ -127,17 +124,23 @@ protected:
             }
         };
 
-        drawRectList(m_includeRegions, QColor(0, 200, 0, 60), QColor(0, 255, 0));
-        drawRectList(m_excludeRegions, QColor(220, 0, 0, 80), QColor(255, 60, 60));
+        // Each entry's own rectangles/label are drawn independently, so an
+        // arbitrary number of named regions (MainWindow's "操作領域を確認"
+        // button, SPEC.md 10) can be shown at once, not just the single
+        // region a NamedRegionEditorDialog session is currently editing.
+        for (const RegionHighlightEntry &entry : m_entries) {
+            drawRectList(entry.includeRegions, QColor(0, 200, 0, 60), QColor(0, 255, 0));
+            drawRectList(entry.excludeRegions, QColor(220, 0, 0, 80), QColor(255, 60, 60));
 
-        if (!m_includeRegions.isEmpty()) {
-            const QRect first = m_includeRegions.first().translated(-m_origin);
-            p.setFont(QFont(font().family(), 12, QFont::Bold));
-            const QString label = QStringLiteral("操作領域「%1」").arg(m_name);
-            const QRect labelBg(first.left(), qMax(0, first.top() - 26), qMax(160, first.width()), 24);
-            p.fillRect(labelBg, QColor(0, 150, 0, 220));
-            p.setPen(Qt::white);
-            p.drawText(labelBg, Qt::AlignCenter, label);
+            if (!entry.includeRegions.isEmpty()) {
+                const QRect first = entry.includeRegions.first().translated(-m_origin);
+                p.setFont(QFont(font().family(), 12, QFont::Bold));
+                const QString label = QStringLiteral("操作領域「%1」").arg(entry.name);
+                const QRect labelBg(first.left(), qMax(0, first.top() - 26), qMax(160, first.width()), 24);
+                p.fillRect(labelBg, QColor(0, 150, 0, 220));
+                p.setPen(Qt::white);
+                p.drawText(labelBg, Qt::AlignCenter, label);
+            }
         }
     }
 
@@ -145,9 +148,7 @@ private:
     bool m_useRealTransparency = false;
     QScreen *m_screen = nullptr;
     QPoint m_origin;
-    QString m_name;
-    QList<QRect> m_includeRegions;
-    QList<QRect> m_excludeRegions;
+    QList<RegionHighlightEntry> m_entries;
     QPixmap m_background;
 };
 
@@ -161,9 +162,12 @@ RegionHighlightOverlay::~RegionHighlightOverlay()
 void RegionHighlightOverlay::showRegion(const QString &name, const QList<QRect> &includeRegions,
                                          const QList<QRect> &excludeRegions)
 {
-    m_name = name;
-    m_includeRegions = includeRegions;
-    m_excludeRegions = excludeRegions;
+    showRegions({RegionHighlightEntry{name, includeRegions, excludeRegions}});
+}
+
+void RegionHighlightOverlay::showRegions(const QList<RegionHighlightEntry> &entries)
+{
+    m_entries = entries;
 
     const QList<QScreen *> screens = QGuiApplication::screens();
 
@@ -183,7 +187,7 @@ void RegionHighlightOverlay::showRegion(const QString &name, const QList<QRect> 
     }
 
     for (int i = 0; i < m_screenWindows.size(); ++i)
-        m_screenWindows[i]->setContent(screens[i], m_name, m_includeRegions, m_excludeRegions);
+        m_screenWindows[i]->setContent(screens[i], m_entries);
 }
 
 void RegionHighlightOverlay::hide()

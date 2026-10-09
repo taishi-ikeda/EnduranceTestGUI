@@ -46,6 +46,7 @@
 #include "LoadInjector.h"
 #include "LoadMonitor.h"
 #include "LoadMonitorChartWidget.h"
+#include "LoadMonitorWindow.h"
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
@@ -127,13 +128,21 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             &MainWindow::onLoadInjectionWorkerExited);
 
     // SPEC.md 追加実装依頼「負荷モニター」: constructed unconditionally (it's
-    // a cheap QObject whose QTimer is never started unless
-    // m_loadMonitorEnabledCheck is checked -- see beginRun()), so its own
-    // enable checkbox being off truly has zero runtime cost. Wired to
-    // m_loadInjector purely so its chart can shade load-injection-active
-    // periods; LoadMonitor never starts/stops injection itself.
+    // a cheap QObject whose QTimer is never started unless its enable
+    // checkbox is checked -- see beginRun()), so leaving that off truly has
+    // zero runtime cost. Wired to m_loadInjector purely so its chart can
+    // shade load-injection-active periods; LoadMonitor never starts/stops
+    // injection itself.
     m_loadMonitor = new LoadMonitor(this);
     m_loadMonitor->setLoadInjector(m_loadInjector);
+    // 「負荷モニターはメニューから選択してmain windowとは別のwindowで確認
+    // できるようにしてください」: UI一式は独立ウィンドウへ（LoadMonitorWindow
+    // 自身の冒頭コメント参照）。一度も開かれなくても（＝メニューを一度も
+    // 選ばなくても）m_loadMonitor自体はここで既に構築済みなので、サンプリング・
+    // 異常停止時のCSV/PNG自動保存は従来どおり動作する。
+    m_loadMonitorWindow = new LoadMonitorWindow(m_loadMonitor, this);
+    connect(m_loadMonitorWindow, &LoadMonitorWindow::saveRequested, this,
+            &MainWindow::onSaveLoadMonitorData);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -372,6 +381,16 @@ void MainWindow::buildMenuBar()
     auto *artifactsDirectoryAction =
         fileMenu->addAction(I18n::t(QStringLiteral("録画・クラッシュ記録の保存先を変更...")));
     connect(artifactsDirectoryAction, &QAction::triggered, this, &MainWindow::onChangeArtifactsDirectory);
+
+    // 「負荷モニターはメニューから選択してmain windowとは別のwindowで確認
+    // できるようにしてください」: メインウィンドウとは別の最上位ウィンドウ
+    // （LoadMonitorWindow）を開閉するためのメニュー。モードレスなので
+    // 「閉じる」操作自体はウィンドウ自身の×ボタンで行う（チェック可能な
+    // トグルアクションにはしていない -- 既に開いている状態でもう一度選ぶと
+    // 単に最前面化するだけで、閉じる専用の操作ではない）。
+    auto *viewMenu = menuBar()->addMenu(I18n::t(QStringLiteral("表示")));
+    m_showLoadMonitorAction = viewMenu->addAction(I18n::t(QStringLiteral("負荷モニター...")));
+    connect(m_showLoadMonitorAction, &QAction::triggered, this, &MainWindow::onShowLoadMonitorWindow);
 
     // SPEC.md "多言語対応": language takes effect on next launch (I18n.h
     // explains why a live retranslate isn't done), so the handlers below
@@ -1043,51 +1062,10 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_loadInjectionManualToggleButton, &QPushButton::clicked, this,
             &MainWindow::onToggleLoadInjectionManual);
 
-    // SPEC.md 追加実装依頼「負荷モニター」: own top-level group, same
-    // reasoning as m_loadInjectionGroup above (stays enabled, and the save
-    // button usable, even while m_timingGroup itself is disabled during a
-    // run).
-    m_loadMonitorGroup = new QGroupBox(I18n::t(QStringLiteral("負荷モニター（CPU/メモリの可視化）")), container);
-    auto *loadMonitorLayout = new QVBoxLayout(m_loadMonitorGroup);
-
-    auto *loadMonitorHeaderRow = new QHBoxLayout;
-    m_loadMonitorEnabledCheck =
-        new QCheckBox(I18n::t(QStringLiteral("負荷モニターを有効にする")), m_loadMonitorGroup);
-    m_loadMonitorEnabledCheck->setChecked(false);
-    m_loadMonitorEnabledCheck->setToolTip(
-        I18n::t(QStringLiteral("有効にすると、テスト実行中に対象アプリ自身のCPU使用率・メモリ使用量と、"
-                                "システム全体のCPU使用率（Linuxのみ）をリアルタイムにグラフ表示します。"
-                                "異常停止（クラッシュ）時には、直前の推移をCSV・画像として自動保存するため、"
-                                "クラッシュ直前にどの程度の負荷がかかっていたかを後から確認できます。"
-                                "無効（デフォルト）のままなら、サンプリング用のタイマーすら動かないため、"
-                                "耐久テスト本体の動作には一切影響しません。")));
-    loadMonitorHeaderRow->addWidget(m_loadMonitorEnabledCheck);
-    loadMonitorHeaderRow->addWidget(
-        new QLabel(I18n::t(QStringLiteral("サンプリング間隔:")), m_loadMonitorGroup));
-    m_loadMonitorIntervalSpin = new QSpinBox(m_loadMonitorGroup);
-    m_loadMonitorIntervalSpin->setRange(50, 60000);
-    m_loadMonitorIntervalSpin->setValue(500);
-    m_loadMonitorIntervalSpin->setSuffix(QStringLiteral(" ms"));
-    m_loadMonitorIntervalSpin->setToolTip(
-        I18n::t(QStringLiteral("短くするほど細かい時間分解能でCPU/メモリの推移を記録できますが、"
-                                "①の操作間隔（最短ms指定）に近づきすぎると、サンプリング自体が耐久テスト"
-                                "本来の高速操作の妨げになり得ます。操作間隔より十分大きい値を推奨します"
-                                "（デフォルト500msは、ほとんどの設定で安全な余裕を持った値です）。")));
-    loadMonitorHeaderRow->addWidget(m_loadMonitorIntervalSpin);
-    loadMonitorHeaderRow->addStretch();
-    loadMonitorLayout->addLayout(loadMonitorHeaderRow);
-
-    m_loadMonitorChartWidget = new LoadMonitorChartWidget(m_loadMonitorGroup);
-    m_loadMonitorChartWidget->setLoadMonitor(m_loadMonitor);
-    loadMonitorLayout->addWidget(m_loadMonitorChartWidget);
-
-    m_saveLoadMonitorButton =
-        new QPushButton(I18n::t(QStringLiteral("負荷モニターのグラフを保存...")), m_loadMonitorGroup);
-    m_saveLoadMonitorButton->setEnabled(false);
-    loadMonitorLayout->addWidget(m_saveLoadMonitorButton);
-    connect(m_saveLoadMonitorButton, &QPushButton::clicked, this, &MainWindow::onSaveLoadMonitorData);
-    connect(m_loadMonitor, &LoadMonitor::sampleAdded, this,
-            [this]() { m_saveLoadMonitorButton->setEnabled(!m_loadMonitor->samples().isEmpty()); });
+    // SPEC.md 追加実装依頼「負荷モニター」: UI一式（有効化チェック・間隔・
+    // チャート・保存ボタン）は独立したLoadMonitorWindowへ切り出し済み
+    // （コンストラクタで構築、「表示」メニューから開閉）。ここにはもう
+    // embedしない。
 
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
@@ -1096,7 +1074,6 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     namedRegionAndTimingRow->addWidget(m_timingGroup, 1);
     layout->addLayout(namedRegionAndTimingRow);
     layout->addWidget(m_loadInjectionGroup);
-    layout->addWidget(m_loadMonitorGroup);
     layout->addStretch();
 
     return wrapper;
@@ -2723,8 +2700,8 @@ bool MainWindow::beginRun(bool interactive)
     // SPEC.md 追加実装依頼「負荷モニター」: only ever starts m_loadMonitor's
     // timer when its own checkbox is checked -- see m_loadMonitor's own
     // comment in MainWindow.h for why leaving it off has zero cost.
-    if (m_loadMonitorEnabledCheck->isChecked())
-        m_loadMonitor->start(config.targetPid, m_loadMonitorIntervalSpin->value());
+    if (m_loadMonitorWindow->monitoringEnabled())
+        m_loadMonitor->start(config.targetPid, m_loadMonitorWindow->intervalMs());
 
     m_engine->start(config);
     return true;
@@ -3492,14 +3469,14 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
         // empty otherwise, but checking the checkbox directly avoids saving
         // an empty/meaningless CSV+PNG pair and the log lines that go with
         // them).
-        if (m_loadMonitorEnabledCheck->isChecked() && !m_loadMonitor->samples().isEmpty()) {
+        if (m_loadMonitorWindow->monitoringEnabled() && !m_loadMonitor->samples().isEmpty()) {
             const QString csvPath =
                 QStringLiteral("%1/anomaly_%2_loadmonitor.csv").arg(baseDir, summary.anomalyArtifactTimestamp);
             if (m_loadMonitor->saveSamplesAsCsv(csvPath))
                 appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移を保存しました: %1")).arg(csvPath));
             const QString pngPath =
                 QStringLiteral("%1/anomaly_%2_loadmonitor.png").arg(baseDir, summary.anomalyArtifactTimestamp);
-            if (m_loadMonitorChartWidget->renderToPixmap(QSize(900, 300)).save(pngPath))
+            if (m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 300)).save(pngPath))
                 appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"))
                                .arg(pngPath));
         }
@@ -3601,12 +3578,19 @@ void MainWindow::onSaveLoadMonitorData()
     const QString csvPath = QStringLiteral("%1/loadmonitor_%2.csv").arg(dir, timestamp);
     const QString pngPath = QStringLiteral("%1/loadmonitor_%2.png").arg(dir, timestamp);
     bool ok = m_loadMonitor->saveSamplesAsCsv(csvPath);
-    ok = m_loadMonitorChartWidget->renderToPixmap(QSize(900, 300)).save(pngPath) && ok;
+    ok = m_loadMonitorWindow->chartWidget()->renderToPixmap(QSize(900, 300)).save(pngPath) && ok;
     if (ok)
         appendLog(I18n::t(QStringLiteral("負荷モニターのデータを保存しました: %1 / %2")).arg(csvPath, pngPath));
     else
         QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")),
                               I18n::t(QStringLiteral("負荷モニターのデータを保存できませんでした。")));
+}
+
+void MainWindow::onShowLoadMonitorWindow()
+{
+    m_loadMonitorWindow->show();
+    m_loadMonitorWindow->raise();
+    m_loadMonitorWindow->activateWindow();
 }
 
 void MainWindow::onGlobalEmergencyStop()
@@ -3698,8 +3682,8 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["loadInjectionMemoryMbPerProcess"] = m_loadInjectionMemoryMbSpin->value();
     timing["loadInjectionLinkToRun"] = m_loadInjectionLinkToRunCheck->isChecked();
     // SPEC.md 追加実装依頼「負荷モニター」
-    timing["loadMonitorEnabled"] = m_loadMonitorEnabledCheck->isChecked();
-    timing["loadMonitorIntervalMs"] = m_loadMonitorIntervalSpin->value();
+    timing["loadMonitorEnabled"] = m_loadMonitorWindow->monitoringEnabled();
+    timing["loadMonitorIntervalMs"] = m_loadMonitorWindow->intervalMs();
     root["timing"] = timing;
     return root;
 }
@@ -3817,10 +3801,10 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_loadInjectionLinkToRunCheck->setChecked(
         timing["loadInjectionLinkToRun"].toBool(m_loadInjectionLinkToRunCheck->isChecked()));
     // SPEC.md 追加実装依頼「負荷モニター」
-    m_loadMonitorEnabledCheck->setChecked(
-        timing["loadMonitorEnabled"].toBool(m_loadMonitorEnabledCheck->isChecked()));
-    m_loadMonitorIntervalSpin->setValue(
-        timing["loadMonitorIntervalMs"].toInt(m_loadMonitorIntervalSpin->value()));
+    m_loadMonitorWindow->setMonitoringEnabled(
+        timing["loadMonitorEnabled"].toBool(m_loadMonitorWindow->monitoringEnabled()));
+    m_loadMonitorWindow->setIntervalMs(
+        timing["loadMonitorIntervalMs"].toInt(m_loadMonitorWindow->intervalMs()));
 
     refreshNamedRegionList();
     refreshSetupActionList();

@@ -1224,6 +1224,13 @@ const QHash<QString, QString> &translationTable()
                         "MB/min). A memory leak is suspected")},
         {QStringLiteral("メモリリークの疑い: あり（最大増加率 約%1 MB/分）"),
          QStringLiteral("Suspected memory leak: yes (peak growth rate about %1 MB/min)")},
+
+        // v1.03: 「負荷モニターはメニューから選択してmain windowとは別のwindowで
+        // 確認できるようにしてください」-- LoadMonitorのUIをLoadMonitorWindow
+        // （独立した最上位ウィンドウ）へ切り出し、「表示」メニューから開閉する
+        // ようにした。
+        {QStringLiteral("表示"), QStringLiteral("View")},
+        {QStringLiteral("負荷モニター..."), QStringLiteral("Load Monitor...")},
     };
     return table;
 }

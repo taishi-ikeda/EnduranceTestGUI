@@ -4895,6 +4895,40 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
     前から存在する複数の既存プリセット（①を設定していないもの）がそのまま正常に
     動作し続けることも、本セッション内の一連の実機テストを通じて確認済み。
     -Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
+- v1.03: 「負荷モニターはメニューから選択してmain windowとは別のwindowで確認
+  できるようにしてください」との依頼を受けて、従来MainWindow内の⑦タイミング・
+  制限の隣に直接埋め込まれていた負荷モニターのUI（有効化チェック・サンプリング
+  間隔・チャート・保存ボタン）を、新規クラス`LoadMonitorWindow`
+  （`LoadMonitorWindow.h/.cpp`）へ切り出し、独立した最上位ウィンドウとして
+  メニューバーに新設した「表示」メニューの「負荷モニター...」から開閉できる
+  ようにした。実際にサンプリングを行う`LoadMonitor`自体は引き続きMainWindow
+  （コンストラクタ内）が所有し、`LoadMonitorWindow`はそれを参照するだけの
+  非所有ポインタを受け取る純粋なUIコンテナとした。これにより、このウィンドウを
+  ユーザーが一度も開かなくても（＝メニューを一度も選ばなくても）既存どおり
+  サンプリング・異常停止時のCSV/PNG自動保存が動作する（`LoadMonitorChartWidget::
+  renderToPixmap()`はウィジェットの実際の表示状態に関わらず指定サイズで描画
+  するため、ウィンドウが非表示のままでも問題ない）。`MainWindow`側の
+  `m_loadMonitorEnabledCheck`/`m_loadMonitorIntervalSpin`/
+  `m_loadMonitorChartWidget`/`m_saveLoadMonitorButton`/`m_loadMonitorGroup`
+  という5つのメンバはすべて廃止し、`m_loadMonitorWindow`（`monitoringEnabled()`/
+  `setMonitoringEnabled()`/`intervalMs()`/`setIntervalMs()`/`chartWidget()`の
+  各アクセサ経由）に一本化した。「負荷モニターのグラフを保存...」ボタンは
+  クリック時に`saveRequested()`シグナルを発行するのみとし、実際のファイル
+  ダイアログ表示・保存処理（ログパネルへの出力を伴うため）は引き続き
+  `MainWindow::onSaveLoadMonitorData()`が担う。ウィンドウはモードレスで、
+  「表示」メニューから複数回選んでも新規インスタンスは作らず、既存の
+  ウィンドウを`show()`/`raise()`/`activateWindow()`するだけ。プリセットJSONの
+  `timing.loadMonitorEnabled`/`timing.loadMonitorIntervalMs`キーは変更なし
+  （読み書き先が`LoadMonitorWindow`のアクセサ経由になっただけ）。実機
+  （Xvfb + openbox）で、①「表示」メニューに「負荷モニター...」項目が追加
+  されていること、②選択するとメインウィンドウとは別の最上位ウィンドウ
+  （タイトルバー・最小化/最大化/閉じるボタン付き）として開き、チェックボックス・
+  サンプリング間隔・チャート（「データなし」表示）・保存ボタンが正しく表示
+  されること、③メインウィンドウには従来の埋め込みグループが一切残っていない
+  こと、④チェックボックスのクリックが正常に反映されること、⑤メニューを
+  再度選んでも重複ウィンドウが作られず同一ウィンドウが前面化するだけである
+  ことを、スクリーンショットで確認した。-Wall -Wextra -Wpedantic付きの
+  クリーンビルドで警告0件を維持。
 
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 

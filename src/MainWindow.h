@@ -35,6 +35,7 @@ class RegionHighlightOverlay;
 class LoadInjector;
 class LoadMonitor;
 class LoadMonitorChartWidget;
+class LoadMonitorWindow;
 
 // Main window, laid out (per SPEC.md 6.9, revised by 追加実装及び修正依頼)
 // as two columns:
@@ -145,6 +146,10 @@ private slots:
     // automatic save onRunSummaryReady() already does on an abnormal stop --
     // lets the user grab the data mid-run, or after a normal (non-crash) stop.
     void onSaveLoadMonitorData();
+    // 「表示」メニューの「負荷モニター...」: m_loadMonitorWindowを表示/最前面化
+    // する（モードレスなので、呼ぶたびに毎回new/showするのではなく既存の
+    // インスタンスをshow()+raise()+activateWindow()するだけでよい）。
+    void onShowLoadMonitorWindow();
     void onToggleManualRecording();
     void onManualRecordingStarted(const QString &outputDir);
     void onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason);
@@ -697,21 +702,22 @@ private:
     // visualization, plus the ability to look back at what the load was
     // doing right before a crash. Deliberately independent of
     // RandomActionEngine (see LoadMonitor's own header comment) so leaving
-    // m_loadMonitorEnabledCheck unchecked (the default) guarantees *zero*
-    // effect on anything else -- m_loadMonitor is still constructed (it's a
-    // cheap QObject with a QTimer that's simply never started), but
-    // beginRun() only ever calls start() on it when this checkbox is
-    // checked, so no extra sampling/timer/repaint work happens otherwise.
-    QGroupBox *m_loadMonitorGroup = nullptr;
-    QCheckBox *m_loadMonitorEnabledCheck = nullptr;
-    // User-configurable sampling interval (ms) -- not hardcoded, since how
-    // fine a resolution is useful/affordable trades off against how close
-    // to the configured minimum action interval the monitor's own timer
-    // gets (see the tooltip text for the concrete guidance given on this).
-    QSpinBox *m_loadMonitorIntervalSpin = nullptr;
-    LoadMonitorChartWidget *m_loadMonitorChartWidget = nullptr;
-    QPushButton *m_saveLoadMonitorButton = nullptr;
+    // its enable checkbox unchecked (the default) guarantees *zero* effect
+    // on anything else -- m_loadMonitor is still constructed (it's a cheap
+    // QObject with a QTimer that's simply never started), but beginRun()
+    // only ever calls start() on it when the checkbox is checked, so no
+    // extra sampling/timer/repaint work happens otherwise.
+    //
+    // 「負荷モニターはメニューから選択してmain windowとは別のwindowで確認
+    // できるようにしてください」: the UI (enable checkbox/interval spin/
+    // chart/save button) lives in its own LoadMonitorWindow, opened via the
+    // "表示" menu's "負荷モニター..." action (m_showLoadMonitorAction) --
+    // see LoadMonitorWindow.h. It stays constructed (just not necessarily
+    // shown) for the whole app lifetime, so crash-time CSV+PNG auto-save
+    // keeps working even if the user never opens it.
     LoadMonitor *m_loadMonitor = nullptr;
+    LoadMonitorWindow *m_loadMonitorWindow = nullptr;
+    QAction *m_showLoadMonitorAction = nullptr;
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;

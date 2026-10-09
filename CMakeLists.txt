@@ -77,6 +77,7 @@ set(SOURCES
     src/LoadInjector.cpp
     src/LoadMonitor.cpp
     src/LoadMonitorChartWidget.cpp
+    src/LoadMonitorWindow.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -110,6 +111,7 @@ set(HEADERS
     src/LoadInjector.h
     src/LoadMonitor.h
     src/LoadMonitorChartWidget.h
+    src/LoadMonitorWindow.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

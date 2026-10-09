@@ -1231,6 +1231,12 @@ const QHash<QString, QString> &translationTable()
         // ようにした。
         {QStringLiteral("表示"), QStringLiteral("View")},
         {QStringLiteral("負荷モニター..."), QStringLiteral("Load Monitor...")},
+
+        // v1.04: 「Mac上で負荷モニターを開いて...テスト実行中でないと有効では
+        // ないですか？」との指摘を受けて、テスト実行の有無に関わらずチェック
+        // ボックス単独で監視を開始/停止できるようにした。
+        {QStringLiteral("負荷モニター: ①で対象アプリを選択してから有効にしてください。"),
+         QStringLiteral("Load Monitor: select a target app in ① before enabling this.")},
     };
     return table;
 }

@@ -150,6 +150,12 @@ private slots:
     // する（モードレスなので、呼ぶたびに毎回new/showするのではなく既存の
     // インスタンスをshow()+raise()+activateWindow()するだけでよい）。
     void onShowLoadMonitorWindow();
+    // 「Mac上で負荷モニターを開いて...テスト実行中でないと有効ではないですか」
+    // との指摘を受けて追加: チェックボックスの状態変化（ユーザー操作・
+    // プリセット読込どちらでも）に応じて、テスト実行中かどうかに関わらず
+    // 即座にLoadMonitorの開始/停止を行う。有効化時は①で現在選択されている
+    // 対象のpidを使う（対象未選択ならログで知らせるだけで何もしない）。
+    void onLoadMonitorToggled(bool enabled);
     void onToggleManualRecording();
     void onManualRecordingStarted(const QString &outputDir);
     void onManualRecordingStopped(const QString &outputDir, int frameCount, const QString &reason);

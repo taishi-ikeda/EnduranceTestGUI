@@ -50,6 +50,16 @@ signals:
     // （ログパネルへの出力等、MainWindow側の機能に依存するため）。
     void saveRequested();
 
+    // 「負荷モニターを有効にする」チェックボックスの状態が変化した（ユーザー
+    // のクリック、またはsetMonitoringEnabled()経由のプリセット読込のいずれでも）。
+    // 「Mac上で負荷モニターを開いて...オンにしてもデータなしのまま...テスト
+    // 実行中でないと...有効ではないですか？」との指摘を受け、MainWindow側で
+    // これを購読してテスト実行の有無に関わらず即座にLoadMonitor::start()/
+    // stop()するようにした -- このウィンドウ自身は「どのpidを監視するか」を
+    // 知らない（①対象選択の状態はMainWindowが持つ）ため、実際の開始/停止は
+    // MainWindowに委ねる。
+    void monitoringToggled(bool enabled);
+
 private:
     QCheckBox *m_enabledCheck = nullptr;
     QSpinBox *m_intervalSpin = nullptr;

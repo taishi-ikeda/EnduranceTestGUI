@@ -53,6 +53,7 @@ LoadMonitorWindow::LoadMonitorWindow(LoadMonitor *monitor, QWidget *parent) : QW
     m_saveButton->setEnabled(false);
     layout->addWidget(m_saveButton);
     connect(m_saveButton, &QPushButton::clicked, this, &LoadMonitorWindow::saveRequested);
+    connect(m_enabledCheck, &QCheckBox::toggled, this, &LoadMonitorWindow::monitoringToggled);
     connect(monitor, &LoadMonitor::sampleAdded, this,
             [this, monitor]() { m_saveButton->setEnabled(!monitor->samples().isEmpty()); });
 

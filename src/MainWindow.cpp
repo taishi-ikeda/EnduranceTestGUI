@@ -143,6 +143,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_loadMonitorWindow = new LoadMonitorWindow(m_loadMonitor, this);
     connect(m_loadMonitorWindow, &LoadMonitorWindow::saveRequested, this,
             &MainWindow::onSaveLoadMonitorData);
+    connect(m_loadMonitorWindow, &LoadMonitorWindow::monitoringToggled, this,
+            &MainWindow::onLoadMonitorToggled);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -3044,10 +3046,17 @@ void MainWindow::onEngineFinished(const QString &reason)
         refreshLoadInjectionStatusLabel();
     }
 
-    // SPEC.md 追加実装依頼「負荷モニター」: stop()ping an already-stopped
-    // monitor (the common case when the checkbox is left unchecked) is a
-    // cheap no-op (QTimer::stop() on a timer that was never started).
-    m_loadMonitor->stop();
+    // SPEC.md 追加実装依頼「負荷モニター」: only stop here if the checkbox is
+    // now unchecked. If it's still checked, leave the monitor running --
+    // since it's now independent of any run (onLoadMonitorToggled()), the
+    // user may have wanted to keep watching the target after this run ends,
+    // and stopping it here would also throw away the just-finished run's
+    // history that "負荷モニターのグラフを保存..." could otherwise still
+    // export. stop()ping an already-stopped monitor (the common case when
+    // the checkbox is left unchecked) is a cheap no-op (QTimer::stop() on a
+    // timer that was never started).
+    if (!m_loadMonitorWindow->monitoringEnabled())
+        m_loadMonitor->stop();
     if (m_stopPanel) {
         m_stopPanel->close();
         m_stopPanel->deleteLater();
@@ -3591,6 +3600,30 @@ void MainWindow::onShowLoadMonitorWindow()
     m_loadMonitorWindow->show();
     m_loadMonitorWindow->raise();
     m_loadMonitorWindow->activateWindow();
+}
+
+void MainWindow::onLoadMonitorToggled(bool enabled)
+{
+    if (!enabled) {
+        // beginRun()が今まさに起動した監視であっても、ユーザーが明示的に
+        // チェックを外したならここで止めるのが正しい（テスト実行中かどうかに
+        // 関わらず、チェックボックスの状態がこの機能のオン/オフそのもの）。
+        m_loadMonitor->stop();
+        return;
+    }
+    const int idx = m_targetCombo->currentIndex();
+    if (idx < 0 || idx >= m_windows.size()) {
+        appendLog(I18n::t(QStringLiteral("負荷モニター: ①で対象アプリを選択してから有効にしてください。")));
+        return;
+    }
+    // テスト実行中かどうかに関わらず、①で現在選択されている対象のpidを
+    // 使って今すぐ監視を開始する（「Mac上で負荷モニターを開いて...テスト
+    // 実行中でないと有効ではないですか？」との指摘を受けての対応）。
+    // 実行中にこのチェックを入れた場合も、実行中の対象＝①の選択のままの
+    // はずなので同じpidになる。beginRun()は開始のたびに改めて同じ呼び出しを
+    // 行うが、start()は同じpidへの再呼び出しなら単にバッファをリセットする
+    // だけで、害はない。
+    m_loadMonitor->start(m_windows[idx].pid, m_loadMonitorWindow->intervalMs());
 }
 
 void MainWindow::onGlobalEmergencyStop()

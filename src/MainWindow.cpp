@@ -44,6 +44,8 @@
 #include "AnimationExportDialog.h"
 #include "DefaultActionParamsDialog.h"
 #include "LoadInjector.h"
+#include "LoadMonitor.h"
+#include "LoadMonitorChartWidget.h"
 #include "ManualRecorder.h"
 #include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
@@ -123,6 +125,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_loadInjector = new LoadInjector(this);
     connect(m_loadInjector, &LoadInjector::workerExitedUnexpectedly, this,
             &MainWindow::onLoadInjectionWorkerExited);
+
+    // SPEC.md 追加実装依頼「負荷モニター」: constructed unconditionally (it's
+    // a cheap QObject whose QTimer is never started unless
+    // m_loadMonitorEnabledCheck is checked -- see beginRun()), so its own
+    // enable checkbox being off truly has zero runtime cost. Wired to
+    // m_loadInjector purely so its chart can shade load-injection-active
+    // periods; LoadMonitor never starts/stops injection itself.
+    m_loadMonitor = new LoadMonitor(this);
+    m_loadMonitor->setLoadInjector(m_loadInjector);
 
     m_uiTimer = new QTimer(this);
     m_uiTimer->setInterval(500);
@@ -978,6 +989,52 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     connect(m_loadInjectionManualToggleButton, &QPushButton::clicked, this,
             &MainWindow::onToggleLoadInjectionManual);
 
+    // SPEC.md 追加実装依頼「負荷モニター」: own top-level group, same
+    // reasoning as m_loadInjectionGroup above (stays enabled, and the save
+    // button usable, even while m_timingGroup itself is disabled during a
+    // run).
+    m_loadMonitorGroup = new QGroupBox(I18n::t(QStringLiteral("負荷モニター（CPU/メモリの可視化）")), container);
+    auto *loadMonitorLayout = new QVBoxLayout(m_loadMonitorGroup);
+
+    auto *loadMonitorHeaderRow = new QHBoxLayout;
+    m_loadMonitorEnabledCheck =
+        new QCheckBox(I18n::t(QStringLiteral("負荷モニターを有効にする")), m_loadMonitorGroup);
+    m_loadMonitorEnabledCheck->setChecked(false);
+    m_loadMonitorEnabledCheck->setToolTip(
+        I18n::t(QStringLiteral("有効にすると、テスト実行中に対象アプリ自身のCPU使用率・メモリ使用量と、"
+                                "システム全体のCPU使用率（Linuxのみ）をリアルタイムにグラフ表示します。"
+                                "異常停止（クラッシュ）時には、直前の推移をCSV・画像として自動保存するため、"
+                                "クラッシュ直前にどの程度の負荷がかかっていたかを後から確認できます。"
+                                "無効（デフォルト）のままなら、サンプリング用のタイマーすら動かないため、"
+                                "耐久テスト本体の動作には一切影響しません。")));
+    loadMonitorHeaderRow->addWidget(m_loadMonitorEnabledCheck);
+    loadMonitorHeaderRow->addWidget(
+        new QLabel(I18n::t(QStringLiteral("サンプリング間隔:")), m_loadMonitorGroup));
+    m_loadMonitorIntervalSpin = new QSpinBox(m_loadMonitorGroup);
+    m_loadMonitorIntervalSpin->setRange(50, 60000);
+    m_loadMonitorIntervalSpin->setValue(500);
+    m_loadMonitorIntervalSpin->setSuffix(QStringLiteral(" ms"));
+    m_loadMonitorIntervalSpin->setToolTip(
+        I18n::t(QStringLiteral("短くするほど細かい時間分解能でCPU/メモリの推移を記録できますが、"
+                                "①の操作間隔（最短ms指定）に近づきすぎると、サンプリング自体が耐久テスト"
+                                "本来の高速操作の妨げになり得ます。操作間隔より十分大きい値を推奨します"
+                                "（デフォルト500msは、ほとんどの設定で安全な余裕を持った値です）。")));
+    loadMonitorHeaderRow->addWidget(m_loadMonitorIntervalSpin);
+    loadMonitorHeaderRow->addStretch();
+    loadMonitorLayout->addLayout(loadMonitorHeaderRow);
+
+    m_loadMonitorChartWidget = new LoadMonitorChartWidget(m_loadMonitorGroup);
+    m_loadMonitorChartWidget->setLoadMonitor(m_loadMonitor);
+    loadMonitorLayout->addWidget(m_loadMonitorChartWidget);
+
+    m_saveLoadMonitorButton =
+        new QPushButton(I18n::t(QStringLiteral("負荷モニターのグラフを保存...")), m_loadMonitorGroup);
+    m_saveLoadMonitorButton->setEnabled(false);
+    loadMonitorLayout->addWidget(m_saveLoadMonitorButton);
+    connect(m_saveLoadMonitorButton, &QPushButton::clicked, this, &MainWindow::onSaveLoadMonitorData);
+    connect(m_loadMonitor, &LoadMonitor::sampleAdded, this,
+            [this]() { m_saveLoadMonitorButton->setEnabled(!m_loadMonitor->samples().isEmpty()); });
+
     // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
     // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
     auto *namedRegionAndTimingRow = new QHBoxLayout;
@@ -985,6 +1042,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     namedRegionAndTimingRow->addWidget(m_timingGroup, 1);
     layout->addLayout(namedRegionAndTimingRow);
     layout->addWidget(m_loadInjectionGroup);
+    layout->addWidget(m_loadMonitorGroup);
     layout->addStretch();
 
     return wrapper;
@@ -2604,6 +2662,12 @@ bool MainWindow::beginRun(bool interactive)
         refreshLoadInjectionStatusLabel();
     }
 
+    // SPEC.md 追加実装依頼「負荷モニター」: only ever starts m_loadMonitor's
+    // timer when its own checkbox is checked -- see m_loadMonitor's own
+    // comment in MainWindow.h for why leaving it off has zero cost.
+    if (m_loadMonitorEnabledCheck->isChecked())
+        m_loadMonitor->start(config.targetPid, m_loadMonitorIntervalSpin->value());
+
     m_engine->start(config);
     return true;
 }
@@ -2944,6 +3008,11 @@ void MainWindow::onEngineFinished(const QString &reason)
         appendLog(I18n::t(QStringLiteral("負荷注入を停止しました")));
         refreshLoadInjectionStatusLabel();
     }
+
+    // SPEC.md 追加実装依頼「負荷モニター」: stop()ping an already-stopped
+    // monitor (the common case when the checkbox is left unchecked) is a
+    // cheap no-op (QTimer::stop() on a timer that was never started).
+    m_loadMonitor->stop();
     if (m_stopPanel) {
         m_stopPanel->close();
         m_stopPanel->deleteLater();
@@ -3359,6 +3428,23 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
             if (m_engine->lastRegionScreenshot().save(shotPath))
                 appendLog(I18n::t(QStringLiteral("異常停止時点の操作領域画像を保存しました: %1")).arg(shotPath));
         }
+
+        // SPEC.md 追加実装依頼「負荷モニター」: only when the feature was
+        // actually enabled for this run (m_loadMonitor->samples() is simply
+        // empty otherwise, but checking the checkbox directly avoids saving
+        // an empty/meaningless CSV+PNG pair and the log lines that go with
+        // them).
+        if (m_loadMonitorEnabledCheck->isChecked() && !m_loadMonitor->samples().isEmpty()) {
+            const QString csvPath =
+                QStringLiteral("%1/anomaly_%2_loadmonitor.csv").arg(baseDir, summary.anomalyArtifactTimestamp);
+            if (m_loadMonitor->saveSamplesAsCsv(csvPath))
+                appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移を保存しました: %1")).arg(csvPath));
+            const QString pngPath =
+                QStringLiteral("%1/anomaly_%2_loadmonitor.png").arg(baseDir, summary.anomalyArtifactTimestamp);
+            if (m_loadMonitorChartWidget->renderToPixmap(QSize(900, 300)).save(pngPath))
+                appendLog(I18n::t(QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"))
+                               .arg(pngPath));
+        }
     }
 
     // SPEC.md 6.7: pop up a dedicated notification the moment a target-app
@@ -3442,6 +3528,27 @@ void MainWindow::onSaveRegionScreenshot()
         appendLog(I18n::t(QStringLiteral("操作領域画像を保存しました: %1")).arg(path));
     else
         QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")), I18n::t(QStringLiteral("画像を保存できませんでした。")));
+}
+
+void MainWindow::onSaveLoadMonitorData()
+{
+    if (m_loadMonitor->samples().isEmpty())
+        return;
+    const QString dir =
+        QFileDialog::getExistingDirectory(this, I18n::t(QStringLiteral("負荷モニターの保存先フォルダを選択")));
+    if (dir.isEmpty())
+        return;
+
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
+    const QString csvPath = QStringLiteral("%1/loadmonitor_%2.csv").arg(dir, timestamp);
+    const QString pngPath = QStringLiteral("%1/loadmonitor_%2.png").arg(dir, timestamp);
+    bool ok = m_loadMonitor->saveSamplesAsCsv(csvPath);
+    ok = m_loadMonitorChartWidget->renderToPixmap(QSize(900, 300)).save(pngPath) && ok;
+    if (ok)
+        appendLog(I18n::t(QStringLiteral("負荷モニターのデータを保存しました: %1 / %2")).arg(csvPath, pngPath));
+    else
+        QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")),
+                              I18n::t(QStringLiteral("負荷モニターのデータを保存できませんでした。")));
 }
 
 void MainWindow::onGlobalEmergencyStop()
@@ -3528,6 +3635,9 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["loadInjectionProcessCount"] = m_loadInjectionProcessCountSpin->value();
     timing["loadInjectionMemoryMbPerProcess"] = m_loadInjectionMemoryMbSpin->value();
     timing["loadInjectionLinkToRun"] = m_loadInjectionLinkToRunCheck->isChecked();
+    // SPEC.md 追加実装依頼「負荷モニター」
+    timing["loadMonitorEnabled"] = m_loadMonitorEnabledCheck->isChecked();
+    timing["loadMonitorIntervalMs"] = m_loadMonitorIntervalSpin->value();
     root["timing"] = timing;
     return root;
 }
@@ -3639,6 +3749,11 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
         timing["loadInjectionMemoryMbPerProcess"].toInt(m_loadInjectionMemoryMbSpin->value()));
     m_loadInjectionLinkToRunCheck->setChecked(
         timing["loadInjectionLinkToRun"].toBool(m_loadInjectionLinkToRunCheck->isChecked()));
+    // SPEC.md 追加実装依頼「負荷モニター」
+    m_loadMonitorEnabledCheck->setChecked(
+        timing["loadMonitorEnabled"].toBool(m_loadMonitorEnabledCheck->isChecked()));
+    m_loadMonitorIntervalSpin->setValue(
+        timing["loadMonitorIntervalMs"].toInt(m_loadMonitorIntervalSpin->value()));
 
     refreshNamedRegionList();
     refreshSetupActionList();

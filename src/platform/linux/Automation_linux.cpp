@@ -481,6 +481,42 @@ ProcessStats queryProcessStats(qint64 pid)
     return stats;
 }
 
+SystemCpuStats querySystemCpuStats()
+{
+    SystemCpuStats stats;
+
+    QFile statFile(QStringLiteral("/proc/stat"));
+    if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return stats;
+
+    const QString firstLine = QString::fromUtf8(statFile.readLine());
+    if (!firstLine.startsWith(QStringLiteral("cpu ")))
+        return stats;
+
+    // Whitespace-separated jiffie counters, summed across every core:
+    // user nice system idle iowait irq softirq steal [guest guest_nice].
+    // guest/guest_nice (if present) are already counted inside user/nice, so
+    // they're deliberately excluded from the total below to avoid double-
+    // counting -- only the first 8 fields are summed.
+    const QStringList fields = firstLine.mid(4).trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (fields.size() < 8)
+        return stats;
+
+    double totalTicks = 0.0;
+    for (int i = 0; i < 8; ++i)
+        totalTicks += fields[i].toDouble();
+    // idle (field 4, 0-indexed 3) + iowait (field 5, 0-indexed 4): both are
+    // time the CPU spent not running any process, so both count as "idle"
+    // for the purposes of a system-wide busy percentage.
+    const double idleTicks = fields[3].toDouble() + fields[4].toDouble();
+
+    const long clockTicksPerSec = sysconf(_SC_CLK_TCK) > 0 ? sysconf(_SC_CLK_TCK) : 100;
+    stats.totalCpuTimeSeconds = totalTicks / double(clockTicksPerSec);
+    stats.idleCpuTimeSeconds = idleTicks / double(clockTicksPerSec);
+    stats.ok = true;
+    return stats;
+}
+
 namespace
 {
 // State for the single in-flight _NET_WM_PING probe (SPEC.md 8/10). Only

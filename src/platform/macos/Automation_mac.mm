@@ -260,6 +260,17 @@ ProcessStats queryProcessStats(qint64 pid)
     return stats;
 }
 
+SystemCpuStats querySystemCpuStats()
+{
+    // Not yet implemented -- see this function's own header comment in
+    // PlatformAutomation.h (a correct whole-system reading here needs
+    // host_statistics() via Mach APIs). LoadMonitor treats ok == false as
+    // "this series isn't available on this platform" and simply omits it,
+    // the same graceful-degradation pattern checkWindowResponsive()'s
+    // Unsupported result already uses above.
+    return SystemCpuStats();
+}
+
 ResponsivenessCheck checkWindowResponsive(quint32 /*windowId*/, qint64 /*pid*/)
 {
     // Activity Monitor / "System Events... is not responding" get this from

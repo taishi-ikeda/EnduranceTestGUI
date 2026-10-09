@@ -39,6 +39,20 @@ struct ProcessStats
     double cpuTimeSeconds = 0.0;  // cumulative user+system CPU time consumed so far
 };
 
+// A snapshot of whole-system (every core combined) CPU time, for computing a
+// system-wide CPU% between two samples the same way ProcessStats::
+// cpuTimeSeconds is used for one process above -- SPEC.md 追加実装依頼
+// 「負荷モニター」(LoadMonitor), which plots this alongside the target
+// process' own CPU/memory to help correlate a crash with system-wide load
+// (e.g. from LoadInjector) rather than just the target's own usage.
+struct SystemCpuStats
+{
+    bool ok = false;  // false if unavailable (always false on a platform with
+                       // no implementation yet -- see querySystemCpuStats())
+    double totalCpuTimeSeconds = 0.0;  // cumulative, summed across every core
+    double idleCpuTimeSeconds = 0.0;   // cumulative idle (+ iowait) time, summed across every core
+};
+
 namespace PlatformAutomation
 {
 
@@ -157,6 +171,17 @@ void terminateProcess(qint64 pid);
 // twice and divide the CPU-time delta by the wall-clock delta to get a CPU
 // percentage (see RandomActionEngine's resource-usage sampler).
 ProcessStats queryProcessStats(qint64 pid);
+
+// Whole-system (every core combined) cumulative CPU time, the same
+// sample-twice-and-divide-the-delta pattern as queryProcessStats() above
+// (see LoadMonitor::onTick()). Linux: parses /proc/stat's first "cpu" line.
+// macOS: not yet implemented (returns SystemCpuStats::ok == false) -- a
+// correct whole-system reading there needs host_statistics() via Mach APIs,
+// which is a possible future addition; until then, LoadMonitor simply omits
+// the system-wide series on macOS and still plots the target process' own
+// CPU/memory, which queryProcessStats() above already supports on both
+// platforms.
+SystemCpuStats querySystemCpuStats();
 
 enum class ResponsivenessCheck {
     // No prior probe to evaluate yet (the very first call for this

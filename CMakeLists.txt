@@ -75,6 +75,8 @@ set(SOURCES
     src/AnimationExportDialog.cpp
     src/MouseActionOverlay.cpp
     src/LoadInjector.cpp
+    src/LoadMonitor.cpp
+    src/LoadMonitorChartWidget.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -106,6 +108,8 @@ set(HEADERS
     src/AnimationExportDialog.h
     src/MouseActionOverlay.h
     src/LoadInjector.h
+    src/LoadMonitor.h
+    src/LoadMonitorChartWidget.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

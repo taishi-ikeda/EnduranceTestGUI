@@ -1139,6 +1139,49 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Couldn't find the loadstress_helper executable (it must be placed in %1)")},
         {QStringLiteral("負荷注入プロセスの起動に失敗しました: %1"),
          QStringLiteral("Failed to start a load injection process: %1")},
+
+        // v1.00: real-time CPU/memory load monitor (SPEC.md 追加実装依頼
+        // 「負荷モニター」) -- LoadMonitor/LoadMonitorChartWidget plot the
+        // target process' own CPU%/memory and (Linux only) whole-system
+        // CPU%, with automatic CSV/PNG export of the lead-up to a crash.
+        {QStringLiteral("負荷モニター（CPU/メモリの可視化）"), QStringLiteral("Load Monitor (CPU/Memory Visualization)")},
+        {QStringLiteral("負荷モニターを有効にする"), QStringLiteral("Enable load monitor")},
+        {QStringLiteral("有効にすると、テスト実行中に対象アプリ自身のCPU使用率・メモリ使用量と、"
+                        "システム全体のCPU使用率（Linuxのみ）をリアルタイムにグラフ表示します。"
+                        "異常停止（クラッシュ）時には、直前の推移をCSV・画像として自動保存するため、"
+                        "クラッシュ直前にどの程度の負荷がかかっていたかを後から確認できます。"
+                        "無効（デフォルト）のままなら、サンプリング用のタイマーすら動かないため、"
+                        "耐久テスト本体の動作には一切影響しません。"),
+         QStringLiteral("When enabled, plots the target app's own CPU usage and memory, plus "
+                        "whole-system CPU usage (Linux only), live during the test run. On an "
+                        "abnormal stop (crash), the lead-up is automatically saved as a CSV and an "
+                        "image, so you can check afterward how much load there was right before the "
+                        "crash. Left disabled (the default), not even the sampling timer runs, so "
+                        "this has zero effect on the endurance test itself.")},
+        {QStringLiteral("サンプリング間隔:"), QStringLiteral("Sampling interval:")},
+        {QStringLiteral("短くするほど細かい時間分解能でCPU/メモリの推移を記録できますが、"
+                        "①の操作間隔（最短ms指定）に近づきすぎると、サンプリング自体が耐久テスト"
+                        "本来の高速操作の妨げになり得ます。操作間隔より十分大きい値を推奨します"
+                        "（デフォルト500msは、ほとんどの設定で安全な余裕を持った値です）。"),
+         QStringLiteral("A shorter interval records CPU/memory at finer time resolution, but getting "
+                        "too close to ①'s own operation interval (its minimum ms setting) can let the "
+                        "sampling itself get in the way of the endurance test's own high-speed "
+                        "operation. A value comfortably larger than the operation interval is "
+                        "recommended (the default, 500ms, leaves a safe margin for most setups).")},
+        {QStringLiteral("負荷モニターのグラフを保存..."), QStringLiteral("Save Load Monitor Graph...")},
+        {QStringLiteral("負荷モニターの保存先フォルダを選択"), QStringLiteral("Select Load Monitor Save Folder")},
+        {QStringLiteral("負荷モニターのデータを保存しました: %1 / %2"),
+         QStringLiteral("Saved load monitor data: %1 / %2")},
+        {QStringLiteral("負荷モニターのデータを保存できませんでした。"),
+         QStringLiteral("Couldn't save the load monitor data.")},
+        {QStringLiteral("異常停止時点までのCPU/メモリ推移を保存しました: %1"),
+         QStringLiteral("Saved the CPU/memory history leading up to the abnormal stop: %1")},
+        {QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"),
+         QStringLiteral("Saved a graph image of the CPU/memory history leading up to the abnormal stop: %1")},
+        {QStringLiteral("データなし"), QStringLiteral("No Data")},
+        {QStringLiteral("対象CPU: %1%  システムCPU: %2  メモリ: %3MB"),
+         QStringLiteral("Target CPU: %1%  System CPU: %2  Memory: %3MB")},
+        {QStringLiteral("(非対応)"), QStringLiteral("(unsupported)")},
     };
     return table;
 }

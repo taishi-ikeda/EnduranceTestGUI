@@ -468,6 +468,18 @@ private:
     // and the moment such a member's region resolves successfully.
     int m_popupDialogWaitStrikes = 0;
 
+    // Consecutive ticks in a row a (non-popup-dialog) step's region has
+    // failed to resolve even after runOneAction() tried restoring the
+    // target window via PlatformAutomation::activateProcess() -- see that
+    // function's own comment for why a region can fail to resolve for the
+    // completely benign reason that this engine's own WindowOp action just
+    // minimized the target window (queryWindowBounds() only considers
+    // currently-viewable windows). Reset to 0 in start(),
+    // advanceToNextStep(), and the moment such a region resolves
+    // successfully; mirrors m_popupDialogWaitStrikes's own retry-then-give-
+    // up role.
+    int m_minimizedWindowWaitStrikes = 0;
+
     // SPEC.md 追加実装依頼「名前付きオブジェクト」: per-NamedRegion cache of
     // its last-resolved accessible object, keyed by NamedRegion::name, so a
     // step/group-member reusing the same object-target region across many

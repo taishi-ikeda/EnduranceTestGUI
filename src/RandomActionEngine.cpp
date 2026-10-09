@@ -200,6 +200,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_currentStepActionsDone = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
+    m_minimizedWindowWaitStrikes = 0;
     m_sequenceLoopCount = 0;
     m_pausedElapsedMs = 0;
     m_elapsed.restart();
@@ -1046,6 +1047,7 @@ void RandomActionEngine::advanceToNextStep()
     m_currentStepActionsDone = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
+    m_minimizedWindowWaitStrikes = 0;
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
     if (m_currentStepIndex == 0) {
         ++m_sequenceLoopCount;
@@ -1136,6 +1138,18 @@ constexpr int kMaxUnexpectedWindowStrikes = 5;
 // legitimately take a moment to render (icons/layout), whereas that retry
 // loop is actively working to dismiss something already on screen.
 constexpr int kMaxPopupDialogWaitStrikes = 50;
+
+// After this many consecutive ticks with a (non-popup-dialog) step's region
+// still failing to resolve even after PlatformAutomation::activateProcess()
+// was given a chance to restore the target window, give up and treat it as
+// an anomaly -- see runOneAction()'s own comment on why a region can fail to
+// resolve for the entirely benign reason that this engine's own WindowOp
+// action just minimized the target window. Lower than
+// kMaxPopupDialogWaitStrikes above since restoring an already-existing
+// window is near-instant (no layout/icon rendering to wait for, unlike a
+// dialog that has yet to even open) -- this is purely a small safety margin
+// for the window manager to process the restore request, not a genuine wait.
+constexpr int kMaxMinimizedWindowWaitStrikes = 10;
 }  // namespace
 
 bool RandomActionEngine::currentActionTargetsPopupDialog() const
@@ -1380,7 +1394,25 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
 
     QList<QRect> includeRegions;
     QList<QRect> excludeRegions;
-    if (!resolveStepRegion(step, includeRegions, excludeRegions) || includeRegions.isEmpty()) {
+    bool regionResolved = resolveStepRegion(step, includeRegions, excludeRegions) && !includeRegions.isEmpty();
+    if (!regionResolved && !step.targetsPopupDialog) {
+        // A region can fail to resolve for the entirely benign reason that
+        // this engine's own WindowOp action (ActionKind::WindowOp's
+        // "最小化") just minimized the target window:
+        // PlatformAutomation::queryWindowBounds() only considers currently-
+        // viewable (mapped) windows (see Automation_linux.cpp's
+        // collectWindows()), so a window minimized a moment ago looks
+        // identical to one that has vanished entirely -- indistinguishable
+        // from a genuine crash/removed-region failure below without trying
+        // to recover first. activateProcess() already exists specifically
+        // to restore a minimized window (see its own comment); try it and
+        // re-resolve before giving up, exactly like targetsPopupDialog's
+        // own retry tolerance just below handles its analogous "not there
+        // yet" case.
+        PlatformAutomation::activateProcess(m_config.targetPid);
+        regionResolved = resolveStepRegion(step, includeRegions, excludeRegions) && !includeRegions.isEmpty();
+    }
+    if (!regionResolved) {
         if (step.targetsPopupDialog) {
             // The dialog this member expects to operate on may simply not
             // have opened yet (its preceding task member's action might
@@ -1401,12 +1433,21 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             }
             return ActionOutcome::SkippedNoCount;
         }
+        // Still not resolved even after the activateProcess() retry above --
+        // tolerate a few more ticks (kMaxMinimizedWindowWaitStrikes) in case
+        // the window manager needed a moment to process the restore, before
+        // concluding this really is a vanished window/deleted region rather
+        // than a transient minimize.
+        ++m_minimizedWindowWaitStrikes;
+        if (m_minimizedWindowWaitStrikes < kMaxMinimizedWindowWaitStrikes)
+            return ActionOutcome::SkippedNoCount;
         doStop(I18n::t(QStringLiteral("%1の対象領域が見つからないため停止しました（対象ウィンドウが"
                               "消失した、または参照している操作領域が削除された可能性があります）"))
                    .arg(stepLabel),
                /*isAnomaly=*/true);
         return ActionOutcome::StoppedEngine;
     }
+    m_minimizedWindowWaitStrikes = 0;
     if (step.targetsPopupDialog)
         m_popupDialogWaitStrikes = 0;
 

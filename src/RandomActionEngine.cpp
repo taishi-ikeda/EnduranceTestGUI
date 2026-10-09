@@ -68,6 +68,10 @@ QString RandomActionEngine::formatSummaryText(const RunSummary &summary)
         for (const QString &action : summary.recentActions)
             lines << QStringLiteral("  %1").arg(action);
     }
+    if (summary.memoryLeakSuspected) {
+        lines << I18n::t(QStringLiteral("メモリリークの疑い: あり（最大増加率 約%1 MB/分）"))
+                     .arg(summary.memoryLeakPeakSlopeMbPerMinute, 0, 'f', 1);
+    }
     return lines.join(QStringLiteral("\n"));
 }
 
@@ -93,6 +97,9 @@ QJsonObject RandomActionEngine::summaryToJson(const RunSummary &summary)
     for (const QString &action : summary.recentActions)
         recentActions.append(action);
     obj["recentActions"] = recentActions;
+    obj["memoryLeakSuspected"] = summary.memoryLeakSuspected;
+    if (summary.memoryLeakSuspected)
+        obj["memoryLeakPeakSlopeMbPerMinute"] = summary.memoryLeakPeakSlopeMbPerMinute;
     return obj;
 }
 
@@ -207,6 +214,10 @@ void RandomActionEngine::start(const TestConfig &config)
     m_running = true;
     m_paused = false;
     m_hasCpuSample = false;
+    m_memoryLeakSamples.clear();
+    m_memoryLeakWarned = false;
+    m_memoryLeakEverWarned = false;
+    m_memoryLeakPeakSlopeMbPerMinute = 0.0;
     m_unexpectedWindowStrikes = 0;
     m_consecutiveUnresponsive = 0;
     m_everRespondedToPing = false;
@@ -344,6 +355,8 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targ
     summary.elapsedMs = m_pausedElapsedMs + m_elapsed.elapsed();
     for (auto it = m_actionKindCounts.constBegin(); it != m_actionKindCounts.constEnd(); ++it)
         summary.actionKindCounts.insert(describeActionKind(it.key()), it.value());
+    summary.memoryLeakSuspected = m_memoryLeakEverWarned;
+    summary.memoryLeakPeakSlopeMbPerMinute = m_memoryLeakPeakSlopeMbPerMinute;
 
     emit logMessage(reason);
     emit summaryReady(summary);
@@ -411,7 +424,54 @@ QString RandomActionEngine::captureAnomalyArtifacts(const QString &reason)
         }
     }
 
+    captureTargetLogTail(timestamp, baseDir);
+
     return timestamp;
+}
+
+void RandomActionEngine::captureTargetLogTail(const QString &timestamp, const QString &baseDir)
+{
+    // TestConfig::targetLogFilePath: empty (default) = feature off, no-op.
+    if (m_config.targetLogFilePath.isEmpty())
+        return;
+
+    QFile f(m_config.targetLogFilePath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit logMessage(
+            I18n::t(QStringLiteral("対象アプリのログファイルを開けませんでした: %1")).arg(m_config.targetLogFilePath));
+        return;
+    }
+
+    // Bounded read from near the end of the file rather than loading it
+    // whole -- a target app's log can grow arbitrarily large over a long
+    // endurance run, and only the tail leading up to the crash is useful
+    // here anyway.
+    constexpr qint64 kMaxTargetLogTailBytes = 512 * 1024;
+    const bool seeked = f.size() > kMaxTargetLogTailBytes;
+    if (seeked)
+        f.seek(f.size() - kMaxTargetLogTailBytes);
+    QString text = QString::fromUtf8(f.readAll());
+    if (seeked) {
+        // The first line after a mid-file seek is likely truncated --
+        // drop it rather than save a misleading partial line.
+        const int firstNewline = text.indexOf(QLatin1Char('\n'));
+        text = (firstNewline >= 0) ? text.mid(firstNewline + 1) : QString();
+    }
+
+    constexpr int kMaxTargetLogTailLines = 200;
+    QStringList lines = text.split(QLatin1Char('\n'));
+    if (lines.size() > kMaxTargetLogTailLines)
+        lines = lines.mid(lines.size() - kMaxTargetLogTailLines);
+
+    const QString outPath = QStringLiteral("%1/anomaly_%2_targetlog.txt").arg(baseDir, timestamp);
+    QFile out(outPath);
+    if (out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        out.write(lines.join(QLatin1Char('\n')).toUtf8());
+        emit logMessage(I18n::t(QStringLiteral("対象アプリのログファイル末尾を保存しました: %1")).arg(outPath));
+    } else {
+        emit logMessage(
+            I18n::t(QStringLiteral("対象アプリのログファイル末尾の保存に失敗しました: %1")).arg(outPath));
+    }
 }
 
 void RandomActionEngine::saveRecordingFrames(const QString &timestamp)
@@ -579,6 +639,76 @@ void RandomActionEngine::sampleResourceUsage()
     emit logMessage(I18n::t(QStringLiteral("リソース使用状況: メモリ %1 MB, CPU %2%"))
                          .arg(stats.residentMemoryMB, 0, 'f', 1)
                          .arg(cpuPercent, 0, 'f', 1));
+
+    // TestConfig::memoryLeakDetectionEnabled: piggybacks on this same
+    // always-running 5-second sampler rather than its own timer, so leaving
+    // the option off costs nothing beyond the branch below.
+    if (m_config.memoryLeakDetectionEnabled)
+        checkMemoryLeakTrend(nowMs, stats.residentMemoryMB);
+}
+
+namespace
+{
+// SPEC.md 10 追加提案「メモリリークの自動検知」: how many samples (at the
+// fixed 5-second sampling interval) must have accumulated before a trend
+// slope is trusted at all -- about 2 minutes, long enough that early
+// startup allocation spikes don't immediately look like a sustained leak.
+constexpr int kMemoryLeakMinSamples = 24;
+// Ring-buffer cap for TestConfig::memoryLeakDetectionEnabled's sample
+// history -- about 13.9 hours at the fixed 5-second interval, comfortably
+// covering a long unattended endurance run while keeping the per-sample
+// (16 bytes) memory footprint and the O(n) regression recomputed every
+// tick both trivially small.
+constexpr int kMaxMemoryLeakSamples = 10000;
+}  // namespace
+
+void RandomActionEngine::checkMemoryLeakTrend(qint64 nowMs, double memoryMb)
+{
+    m_memoryLeakSamples.append({nowMs, memoryMb});
+    if (m_memoryLeakSamples.size() > kMaxMemoryLeakSamples)
+        m_memoryLeakSamples.removeFirst();
+    if (m_memoryLeakSamples.size() < kMemoryLeakMinSamples)
+        return;
+
+    // Least-squares slope of memory (MB) vs. elapsed time (minutes since
+    // the oldest sample still retained) over the whole window. Recomputed
+    // fresh each call rather than tracked incrementally -- simpler and
+    // numerically safer given the window's contents change as it's
+    // trimmed, and O(kMaxMemoryLeakSamples) every 5 seconds is negligible
+    // next to the action-dispatch loop's own per-tick cost.
+    const qint64 t0 = m_memoryLeakSamples.first().timestampMs;
+    double sumX = 0.0, sumY = 0.0, sumXY = 0.0, sumXX = 0.0;
+    const int n = m_memoryLeakSamples.size();
+    for (const MemoryLeakSample &s : m_memoryLeakSamples) {
+        const double x = double(s.timestampMs - t0) / 60000.0;  // minutes
+        sumX += x;
+        sumY += s.memoryMb;
+        sumXY += x * s.memoryMb;
+        sumXX += x * x;
+    }
+    const double denom = double(n) * sumXX - sumX * sumX;
+    if (qFuzzyIsNull(denom))
+        return;
+    const double slopeMbPerMinute = (double(n) * sumXY - sumX * sumY) / denom;
+
+    if (slopeMbPerMinute >= m_config.memoryLeakThresholdMbPerMinute) {
+        m_memoryLeakPeakSlopeMbPerMinute = qMax(m_memoryLeakPeakSlopeMbPerMinute, slopeMbPerMinute);
+        m_memoryLeakEverWarned = true;
+        if (!m_memoryLeakWarned) {
+            m_memoryLeakWarned = true;
+            emit logMessage(
+                I18n::t(QStringLiteral("メモリ使用量が継続的に増加しています（約%1 MB/分、しきい値%2 MB/分）。"
+                                        "メモリリークの疑いがあります"))
+                    .arg(slopeMbPerMinute, 0, 'f', 1)
+                    .arg(m_config.memoryLeakThresholdMbPerMinute, 0, 'f', 1));
+        }
+    } else if (slopeMbPerMinute < m_config.memoryLeakThresholdMbPerMinute / 2.0) {
+        // Re-arm once the trend clearly recovers (e.g. a GC pass brought
+        // usage back down), so a later, separate leak phase further into a
+        // long run can still be reported rather than staying silent forever
+        // after the first warning.
+        m_memoryLeakWarned = false;
+    }
 }
 
 bool RandomActionEngine::resolveObjectTargetRegion(const NamedRegion &region, QList<QRect> &outIncludeRegions,

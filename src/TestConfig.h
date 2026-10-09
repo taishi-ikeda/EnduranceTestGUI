@@ -618,6 +618,19 @@ struct TestConfig
     // one-shot filesystem lookup with no ongoing overhead during the run.
     bool enableCrashDumpCollection = true;
 
+    // SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・クラッシュ時
+    // 自動添付」: optional path to a log file the target app itself writes.
+    // Empty (default) = feature off, same convention as MainWindow's
+    // targetLaunchCommand field -- when empty, RandomActionEngine::
+    // captureAnomalyArtifacts() skips this step entirely, so existing runs
+    // that never set this see zero behavior change. When set, the last
+    // portion of this file (bounded, see captureTargetLogTail()) is copied
+    // alongside the other anomaly artifacts (screenshot/crash dump/preset
+    // snapshot) whenever a run stops abnormally, giving far richer crash
+    // context than the screenshot alone for a target app that logs its own
+    // diagnostics.
+    QString targetLogFilePath;
+
     // 0 = pick a fresh random seed each run (and log it). Any other value
     // seeds the run's random generator directly, so the exact same
     // sequence of actions can be reproduced later by re-entering the seed
@@ -638,4 +651,20 @@ struct TestConfig
     // for users who want the fastest possible, purely coordinate-based
     // execution regardless of what regions/steps happen to be configured.
     bool disableAccessibilityFeatures = false;
+
+    // SPEC.md 10 追加提案「メモリリークの自動検知」: off by default (opt-in
+    // diagnostic, matching the other toggles above). When true,
+    // RandomActionEngine::sampleResourceUsage() (the existing, always-
+    // running 5-second resource sampler) additionally feeds each memory
+    // sample into a simple linear-regression trend check
+    // (checkMemoryLeakTrend()); if the memory-usage slope over the
+    // retained sample window sustains at or above
+    // memoryLeakThresholdMbPerMinute, a warning is logged once and
+    // RunSummary::memoryLeakSuspected is set. This never stops the run by
+    // itself (a slow leak by itself isn't a crash) -- it's purely
+    // detection/reporting -- so leaving this off (the default) costs
+    // nothing beyond the sampler's own pre-existing 5-second tick, and
+    // other features are completely unaffected either way.
+    bool memoryLeakDetectionEnabled = false;
+    double memoryLeakThresholdMbPerMinute = 5.0;
 };

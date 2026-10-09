@@ -74,6 +74,17 @@ public:
         // which operations immediately preceded it, alongside the RNG seed
         // (which alone may not reproduce a non-deterministic bug).
         QStringList recentActions;
+        // SPEC.md 10 追加提案「メモリリークの自動検知」: set when
+        // TestConfig::memoryLeakDetectionEnabled was on and the memory-usage
+        // trend (see checkMemoryLeakTrend()) crossed
+        // memoryLeakThresholdMbPerMinute at any point during this run --
+        // independent of how/why the run itself stopped, since a leak by
+        // itself is never treated as a stop condition.
+        // memoryLeakPeakSlopeMbPerMinute is the steepest sustained slope
+        // (MB/min) observed, for display in the summary/log; 0 when
+        // memoryLeakSuspected is false.
+        bool memoryLeakSuspected = false;
+        double memoryLeakPeakSlopeMbPerMinute = 0.0;
     };
 
     // Where captureAnomalyArtifacts() saves anomaly screenshots/recording
@@ -387,6 +398,13 @@ private:
     // into anomalyArtifactsDirectory()/recording_<timestamp>/, oldest
     // first, then clears the buffer. No-op if it's empty.
     void saveRecordingFrames(const QString &timestamp);
+    // SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・クラッシュ時
+    // 自動添付」: no-op if TestConfig::targetLogFilePath is empty. Otherwise
+    // reads (at most the last kMaxTargetLogTailBytes of) that file, keeps
+    // only its last kMaxTargetLogTailLines lines, and writes them to
+    // anomaly_<timestamp>_targetlog.txt in baseDir alongside the other
+    // anomaly artifacts.
+    void captureTargetLogTail(const QString &timestamp, const QString &baseDir);
     // Checks for a top-level window belonging to the target process other
     // than the one originally selected (config.targetWindowId) -- e.g. a
     // confirmation dialog the target itself popped up, unrelated to the
@@ -394,6 +412,14 @@ private:
     // should skip this tick's action entirely (either because it just
     // tried to dismiss one, or because it gave up and stopped the run).
     bool handleUnexpectedWindows();
+    // SPEC.md 10 追加提案「メモリリークの自動検知」: called from
+    // sampleResourceUsage() (only when TestConfig::memoryLeakDetectionEnabled
+    // is on) with each new memory sample. Appends it to m_memoryLeakSamples
+    // and, once enough samples have accumulated, fits a least-squares slope
+    // (MB/minute) over the whole retained window; logs a one-shot warning
+    // and marks m_memoryLeakEverWarned once that slope reaches
+    // TestConfig::memoryLeakThresholdMbPerMinute.
+    void checkMemoryLeakTrend(qint64 nowMs, double memoryMb);
 
     TestConfig m_config;
     // Startup setup-phase state (SPEC.md 6.x "起動時セットアップ"): while
@@ -543,6 +569,31 @@ private:
     double m_lastCpuTimeSeconds = 0.0;
     qint64 m_lastCpuSampleMs = 0;
     bool m_hasCpuSample = false;
+
+    // SPEC.md 10 追加提案「メモリリークの自動検知」: ring buffer of
+    // (timestamp, memory MB) samples fed by sampleResourceUsage() when
+    // TestConfig::memoryLeakDetectionEnabled is on, capped at
+    // kMaxMemoryLeakSamples (oldest dropped first) -- see
+    // checkMemoryLeakTrend(). Empty/unused whenever that option is off.
+    struct MemoryLeakSample
+    {
+        qint64 timestampMs = 0;
+        double memoryMb = 0.0;
+    };
+    QList<MemoryLeakSample> m_memoryLeakSamples;
+    // Whether the most recent trend check found the slope at or above
+    // TestConfig::memoryLeakThresholdMbPerMinute -- used only to avoid
+    // re-logging the same warning every 5 seconds while the trend stays
+    // elevated; clears (re-arming the warning) once the slope drops back
+    // under half the threshold, so a later, separate leak phase in a long
+    // run can still be reported.
+    bool m_memoryLeakWarned = false;
+    // Sticky for the whole run (never cleared except by start()): whether
+    // the warning above was ever raised at all, and the steepest slope seen
+    // -- copied into RunSummary::memoryLeakSuspected/
+    // memoryLeakPeakSlopeMbPerMinute by doStop().
+    bool m_memoryLeakEverWarned = false;
+    double m_memoryLeakPeakSlopeMbPerMinute = 0.0;
 
     // Consecutive ticks in a row an unexpected extra window has been seen
     // for the target process despite attempts to dismiss it (Escape) --

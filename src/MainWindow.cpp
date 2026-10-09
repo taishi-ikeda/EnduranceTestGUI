@@ -547,6 +547,27 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_launchTargetNowButton = new QPushButton(I18n::t(QStringLiteral("今すぐ起動")), m_targetGroup);
     targetLayout->addWidget(m_launchTargetNowButton);
 
+    // SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・クラッシュ時
+    // 自動添付」: entirely optional, same convention as the launch command
+    // above -- empty (default) means RandomActionEngine::
+    // captureTargetLogTail() no-ops and nothing about existing runs changes.
+    auto *targetLogFileLabel = new QLabel(
+        I18n::t(QStringLiteral("対象アプリのログファイル（任意、クラッシュ時に末尾を自動保存）:")), m_targetGroup);
+    targetLogFileLabel->setWordWrap(true);
+    targetLayout->addWidget(targetLogFileLabel);
+    auto *targetLogFileRow = new QHBoxLayout;
+    m_targetLogFileEdit = new QLineEdit(m_targetGroup);
+    m_targetLogFileEdit->setPlaceholderText(I18n::t(QStringLiteral("例: /path/to/target.log")));
+    m_targetLogFileEdit->setToolTip(
+        I18n::t(QStringLiteral("対象アプリが自分で書き出すログファイルのパスを指定すると、異常停止"
+                                "（クラッシュ等）の検知時に、そのファイルの末尾（最大512KB・200行）を"
+                                "スクリーンショット等と同じ場所に自動保存します。空欄のまま（デフォルト）"
+                                "ならこの機能は一切働かず、既存の動作に影響しません。")));
+    m_browseTargetLogFileButton = new QPushButton(I18n::t(QStringLiteral("参照...")), m_targetGroup);
+    targetLogFileRow->addWidget(m_targetLogFileEdit, 1);
+    targetLogFileRow->addWidget(m_browseTargetLogFileButton);
+    targetLayout->addLayout(targetLogFileRow);
+
     // SPEC.md 10 ⑤: ▶開始時に、この起動コマンドで対象アプリをまず起動して
     // から②③を実行するオプション。連続実行（m_continuousRunButton）は常に
     // 起動コマンドを使うので、これはあくまで▶開始（単発実行）用。
@@ -634,6 +655,12 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             this, I18n::t(QStringLiteral("対象アプリの実行ファイルを選択")));
         if (!path.isEmpty())
             m_targetLaunchCommandEdit->setText(path);
+    });
+    connect(m_browseTargetLogFileButton, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, I18n::t(QStringLiteral("対象アプリのログファイルを選択")));
+        if (!path.isEmpty())
+            m_targetLogFileEdit->setText(path);
     });
     connect(m_launchTargetNowButton, &QPushButton::clicked, this,
             &MainWindow::launchTargetAppFromConfiguredCommand);
@@ -916,6 +943,33 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                         "いずれ検知します）。デバッガがアタッチされているのにこのオプションが無効のままだと、"
                         "開始前と実行中に警告が表示されます。")));
     timingForm->addRow(QString(), m_debugModeCheck);
+
+    // SPEC.md 10 追加提案「メモリリークの自動検知」: off by default, like the
+    // other diagnostics toggles above -- see TestConfig::
+    // memoryLeakDetectionEnabled's own comment. Purely detection/reporting:
+    // never stops the run by itself.
+    auto *memoryLeakRow = new QHBoxLayout;
+    m_memoryLeakDetectionCheck = new QCheckBox(
+        I18n::t(QStringLiteral("メモリリークの疑いを自動検知する（増加傾向がしきい値を超えたら警告）:")),
+        m_timingGroup);
+    m_memoryLeakDetectionCheck->setChecked(false);
+    m_memoryLeakDetectionCheck->setToolTip(
+        I18n::t(QStringLiteral("実行中5秒ごとに記録しているメモリ使用量の推移を監視し、直近の増加傾向"
+                                "（MB/分）がこのしきい値を一定時間（数分）超え続けた場合に「メモリリークの"
+                                "疑いあり」としてログに警告を出し、実行結果サマリーにも記録します。クラッシュ"
+                                "として扱ったりテストを自動停止したりはしません（検知・記録のみ）。")));
+    m_memoryLeakThresholdSpin = new QDoubleSpinBox(m_timingGroup);
+    m_memoryLeakThresholdSpin->setRange(0.1, 10000.0);
+    m_memoryLeakThresholdSpin->setDecimals(1);
+    m_memoryLeakThresholdSpin->setValue(5.0);
+    m_memoryLeakThresholdSpin->setSuffix(I18n::t(QStringLiteral(" MB/分")));
+    m_memoryLeakThresholdSpin->setEnabled(false);
+    connect(m_memoryLeakDetectionCheck, &QCheckBox::toggled, m_memoryLeakThresholdSpin,
+            &QDoubleSpinBox::setEnabled);
+    memoryLeakRow->addWidget(m_memoryLeakDetectionCheck);
+    memoryLeakRow->addWidget(m_memoryLeakThresholdSpin);
+    memoryLeakRow->addStretch();
+    timingForm->addRow(QString(), memoryLeakRow);
 
     // SPEC.md 追加実装依頼「名前付きオブジェクト」: master override -- see
     // TestConfig::disableAccessibilityFeatures' own comment. Off by default
@@ -2408,6 +2462,9 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.autoSlowdownEnabled = m_autoSlowdownCheck->isChecked();
     config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
     config.debuggerModeEnabled = m_debugModeCheck->isChecked();
+    config.targetLogFilePath = m_targetLogFileEdit->text().trimmed();
+    config.memoryLeakDetectionEnabled = m_memoryLeakDetectionCheck->isChecked();
+    config.memoryLeakThresholdMbPerMinute = m_memoryLeakThresholdSpin->value();
 
     ok = true;
     return config;
@@ -2451,6 +2508,7 @@ TestConfig MainWindow::buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessag
     config.enableCrashDumpCollection = m_crashDumpCollectionCheck->isChecked();
     config.disableAccessibilityFeatures = m_disableAccessibilityCheck->isChecked();
     config.debuggerModeEnabled = m_debugModeCheck->isChecked();
+    config.targetLogFilePath = m_targetLogFileEdit->text().trimmed();
 
     ok = true;
     return config;
@@ -3582,6 +3640,7 @@ QJsonObject MainWindow::buildPresetJson() const
     // SPEC.md 10 ②: saved/loaded alongside the rest of the setup so a
     // preset built for unattended batch runs (①) stays fully self-contained.
     root["targetLaunchCommand"] = m_targetLaunchCommandEdit->text();
+    root["targetLogFilePath"] = m_targetLogFileEdit->text();
     root["launchWaitSeconds"] = m_launchWaitSecondsSpin->value();
     root["hasSavedWindowSize"] = m_hasSavedWindowSize;
     root["savedWindowWidth"] = m_savedWindowSize.width();
@@ -3630,6 +3689,9 @@ QJsonObject MainWindow::buildPresetJson() const
     timing["autoSlowdownEnabled"] = m_autoSlowdownCheck->isChecked();
     timing["disableAccessibilityFeatures"] = m_disableAccessibilityCheck->isChecked();
     timing["debuggerModeEnabled"] = m_debugModeCheck->isChecked();
+    // SPEC.md 10 追加提案「メモリリークの自動検知」
+    timing["memoryLeakDetectionEnabled"] = m_memoryLeakDetectionCheck->isChecked();
+    timing["memoryLeakThresholdMbPerMinute"] = m_memoryLeakThresholdSpin->value();
     // SPEC.md 追加実装依頼「負荷注入モード」
     timing["loadInjectionEnabled"] = m_loadInjectionEnabledCheck->isChecked();
     timing["loadInjectionProcessCount"] = m_loadInjectionProcessCountSpin->value();
@@ -3740,6 +3802,11 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_disableAccessibilityCheck->setChecked(
         timing["disableAccessibilityFeatures"].toBool(m_disableAccessibilityCheck->isChecked()));
     m_debugModeCheck->setChecked(timing["debuggerModeEnabled"].toBool(m_debugModeCheck->isChecked()));
+    // SPEC.md 10 追加提案「メモリリークの自動検知」
+    m_memoryLeakDetectionCheck->setChecked(
+        timing["memoryLeakDetectionEnabled"].toBool(m_memoryLeakDetectionCheck->isChecked()));
+    m_memoryLeakThresholdSpin->setValue(
+        timing["memoryLeakThresholdMbPerMinute"].toDouble(m_memoryLeakThresholdSpin->value()));
     // SPEC.md 追加実装依頼「負荷注入モード」
     m_loadInjectionEnabledCheck->setChecked(
         timing["loadInjectionEnabled"].toBool(m_loadInjectionEnabledCheck->isChecked()));
@@ -3759,6 +3826,7 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     refreshSetupActionList();
     refreshStepList();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());
+    m_targetLogFileEdit->setText(root["targetLogFilePath"].toString());
     m_launchWaitSecondsSpin->setValue(root["launchWaitSeconds"].toInt(m_launchWaitSecondsSpin->value()));
     m_hasSavedWindowSize = root["hasSavedWindowSize"].toBool(false);
     m_savedWindowSize =

@@ -409,6 +409,15 @@ private:
     QLineEdit *m_targetLaunchCommandEdit = nullptr;
     QPushButton *m_browseLaunchCommandButton = nullptr;
     QPushButton *m_launchTargetNowButton = nullptr;
+    // SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・クラッシュ時
+    // 自動添付」: optional path to a log file the target app itself writes
+    // -- see TestConfig::targetLogFilePath's own comment. Persisted in
+    // preset JSON as "targetLogFilePath". Left empty (the default), this
+    // has zero effect: buildConfigFromUi() passes an empty
+    // TestConfig::targetLogFilePath through, and RandomActionEngine::
+    // captureTargetLogTail() no-ops on that exact condition.
+    QLineEdit *m_targetLogFileEdit = nullptr;
+    QPushButton *m_browseTargetLogFileButton = nullptr;
     // SPEC.md 10 ⑤: if checked, ▶開始 (onStart()) launches the target app
     // via the "自動起動コマンド" above and waits for it to appear *before*
     // running ②起動時セットアップ→③ステップ構成 -- instead of assuming the
@@ -647,6 +656,13 @@ private:
     QCheckBox *m_autoSlowdownCheck = nullptr;
     QCheckBox *m_disableAccessibilityCheck = nullptr;
     QCheckBox *m_debugModeCheck = nullptr;
+    // SPEC.md 10 追加提案「メモリリークの自動検知」: off by default, like the
+    // other diagnostics toggles above -- see TestConfig::
+    // memoryLeakDetectionEnabled's own comment for what this does and why
+    // leaving it off costs nothing. The threshold spinbox is only enabled
+    // (greyed out otherwise) while the checkbox is checked.
+    QCheckBox *m_memoryLeakDetectionCheck = nullptr;
+    QDoubleSpinBox *m_memoryLeakThresholdSpin = nullptr;
 
     // SPEC.md 追加実装依頼「負荷注入モード」: deliberately injects CPU+メモリ
     // load from separate OS processes alongside a run, to help reproduce

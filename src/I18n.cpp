@@ -1182,6 +1182,48 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("対象CPU: %1%  システムCPU: %2  メモリ: %3MB"),
          QStringLiteral("Target CPU: %1%  System CPU: %2  Memory: %3MB")},
         {QStringLiteral("(非対応)"), QStringLiteral("(unsupported)")},
+
+        // v1.02: SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・
+        // クラッシュ時自動添付」/「メモリリークの自動検知」。両方とも既定で
+        // 無効・空欄のオプション機能で、使わなければ既存の動作に一切影響しない。
+        {QStringLiteral("対象アプリのログファイル（任意、クラッシュ時に末尾を自動保存）:"),
+         QStringLiteral("Target app's log file (optional, its tail is auto-saved on a crash):")},
+        {QStringLiteral("例: /path/to/target.log"), QStringLiteral("e.g. /path/to/target.log")},
+        {QStringLiteral("対象アプリが自分で書き出すログファイルのパスを指定すると、異常停止"
+                        "（クラッシュ等）の検知時に、そのファイルの末尾（最大512KB・200行）を"
+                        "スクリーンショット等と同じ場所に自動保存します。空欄のまま（デフォルト）"
+                        "ならこの機能は一切働かず、既存の動作に影響しません。"),
+         QStringLiteral("If you point this at a log file the target app writes itself, its tail "
+                        "(up to 512KB / 200 lines) is automatically saved alongside the screenshot "
+                        "and other artifacts whenever an abnormal stop (crash, etc.) is detected. "
+                        "Left blank (the default), this feature does nothing and existing behavior "
+                        "is unaffected.")},
+        {QStringLiteral("対象アプリのログファイルを選択"), QStringLiteral("Select the Target App's Log File")},
+        {QStringLiteral("対象アプリのログファイルを開けませんでした: %1"),
+         QStringLiteral("Couldn't open the target app's log file: %1")},
+        {QStringLiteral("対象アプリのログファイル末尾を保存しました: %1"),
+         QStringLiteral("Saved the tail of the target app's log file: %1")},
+        {QStringLiteral("対象アプリのログファイル末尾の保存に失敗しました: %1"),
+         QStringLiteral("Failed to save the tail of the target app's log file: %1")},
+        {QStringLiteral("メモリリークの疑いを自動検知する（増加傾向がしきい値を超えたら警告）:"),
+         QStringLiteral("Automatically detect a suspected memory leak (warn if the growth trend "
+                        "exceeds this threshold):")},
+        {QStringLiteral("実行中5秒ごとに記録しているメモリ使用量の推移を監視し、直近の増加傾向"
+                        "（MB/分）がこのしきい値を一定時間（数分）超え続けた場合に「メモリリークの"
+                        "疑いあり」としてログに警告を出し、実行結果サマリーにも記録します。クラッシュ"
+                        "として扱ったりテストを自動停止したりはしません（検知・記録のみ）。"),
+         QStringLiteral("Watches the memory-usage trend already recorded every 5 seconds during the "
+                        "run, and if the recent growth rate (MB/minute) stays at or above this "
+                        "threshold for a while (a few minutes), logs a \"suspected memory leak\" "
+                        "warning and records it in the run summary. It never treats this as a crash "
+                        "or auto-stops the test -- detection/reporting only.")},
+        {QStringLiteral(" MB/分"), QStringLiteral(" MB/min")},
+        {QStringLiteral("メモリ使用量が継続的に増加しています（約%1 MB/分、しきい値%2 MB/分）。"
+                        "メモリリークの疑いがあります"),
+         QStringLiteral("Memory usage has been growing steadily (about %1 MB/min, threshold %2 "
+                        "MB/min). A memory leak is suspected")},
+        {QStringLiteral("メモリリークの疑い: あり（最大増加率 約%1 MB/分）"),
+         QStringLiteral("Suspected memory leak: yes (peak growth rate about %1 MB/min)")},
     };
     return table;
 }

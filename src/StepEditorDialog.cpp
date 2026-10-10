@@ -250,6 +250,12 @@ void StepEditorDialog::onActionParamsModeChanged()
         m_initialCustomActionParams = m_paramsEditor->params();
     }
     m_paramsEditor->setParams(useDefault ? m_defaultActionParams : m_initialCustomActionParams);
+    // The hint label right above this editor says "デフォルトを使う場合の値は
+    // 参照のみです" -- disable it so that's actually true, instead of letting
+    // the user edit fields that get silently discarded on save (same fix as
+    // StepGroupEditorDialog/TaskEditorDialog's identical radio handler
+    // already applies to their own member-params editor).
+    m_paramsEditor->setEnabled(!useDefault);
 }
 
 void StepEditorDialog::applyActionKindsTo(RegionStep &step) const

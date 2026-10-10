@@ -1176,15 +1176,24 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
 
 void MainWindow::onRefreshTargets()
 {
+    refreshTargetList(/*preserveLastTargetHint=*/false);
+}
+
+void MainWindow::refreshTargetList(bool preserveLastTargetHint)
+{
     // Remember which app is currently selected (if any) *before* clearing
     // the combo below -- QComboBox::clear() forgets the selection outright,
     // so without this, every refresh (crash/stop, regaining focus, the
     // user's own "更新" click, ...) would silently reset ① back to nothing
     // selected. Captured here rather than via a currentIndexChanged signal
     // so it also picks up a selection the user made since the last refresh.
-    const int previousIdx = m_targetCombo->currentIndex();
-    if (previousIdx >= 0 && previousIdx < m_windows.size() && !m_windows[previousIdx].appName.isEmpty())
-        m_lastTargetAppName = m_windows[previousIdx].appName;
+    // Skipped when `preserveLastTargetHint` is true -- see this function's
+    // own declaration comment in MainWindow.h (SPEC.md 10 不具合報告 N1).
+    if (!preserveLastTargetHint) {
+        const int previousIdx = m_targetCombo->currentIndex();
+        if (previousIdx >= 0 && previousIdx < m_windows.size() && !m_windows[previousIdx].appName.isEmpty())
+            m_lastTargetAppName = m_windows[previousIdx].appName;
+    }
 
     m_targetCombo->clear();
     m_windows = PlatformAutomation::listWindows();
@@ -3160,6 +3169,22 @@ void MainWindow::checkHeadlessCompletion()
 {
     if (!m_headlessMode || m_batchModeActive)
         return;
+    // Bug (SPEC.md 10 不具合報告 N4): this used to exit the whole process
+    // without ever terminating whatever target instance the last run (or
+    // ⟳連続実行's kill-then-relaunch) left behind -- once this process is
+    // gone, nothing in it can ever reference that pid again, so the target
+    // just lingers as an orphan indefinitely. A later `--run` invocation
+    // then launches yet another fresh instance on top of it, leaving two
+    // (or more, after repeated invocations) simultaneous copies of the same
+    // target app with no way to tell from the outside which one the test
+    // that just ran actually used -- worse still when combined with N1's
+    // "kill the wrong app" bug, since a leftover instance here is one more
+    // thing an unrelated future kill attempt could mistakenly match.
+    if (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+        appendLog(I18n::t(QStringLiteral("ヘッドレス実行終了のため対象アプリ（PID %1）を終了します"))
+                       .arg(m_lastRunTargetPid));
+        PlatformAutomation::terminateProcess(m_lastRunTargetPid);
+    }
     QCoreApplication::exit(m_headlessAnomalyOccurred ? 1 : 0);
 }
 
@@ -3172,7 +3197,17 @@ void MainWindow::waitForTargetThenContinueBatch()
         killTargetThenRelaunchForContinuousRun();
         return;
     }
-    onRefreshTargets();
+    // Bug (SPEC.md 10 不具合報告 N1): preserve, don't capture -- this is an
+    // unattended poll re-seeking a specific, already-known target by name
+    // (m_lastTargetAppName), not a moment a human could plausibly have
+    // picked something different in the combo themselves. Capturing
+    // whatever the combo happens to be showing here (its fallback default
+    // when the real target isn't currently found) would silently replace
+    // the known target's name with that fallback's, exactly as it did at
+    // the preset-load call site this bug was first found at -- except here
+    // it would then keep re-happening on every single poll of this
+    // function for as long as the real target stays absent.
+    refreshTargetList(/*preserveLastTargetHint=*/true);
     if (tryReselectLastTarget()) {
         beginRun(/*interactive=*/false);
         return;
@@ -3190,9 +3225,12 @@ void MainWindow::waitForTargetThenContinueBatch()
 
 void MainWindow::killTargetThenRelaunchForContinuousRun()
 {
-    onRefreshTargets();
+    // See waitForTargetThenContinueBatch()'s identical comment (SPEC.md 10
+    // 不具合報告 N1) -- same unattended re-seek-by-name situation.
+    refreshTargetList(/*preserveLastTargetHint=*/true);
     qint64 pidToKill = -1;
-    if (tryReselectLastTarget()) {
+    const bool targetWindowPresent = tryReselectLastTarget();
+    if (targetWindowPresent) {
         const int idx = m_targetCombo->currentIndex();
         if (idx >= 0 && idx < m_windows.size())
             pidToKill = m_windows[idx].pid;
@@ -3205,15 +3243,54 @@ void MainWindow::killTargetThenRelaunchForContinuousRun()
     if (pidToKill > 0) {
         appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が残っているため終了します")).arg(pidToKill));
         PlatformAutomation::terminateProcess(pidToKill);
+        m_continuousWaitPhase = ContinuousWaitPhase::WaitingForExit;
+        m_batchWaitTimer->start();
+        return;
     }
-    m_continuousWaitPhase = ContinuousWaitPhase::WaitingForExit;
+    // Bug (SPEC.md 10 不具合報告 N2): this used to always enter
+    // WaitingForExit and start m_batchWaitTimer here regardless of whether
+    // pidToKill was actually resolved -- but a window with no _NET_WM_PID
+    // (practically selectable since the D9 fix for isProcessRunning()'s
+    // pid<=0 guard) can never yield one, so nothing above ever calls
+    // terminateProcess() for it. onBatchWaitTick()'s WaitingForExit check
+    // (`tryReselectLastTarget() || isProcessRunning(...)`) then just kept
+    // matching that same still-there, never-killed window forever: nothing
+    // was ever asked to exit, so it never does, and the wait never ends.
+    if (targetWindowPresent) {
+        // The target IS right there, just unkillable via pid -- "連続実行
+        // always kills the leftover and relaunches fresh" (SPEC.md 10 ⑤)
+        // cannot be honored for this target, but continuing with the
+        // window that is already present is strictly better than hanging
+        // forever waiting for an exit nothing triggered.
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象ウィンドウのPIDを特定できないため終了できません。"
+                                          "既存のウィンドウをそのまま使って実行します")));
+        startRunAfterLaunchWait(/*interactive=*/false);
+        return;
+    }
+    // Nothing to kill and no window currently present either -- same
+    // "launch if configured, otherwise wait for a manual relaunch" shape as
+    // waitForTargetThenContinueBatch()'s non-continuous branch above, just
+    // landing in WaitingForAppear instead of returning early.
+    if (!m_targetLaunchCommandEdit->text().trimmed().isEmpty()) {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリが見つからないため、登録された起動コマンドで"
+                                          "自動的に起動します")));
+        launchTargetAppFromConfiguredCommand();
+    } else {
+        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリが見つかりません。手動で再起動してください"
+                                          "（再起動を検知したら自動的に次の実行を開始します）")));
+    }
+    m_continuousWaitPhase = ContinuousWaitPhase::WaitingForAppear;
     m_batchWaitTimer->start();
 }
 
 void MainWindow::onBatchWaitTick()
 {
     if (m_continuousRunMode) {
-        onRefreshTargets();
+        // See waitForTargetThenContinueBatch()'s identical comment (SPEC.md
+        // 10 不具合報告 N1) -- ticks every second or so while unattended,
+        // so capturing here would clobber m_lastTargetAppName on practically
+        // every tick for as long as the real target stays absent/exited.
+        refreshTargetList(/*preserveLastTargetHint=*/true);
         if (m_continuousWaitPhase == ContinuousWaitPhase::WaitingForExit) {
             // Still showing a window, or the process itself hasn't exited
             // yet (SIGTERM is asynchronous) -- keep waiting.
@@ -3236,7 +3313,11 @@ void MainWindow::onBatchWaitTick()
         return;
     }
 
-    onRefreshTargets();
+    // Same reasoning as the m_continuousRunMode branch above (SPEC.md 10
+    // 不具合報告 N1): a timer tick, not a moment a human re-picks the combo,
+    // whether this is a plain batch continuation or the m_launchBeforeStartPending
+    // "起動してから開始する" wait below.
+    refreshTargetList(/*preserveLastTargetHint=*/true);
     if (!tryReselectLastTarget())
         return;
     m_batchWaitTimer->stop();
@@ -3548,6 +3629,16 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
                 .arg(summary.rngSeedUsed),
             QMessageBox::Ok, this);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
+        // Bug (SPEC.md 10 不具合報告 N3): giving a QDialog/QMessageBox a
+        // parent makes it Qt::ApplicationModal by default regardless of
+        // show() vs exec() -- only exec() ever *enforces* that (its own
+        // blocking event loop), but show() does NOT undo the modality
+        // flag, so every other window the parent owns (① through ③, ▶開始
+        // included) silently stops accepting input for as long as this
+        // dialog stays open, exactly defeating the "non-modal, don't
+        // freeze the batch loop" intent the comment above already stated.
+        // Explicitly non-modal makes show() actually behave as advertised.
+        dialog->setWindowModality(Qt::NonModal);
         dialog->show();
     }
 }
@@ -3894,7 +3985,7 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
         // it is currently open, instead of always making the user pick it
         // by hand even when it's obvious which one it is.
         m_lastTargetAppName = hint;
-        onRefreshTargets();
+        refreshTargetList(/*preserveLastTargetHint=*/true);
     }
     const bool targetSelected =
         !hint.isEmpty() && m_targetCombo->currentIndex() >= 0 &&

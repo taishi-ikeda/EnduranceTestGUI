@@ -307,6 +307,26 @@ private:
     // did. Returns true if a match was found and selected.
     bool tryReselectLastTarget();
 
+    // Bug (SPEC.md 10 不具合報告 N1): onRefreshTargets() itself captures
+    // whichever app the combo currently has selected and remembers it as
+    // m_lastTargetAppName, so a later refresh can keep tracking "the same
+    // app under test" across a crash/relaunch even without an explicit
+    // currentIndexChanged handler. That capture is correct for every other
+    // caller, but loadPresetFromPath() sets m_lastTargetAppName to the
+    // preset's own targetAppNameHint and calls onRefreshTargets()
+    // immediately afterward purely to let tryReselectLastTarget() act on
+    // that hint -- except the capture step ran *first*, overwriting the
+    // hint with whatever had been selected before the preset was even
+    // loaded (an unrelated leftover from a previous session, in the
+    // reported case) before tryReselectLastTarget() ever got to use it. A
+    // later kill-then-relaunch (⟳連続実行) would then terminate *that*
+    // unrelated app instead of doing nothing, since it was never the
+    // actual target to begin with. refreshTargetList(true) skips the
+    // capture step entirely so the hint that was just explicitly set
+    // survives; onRefreshTargets() itself still calls this with `false`
+    // (normal behavior, unchanged) for every other existing caller.
+    void refreshTargetList(bool preserveLastTargetHint);
+
     // The actual "start the engine" logic (SPEC.md 10 ①), shared by the
     // ▶開始 button (onStart(), interactive == true: config/permission/
     // safety-check failures pop up a QMessageBox) and the batch loop's

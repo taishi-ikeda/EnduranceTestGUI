@@ -57,6 +57,26 @@ bool PointPickerOverlay::run(QPoint &outPoint)
     return false;
 }
 
+bool PointPickerOverlay::runMulti(QList<QPoint> &outPoints)
+{
+    PointPickerOverlay overlay;
+    overlay.m_multiMode = true;
+    overlay.show();
+    overlay.setGeometry(virtualDesktopGeometry());
+    overlay.activateWindow();
+    overlay.raise();
+
+    QEventLoop loop;
+    QObject::connect(&overlay, &PointPickerOverlay::finishedPicking, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    if (overlay.m_accepted) {
+        outPoints = overlay.m_pickedPoints;
+        return true;
+    }
+    return false;
+}
+
 void PointPickerOverlay::finish(bool accepted, const QPoint &pt)
 {
     // See RegionSelectorOverlay::finish()'s identical guard: without it,
@@ -87,10 +107,46 @@ void PointPickerOverlay::paintEvent(QPaintEvent * /*event*/)
     // Qt::CrossCursor (set in the constructor) already signals that this
     // overlay is in point-picking mode.
     p.drawPixmap(0, 0, m_backgroundSnapshot);
+
+    // runMulti() only: mark each point already clicked this session, so the
+    // user can see what they've picked so far while deciding where to click
+    // next (or whether to right-click and stop) -- same dot+crosshair style
+    // as PointHighlightOverlay, which isn't reused directly here since it
+    // draws onto its own separate always-on-top windows rather than this
+    // overlay's own paintEvent().
+    if (m_multiMode && !m_pickedPoints.isEmpty()) {
+        const QPoint origin = geometry().topLeft();
+        if (m_pickedPoints.size() >= 2) {
+            p.setPen(QPen(QColor(255, 140, 0), 2, Qt::DashLine));
+            for (int i = 0; i + 1 < m_pickedPoints.size(); ++i)
+                p.drawLine(m_pickedPoints[i] - origin, m_pickedPoints[i + 1] - origin);
+        }
+        for (const QPoint &pt : m_pickedPoints) {
+            const QPoint local = pt - origin;
+            p.setPen(QPen(Qt::white, 2));
+            p.setBrush(QColor(255, 120, 0));
+            p.drawEllipse(local, 7, 7);
+            p.drawLine(local.x() - 13, local.y(), local.x() + 13, local.y());
+            p.drawLine(local.x(), local.y() - 13, local.x(), local.y() + 13);
+        }
+    }
 }
 
 void PointPickerOverlay::mousePressEvent(QMouseEvent *event)
 {
+    if (m_multiMode) {
+        // Left-click keeps adding points (and keeps this overlay up for the
+        // next one) instead of ending the session on the first click like
+        // run() does; right-click ends it, handing back whatever was
+        // collected (possibly nothing).
+        if (event->button() == Qt::LeftButton) {
+            m_pickedPoints.append(globalPosOf(event));
+            update();
+        } else if (event->button() == Qt::RightButton) {
+            finish(true, QPoint());
+        }
+        return;
+    }
     if (event->button() == Qt::LeftButton)
         finish(true, globalPosOf(event));
 }

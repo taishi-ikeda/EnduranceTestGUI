@@ -35,9 +35,30 @@ QString labeledRect(const QString &prefix, int index, const QRect &r)
 }
 }  // namespace
 
+QString generateDefaultRegionName(const QList<NamedRegion> &existing, const QString &nameTemplate)
+{
+    for (int n = 1;; ++n) {
+        const QString candidate = I18n::t(nameTemplate).arg(n);
+        bool used = false;
+        for (const NamedRegion &region : existing) {
+            if (region.name == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used)
+            return candidate;
+    }
+}
+
 NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, const QPoint &targetTopLeft,
-                                                   bool hasTarget, qint64 targetPid, QWidget *parent)
+                                                   bool hasTarget, qint64 targetPid, QWidget *parent,
+                                                   const QList<NamedRegion> *existingRegionsForNaming,
+                                                   bool autoManageName)
     : QDialog(parent),
+      m_existingRegionsForNaming(existingRegionsForNaming),
+      m_autoManageName(autoManageName),
+      m_lastAutoName(autoManageName ? initial.name : QString()),
       m_regions(initial.regions),
       m_excludeRegions(initial.excludeRegions),
       m_targetTopLeft(targetTopLeft),
@@ -241,9 +262,11 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     sweepLayout->setContentsMargins(0, 0, 0, 0);
 
     auto *sweepHint = new QLabel(
-        I18n::t(QStringLiteral("始点・中点（いくつでも追加可）・終点の順に画面上の点を追加してください。"
-                                "それらを順番に結んだ経路上を、指定した間隔で並んだ点として巡回操作します"
-                                "（最後まで行くと始点に戻って繰り返します）。")),
+        I18n::t(QStringLiteral("「点を追加...」を押すと、画面上を左クリックするたびに始点・中点"
+                                "（いくつでも可）・終点の順に点が追加されていきます。右クリックで"
+                                "追加を終了してください。それらを順番に結んだ経路上を、指定した間隔"
+                                "で並んだ点として巡回操作します（最後まで行くと始点に戻って"
+                                "繰り返します）。")),
         m_sweepModeGroup);
     sweepHint->setWordWrap(true);
     sweepLayout->addWidget(sweepHint);
@@ -391,6 +414,19 @@ void NamedRegionEditorDialog::onModeChanged()
     m_rectModeGroup->setVisible(!objectMode && !sweepMode);
     m_objectModeGroup->setVisible(objectMode);
     m_sweepModeGroup->setVisible(sweepMode);
+
+    // Keep a brand-new region's still-untouched default name matching its
+    // current mode ("操作領域N" for rectangle/object, "操作線分N" for 点列
+    // （スイープ）, each numbered independently -- see the constructor's doc
+    // comment). If the name no longer matches what we last auto-set, the
+    // user has typed their own, so leave it alone from here on.
+    if (m_autoManageName && m_existingRegionsForNaming && m_nameEdit->text() == m_lastAutoName) {
+        const QString nameTemplate =
+            sweepMode ? QStringLiteral("操作線分%1") : QStringLiteral("操作領域%1");
+        m_lastAutoName = generateDefaultRegionName(*m_existingRegionsForNaming, nameTemplate);
+        m_nameEdit->setText(m_lastAutoName);
+    }
+
     updateHighlight();
     updateSweepHighlight();
 }
@@ -456,13 +492,21 @@ void NamedRegionEditorDialog::onAddSweepWaypoint()
         return;
     }
     // Hide the persistent point highlight while PointPickerOverlay (which
-    // draws its own live crosshair) is up, same rationale as onDrawRegions()
-    // hiding m_highlightOverlay around RegionSelectorOverlay.
+    // draws its own live crosshair, plus a marker for each point already
+    // clicked this session -- see its paintEvent()) is up, same rationale
+    // as onDrawRegions() hiding m_highlightOverlay around
+    // RegionSelectorOverlay.
     if (m_sweepHighlightOverlay)
         m_sweepHighlightOverlay->hide();
-    QPoint picked;
-    if (PointPickerOverlay::run(picked)) {
-        m_sweepWaypoints.append(picked - m_targetTopLeft);
+    // runMulti(), not run(): left-click keeps adding points one after
+    // another in the same session instead of requiring a fresh press of
+    // this button before every single point; a right-click ends the
+    // session (SPEC.md 追加実装依頼「点列の点を連続して追加できるように
+    // する」).
+    QList<QPoint> picked;
+    if (PointPickerOverlay::runMulti(picked) && !picked.isEmpty()) {
+        for (const QPoint &pt : picked)
+            m_sweepWaypoints.append(pt - m_targetTopLeft);
         refreshSweepWaypointList();
     }
     updateSweepHighlight();
@@ -558,8 +602,8 @@ void NamedRegionEditorDialog::refreshRegionList()
 {
     m_regionListWidget->clear();
     // "矩形N" (rectangle N), not "領域N" -- this dialog's own "名前" field is
-    // the operation region's name (auto-suggested as "操作領域N" by
-    // MainWindow::generateDefaultRegionName), so reusing "領域N" for the
+    // the operation region's name (auto-suggested as "操作領域N"/"操作線分N"
+    // by generateDefaultRegionName() above), so reusing "領域N" for the
     // individual rectangles drawn inside it read as if it were the same
     // name and was confusing (SPEC.md 6.3).
     for (int i = 0; i < m_regions.size(); ++i)

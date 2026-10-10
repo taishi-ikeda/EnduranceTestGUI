@@ -122,7 +122,7 @@ private slots:
     void onClearSteps();
     void onGroupSelectedSteps();
     void onUngroupSelectedStep();
-    void onTaskifySelectedSteps();
+    void onAddTask();
     void onUntaskifySelectedStep();
     void onEditDefaultParams();
 
@@ -254,11 +254,13 @@ private:
     bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                    QString &errorMessage) const;
     void setControlsEnabled(bool enabled);
-    // Enables m_groupStepsButton/m_ungroupStepButton/m_taskifyStepsButton/
-    // m_untaskifyStepButton based on the current ②list selection (2+ plain
-    // steps -> グループ化/タスク化; exactly one group/task -> グループ解除/
-    // タスク解除) and whether the steps panel is enabled at all (i.e. not
-    // mid-run) -- called both when the selection changes and whenever
+    // Enables m_groupStepsButton/m_ungroupStepButton/m_untaskifyStepButton
+    // based on the current ②list selection (2+ plain steps -> グループ化;
+    // exactly one group/task -> グループ解除/タスク解除) and whether the
+    // steps panel is enabled at all (i.e. not mid-run) -- m_addTaskButton
+    // doesn't depend on the selection at all (see its own doc comment), so
+    // it's enabled/disabled only by the steps-panel-wide state. Called both
+    // when the selection changes and whenever
     // setControlsEnabled() toggles run state.
     void updateGroupButtonsEnabled();
     TestConfig buildConfigFromUi(bool &ok, QString &errorMessage) const;
@@ -612,15 +614,18 @@ private:
     // replaces it with its member steps as standalone top-level steps.
     QPushButton *m_groupStepsButton = nullptr;
     QPushButton *m_ungroupStepButton = nullptr;
-    // Combines the currently multi-selected steps into a single task step
-    // (SPEC.md 6.2追加実装及び修正依頼): enabled only when 2+ plain steps
-    // (no wait steps, no groups/tasks -- no nesting of any container kind)
-    // are selected. Unlike grouping, a task runs every member exactly
-    // once, in the order shown, every time its turn comes up (see
-    // RegionStep::isTask) -- "タスク解除" is the reverse: enabled only
-    // when exactly one task is selected, and replaces it with its member
-    // steps as standalone top-level steps, same as "グループ解除".
-    QPushButton *m_taskifyStepsButton = nullptr;
+    // Opens an empty TaskEditorDialog to build a brand-new task step from
+    // scratch (SPEC.md 追加実装依頼「タスクの作成方法をボタン1つに変更」) --
+    // unlike m_groupStepsButton above, this does NOT act on the current ②
+    // selection at all (no steps need to be pre-built and multi-selected
+    // first; every member is instead authored directly inside the dialog,
+    // via its own "追加..." -- see onAddTask()). A task runs every member
+    // exactly once, in the order shown, every time its turn comes up (see
+    // RegionStep::isTask) -- "タスク解除" is the reverse of a task's
+    // creation: enabled only when exactly one task is selected, and
+    // replaces it with its member steps as standalone top-level steps,
+    // same as "グループ解除".
+    QPushButton *m_addTaskButton = nullptr;
     QPushButton *m_untaskifyStepButton = nullptr;
     QList<RegionStep> m_steps;
     // Index into m_steps currently being executed by m_engine, or -1 while

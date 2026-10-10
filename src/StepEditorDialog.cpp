@@ -16,30 +16,6 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
-namespace
-{
-// "操作領域1", "操作領域2", ... -- the first of these not already used by an
-// existing named region, mirroring the naming scheme the old ①対象選択
-// panel's "追加..." button used to generate (see MainWindow::
-// generateDefaultRegionName()'s own identical rationale, now folded in here
-// since region authoring moved to this dialog).
-QString generateDefaultRegionName(const QList<NamedRegion> &existing)
-{
-    for (int n = 1;; ++n) {
-        const QString candidate = I18n::t(QStringLiteral("操作領域%1")).arg(n);
-        bool used = false;
-        for (const NamedRegion &region : existing) {
-            if (region.name == candidate) {
-                used = true;
-                break;
-            }
-        }
-        if (!used)
-            return candidate;
-    }
-}
-}  // namespace
-
 StepEditorDialog::StepEditorDialog(const RegionStep &initial, RegionEditContext *regionCtx, QWidget *parent,
                                     bool allowPopupDialogTarget, bool includeActionParams,
                                     const ActionParams &defaultActionParams)
@@ -348,9 +324,10 @@ void StepEditorDialog::onCreateRegion()
         return;
 
     NamedRegion initial;
-    initial.name = generateDefaultRegionName(*m_regionCtx->namedRegions);
+    initial.name = generateDefaultRegionName(*m_regionCtx->namedRegions, QStringLiteral("操作領域%1"));
     NamedRegionEditorDialog dialog(initial, m_regionCtx->targetTopLeft, m_regionCtx->hasTarget,
-                                   m_regionCtx->targetPid, this);
+                                   m_regionCtx->targetPid, this, m_regionCtx->namedRegions,
+                                   /*autoManageName=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const NamedRegion region = dialog.result();

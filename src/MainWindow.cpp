@@ -1094,15 +1094,19 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     groupButtonsRow->addWidget(m_ungroupStepButton);
     stepsLayout->addLayout(groupButtonsRow);
 
-    // SPEC.md 6.2追加実装及び修正依頼: select 2+ plain steps and combine
-    // them into a task that always runs every member exactly once, in the
-    // order shown, as a single atomic action each time its turn comes up
-    // (unlike a group's random per-action member pick above). "タスク解除"
-    // reverses this, same as "グループ解除".
+    // SPEC.md 追加実装依頼「タスクの作成方法をボタン1つに変更」: "タスクを
+    // 追加..." opens an empty TaskEditorDialog directly (see onAddTask()) --
+    // unlike "グループ化" above, it doesn't act on the current ②selection at
+    // all; every member is authored from scratch inside the dialog itself,
+    // the same dialog "編集..." already opens for an existing task. A task
+    // always runs every member exactly once, in the order shown, as a
+    // single atomic action each time its turn comes up (unlike a group's
+    // random per-action member pick above). "タスク解除" reverses a task
+    // back into standalone top-level steps, same as "グループ解除".
     auto *taskButtonsRow = new QHBoxLayout;
-    m_taskifyStepsButton = new QPushButton(I18n::t(QStringLiteral("タスク化")), m_stepsGroup);
+    m_addTaskButton = new QPushButton(I18n::t(QStringLiteral("タスクを追加...")), m_stepsGroup);
     m_untaskifyStepButton = new QPushButton(I18n::t(QStringLiteral("タスク解除")), m_stepsGroup);
-    taskButtonsRow->addWidget(m_taskifyStepsButton);
+    taskButtonsRow->addWidget(m_addTaskButton);
     taskButtonsRow->addWidget(m_untaskifyStepButton);
     stepsLayout->addLayout(taskButtonsRow);
 
@@ -1120,7 +1124,7 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_clearStepsButton, &QPushButton::clicked, this, &MainWindow::onClearSteps);
     connect(m_groupStepsButton, &QPushButton::clicked, this, &MainWindow::onGroupSelectedSteps);
     connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
-    connect(m_taskifyStepsButton, &QPushButton::clicked, this, &MainWindow::onTaskifySelectedSteps);
+    connect(m_addTaskButton, &QPushButton::clicked, this, &MainWindow::onAddTask);
     connect(m_untaskifyStepButton, &QPushButton::clicked, this, &MainWindow::onUntaskifySelectedStep);
 
     // SPEC.md 10「操作領域を確認するボタン」: moved here from the now-removed
@@ -2152,47 +2156,21 @@ void MainWindow::onUngroupSelectedStep()
         m_stepListWidget->setCurrentRow(row);
 }
 
-void MainWindow::onTaskifySelectedSteps()
+void MainWindow::onAddTask()
 {
-    QList<int> rows;
-    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
-        rows.append(m_stepListWidget->row(item));
-    std::sort(rows.begin(), rows.end());
-    if (rows.size() < 2)
-        return;
-    for (int row : rows) {
-        if (row < 0 || row >= m_steps.size() || m_steps[row].isWaitStep || m_steps[row].isGroup ||
-            m_steps[row].isTask) {
-            QMessageBox::warning(
-                this, I18n::t(QStringLiteral("タスク化できません")),
-                I18n::t(QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にタスク化"
-                                "できません（コンテナの入れ子は未対応です）。")));
-            return;
-        }
-    }
+    // See onAddStep()'s identical comment.
+    if (m_showingAllRegions)
+        onToggleShowAllRegions();
+    RegionEditContext ctx = buildRegionEditContext();
 
     RegionStep task;
     task.isTask = true;
-    for (int row : rows) {
-        RegionStep member = m_steps[row];
-        // Reset fields that only make sense at the top level (see
-        // onGroupSelectedSteps()'s identical rationale) -- groupWeight is
-        // irrelevant for a task member (order, not weight, decides
-        // execution), so it's left at its default rather than reset.
-        member.isGroup = false;
-        member.groupMembers.clear();
-        member.isTask = false;
-        member.taskMembers.clear();
-        task.taskMembers.append(member);
-    }
-
-    const int insertAt = rows.first();
-    for (int i = rows.size() - 1; i >= 0; --i)  // remove highest index first so earlier ones stay valid
-        m_steps.removeAt(rows[i]);
-    m_steps.insert(insertAt, task);
-
+    TaskEditorDialog dialog(task, &ctx, m_defaultActionParams, m_defaultActionKinds, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_steps.append(dialog.result());
     refreshStepList();
-    m_stepListWidget->setCurrentRow(insertAt);
+    m_stepListWidget->setCurrentRow(m_steps.size() - 1);
 }
 
 void MainWindow::onUntaskifySelectedStep()
@@ -2429,8 +2407,9 @@ void MainWindow::updateGroupButtonsEnabled()
     }
     m_groupStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
                                     plainCount == selected.size());
-    m_taskifyStepsButton->setEnabled(m_stepsGroup->isEnabled() && plainCount >= 2 &&
-                                      plainCount == selected.size());
+    // m_addTaskButton doesn't depend on the ②selection at all -- see its own
+    // doc comment.
+    m_addTaskButton->setEnabled(m_stepsGroup->isEnabled());
     const int row = m_stepListWidget->currentRow();
     m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
                                      row < m_steps.size() && m_steps[row].isGroup);

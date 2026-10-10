@@ -16,6 +16,18 @@ class QWidget;
 class RegionHighlightOverlay;
 class PointHighlightOverlay;
 
+// `nameTemplate` is a translatable string containing one "%1" placeholder
+// (e.g. QStringLiteral("操作領域%1") or QStringLiteral("操作線分%1"));
+// returns the first `nameTemplate.arg(n)` (n = 1, 2, ...) not already used
+// by an existing region's `.name`. Shared between StepEditorDialog (which
+// computes a brand-new region's initial default name, before this dialog
+// even opens and before the user has picked a mode) and this dialog itself
+// (which regenerates the name reactively if the user switches the mode
+// radio between rectangle/object vs 点列（スイープ）, so sweep regions get
+// their own "操作線分N" counter independent of "操作領域N" -- SPEC.md 追加
+// 実装依頼「操作領域のデフォルト名を種別ごとに独立させる」).
+QString generateDefaultRegionName(const QList<NamedRegion> &existing, const QString &nameTemplate);
+
 // Modal dialog for creating/editing one NamedRegion: a name, one or more
 // rectangles drawn via RegionSelectorOverlay, and optional mask/exclude
 // sub-rectangles within them. Used from StepEditorDialog's "新規作成.../
@@ -43,8 +55,20 @@ public:
     // (SPEC.md 追加実装依頼「名前付きオブジェクト」) -- pass -1 if
     // `hasTarget` is false (that mode is then simply unusable, same as the
     // follow-target checkbox above).
+    //
+    // `existingRegionsForNaming`/`autoManageName`: when `autoManageName` is
+    // true (StepEditorDialog::onCreateRegion() creating a brand-new region
+    // -- never set for onEditRegion()'s already-named regions), this dialog
+    // keeps the name field in sync with generateDefaultRegionName() as the
+    // user switches modes, using `existingRegionsForNaming` (the shared
+    // region pool, not yet including the one being created) to pick the
+    // next free number -- but only as long as the field still holds exactly
+    // the auto-generated value it last set; once the user types their own
+    // name, mode switches no longer touch it.
     explicit NamedRegionEditorDialog(const NamedRegion &initial, const QPoint &targetTopLeft,
-                                      bool hasTarget, qint64 targetPid, QWidget *parent = nullptr);
+                                      bool hasTarget, qint64 targetPid, QWidget *parent = nullptr,
+                                      const QList<NamedRegion> *existingRegionsForNaming = nullptr,
+                                      bool autoManageName = false);
 
     NamedRegion result() const;
 
@@ -84,6 +108,16 @@ private:
     QWidget *m_rectModeGroup = nullptr;
     QWidget *m_objectModeGroup = nullptr;
     QWidget *m_sweepModeGroup = nullptr;
+
+    // See the constructor's `existingRegionsForNaming`/`autoManageName` doc
+    // comment above. m_lastAutoName tracks whatever name onModeChanged()
+    // (or the constructor, for the mode seeded at startup) most recently
+    // put in m_nameEdit itself, so a later mode switch can tell "still the
+    // auto value, safe to replace" apart from "the user typed their own
+    // name since, leave it alone".
+    const QList<NamedRegion> *m_existingRegionsForNaming = nullptr;
+    bool m_autoManageName = false;
+    QString m_lastAutoName;
 
     QListWidget *m_regionListWidget = nullptr;
     QPushButton *m_drawButton = nullptr;

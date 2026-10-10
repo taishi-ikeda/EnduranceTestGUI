@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QPixmap>
 #include <QPoint>
 #include <QWidget>
@@ -23,6 +24,19 @@ public:
     // clicked a point; returns false (outPoint left unset) if cancelled.
     static bool run(QPoint &outPoint);
 
+    // Like run(), but for picking several points in one sitting instead of
+    // one: each left-click adds a point (shown immediately as a marker, so
+    // the user can see what's been picked so far) and the overlay stays up
+    // for the next one, instead of ending the session like run() does on
+    // its first click. A right-click ends the session, returning true and
+    // filling `outPoints` with everything collected (possibly empty, if
+    // right-clicked before any left-click). Esc still cancels the whole
+    // session (returns false, outPoints left unset) -- used by
+    // NamedRegionEditorDialog's 点列（スイープ）waypoint picker, so adding
+    // several points doesn't require re-clicking "点を追加..." before each
+    // one (SPEC.md 追加実装依頼「点列の点を連続して追加できるようにする」).
+    static bool runMulti(QList<QPoint> &outPoints);
+
 signals:
     void finishedPicking();
 
@@ -38,6 +52,11 @@ private:
     bool m_finished = false;
     bool m_accepted = false;
     QPoint m_pickedPoint;
+    // Set only by runMulti(); mousePressEvent()/paintEvent() both branch on
+    // this to switch between run()'s single-click-and-done behavior and
+    // runMulti()'s accumulate-until-right-click one.
+    bool m_multiMode = false;
+    QList<QPoint> m_pickedPoints;
     // Screenshot of the virtual desktop taken right before this overlay is
     // shown, painted as its own background instead of relying on
     // Qt::WA_TranslucentBackground -- see RegionSelectorOverlay's identical

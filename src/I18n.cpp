@@ -274,6 +274,7 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("操作種別ごとの回数: (なし)"), QStringLiteral("Count per action type: (None)")},
         {QStringLiteral("操作種別ごとの回数:"), QStringLiteral("Count per action type:")},
         {QStringLiteral("操作間隔:"), QStringLiteral("Action interval:")},
+        {QStringLiteral("操作線分%1"), QStringLiteral("Line%1")},
         {QStringLiteral("操作領域%1"), QStringLiteral("Region%1")},
         {QStringLiteral("操作領域「%1」"), QStringLiteral("Operation region \"%1\"")},
         {QStringLiteral("操作領域が選択されていません。"), QStringLiteral("No operation region is selected.")},
@@ -718,8 +719,9 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("記録された間隔"), QStringLiteral("Recorded gap")},
 
         // v0.61: ステップ構成「タスク」機能 (TaskEditorDialog)
-        {QStringLiteral("タスク化"), QStringLiteral("Task")},
-        {QStringLiteral("タスク化できません"), QStringLiteral("Cannot Task")},
+        // v1.12: "タスク化"（複数選択→変換）を"タスクを追加..."（単独ボタン
+        // →空のTaskEditorDialog）に置き換え -- MainWindow::onAddTask()。
+        {QStringLiteral("タスクを追加..."), QStringLiteral("Add Task...")},
         {QStringLiteral("タスク解除"), QStringLiteral("Untask")},
         {QStringLiteral("タスクの編集"), QStringLiteral("Edit Task")},
         {QStringLiteral("タスクの操作（一覧の順番通りに、毎回すべて1回ずつ実行されます。\n"
@@ -745,10 +747,6 @@ const QHash<QString, QString> &translationTable()
                         "できません（コンテナの入れ子は未対応です）。"),
          QStringLiteral("Wait steps, groups, and tasks themselves cannot be combined with other "
                         "steps into a group (nesting containers is not supported).")},
-        {QStringLiteral("待機ステップ・グループ・タスク自体は、他のステップと一緒にタスク化"
-                        "できません（コンテナの入れ子は未対応です）。"),
-         QStringLiteral("Wait steps, groups, and tasks themselves cannot be combined with other "
-                        "steps into a task (nesting containers is not supported).")},
 
         // v0.62: タスクメンバーの「新しく出現したダイアログを対象にする」機能
         {QStringLiteral("新しく出現したウィンドウ（ダイアログ等）を対象にする（自動検出）"),
@@ -1096,13 +1094,21 @@ const QHash<QString, QString> &translationTable()
         // "点を追加.../選択を削除" list replacing the old fixed two-button
         // pair, and PointHighlightOverlay drawing a connected polyline
         // through all of them instead of just a single start-end line.
-        {QStringLiteral("始点・中点（いくつでも追加可）・終点の順に画面上の点を追加してください。"
-                        "それらを順番に結んだ経路上を、指定した間隔で並んだ点として巡回操作します"
-                        "（最後まで行くと始点に戻って繰り返します）。"),
-         QStringLiteral("Add points on screen in order: start, any number of midpoints, then end. "
-                        "The path connecting them in that order is walked as a sequence of points "
-                        "evenly spaced at the given interval (wrapping back to the start once the "
-                        "end is reached).")},
+        // v1.12: left-click now keeps adding points one after another in the
+        // same picking session (PointPickerOverlay::runMulti()) instead of
+        // ending the session on the very first click, so the hint text was
+        // reworded to describe that -- see
+        // NamedRegionEditorDialog::onAddSweepWaypoint().
+        {QStringLiteral("「点を追加...」を押すと、画面上を左クリックするたびに始点・中点"
+                        "（いくつでも可）・終点の順に点が追加されていきます。右クリックで"
+                        "追加を終了してください。それらを順番に結んだ経路上を、指定した間隔"
+                        "で並んだ点として巡回操作します（最後まで行くと始点に戻って"
+                        "繰り返します）。"),
+         QStringLiteral("Click \"Add Point...\", then left-click on screen to add points one after "
+                        "another, in order: start, any number of midpoints, then end. Right-click to "
+                        "stop adding. The path connecting them in that order is walked as a sequence "
+                        "of points evenly spaced at the given interval (wrapping back to the start "
+                        "once the end is reached).")},
         {QStringLiteral("点を追加..."), QStringLiteral("Add Point...")},
         {QStringLiteral("始点"), QStringLiteral("Start")},
         {QStringLiteral("終点"), QStringLiteral("End")},

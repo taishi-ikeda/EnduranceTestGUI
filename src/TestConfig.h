@@ -11,20 +11,6 @@ enum class DragDirectionMode { Random, Up, Down, Left, Right };
 
 enum class ContextMenuSelectionMode { ByName, ByIndex };
 
-// How a step picks each action's target point within its resolved region
-// (SPEC.md 10, 「操作領域の下から適当な間隔で上にマウスを動かしながら
-// 順番にクリックする」). Random (default, original behavior): a uniform-
-// random point, independently chosen for every action. Sweep: a fixed
-// sequence of evenly spaced points from RegionStep::sweepStart to
-// sweepEnd (sweepIntervalPx apart), visited in order and wrapping back to
-// the start once the sequence is exhausted -- for exercising a region
-// systematically (e.g. a vertical list of rows or controls) instead of
-// purely at random, without hand-building a separate named region/task
-// member for every point. sweepJitterPx adds up to that many px of
-// independent random offset in x and y to each visited point, so
-// repeated passes don't land on the exact same pixel every time.
-enum class PointSelectionMode { Random, Sweep };
-
 // When RandomActionEngine captures an internal screenshot of the current
 // step's operation region (region boundary drawn on top, for later
 // inspection via MainWindow's "操作領域画像を保存..." button -- SPEC.md
@@ -234,10 +220,12 @@ struct NamedRegion
     // the regions/excludeRegions/followsTargetWindow/anchorTopLeft fields
     // above by construction (the registration UI offers exactly one of the
     // three), which are then unused/empty. Defining the sweep at the
-    // NamedRegion level (rather than only per-RegionStep, which remains
-    // available for a one-off two-point sweep not worth naming) lets the
-    // same point sequence be reused by name across multiple steps, the same
-    // way a drawn rectangle or a named object can be.
+    // NamedRegion level (the only place it's defined -- a step referencing
+    // this region only chooses, via RegionStep::sweepRegionUseRandomPoint,
+    // between walking this sequence deterministically or picking a random
+    // point along it) lets the same point sequence be reused by name across
+    // multiple steps, the same way a drawn rectangle or a named object can
+    // be.
     //
     // Each waypoint is stored as a window-relative offset from the target
     // window's top-left corner (same convention as RegionStep's own
@@ -288,19 +276,22 @@ struct RegionStep
     bool useWholeWindow = true;
     QString regionName;  // used when useWholeWindow == false
 
-    // See PointSelectionMode's own comment. sweepStart/sweepEnd are stored
-    // as window-relative offsets from the target window's top-left corner
-    // (same convention as SetupAction::point), picked via the same
-    // on-screen overlay, so they stay correct if the window later moves.
-    // Meaningless (and left at their defaults) when pointSelectionMode is
-    // Random. Only ever set on a top-level step -- a group/task member's
-    // point selection is always Random (StepEditorDialog only exposes
-    // this when constructed for a top-level step).
-    PointSelectionMode pointSelectionMode = PointSelectionMode::Random;
-    QPoint sweepStart;
-    QPoint sweepEnd;
-    int sweepIntervalPx = 50;
-    int sweepJitterPx = 0;
+    // Only meaningful when `regionName` refers to a NamedRegion with
+    // isSweepTarget == true (a 点列(スイープ) region -- see NamedRegion's
+    // own comment); ignored otherwise, including for an ordinary rectangle
+    // region or useWholeWindow, which always pick a uniform-random point
+    // within the region/window. When the resolved region IS a sweep
+    // target, this chooses between the region's two offered behaviors:
+    // false (default) -- deterministic 点列スイープ: visit the region's
+    // sweepWaypoints in order, sweepIntervalPx apart, wrapping back to the
+    // first once exhausted (RandomActionEngine::pickSweepPoint()). true --
+    // ランダム: a uniform-random point along the whole connected path
+    // through sweepWaypoints, independently chosen for every action
+    // (RandomActionEngine::pickRandomPointOnSweepPath()). Either way the
+    // region's own sweepIntervalPx/sweepJitterPx and sweepWaypoints are
+    // the sole source of the path; a step no longer carries its own
+    // start/end points.
+    bool sweepRegionUseRandomPoint = false;
 
     bool enableClick = true;
     bool enableLeftClick = true;

@@ -816,17 +816,18 @@ bool RandomActionEngine::resolveStepRegion(const RegionStep &step, QList<QRect> 
                 // SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/
                 // 「中点対応」: record the sweep parameters for
                 // runOneAction() to pick the actual point from via
-                // pickSweepPoint() (see m_currentRegionIsSweepTarget's own
-                // comment for why this goes through member state rather
-                // than this function's return-by-reference parameters) --
-                // outIncludeRegions is only a bounding box around every
-                // waypoint, inflated so a perfectly horizontal/vertical
-                // sweep isn't a zero-width/height rectangle, used solely
-                // for the includeRegions.isEmpty() check below, the
-                // exclude-region test inside pickSweepPoint(), and
-                // screenshot/highlight drawing -- the point actually
-                // dispatched always comes from pickSweepPoint(), never a
-                // random point picked within this box.
+                // pickSweepPoint()/pickRandomPointOnSweepPath() (see
+                // m_currentRegionIsSweepTarget's own comment for why this
+                // goes through member state rather than this function's
+                // return-by-reference parameters) -- outIncludeRegions is
+                // only a bounding box around every waypoint, inflated so a
+                // perfectly horizontal/vertical sweep isn't a zero-width/
+                // height rectangle, used solely for the
+                // includeRegions.isEmpty() check below, the exclude-region
+                // test inside those two pickers, and screenshot/highlight
+                // drawing -- the point actually dispatched always comes
+                // from one of those two pickers, never a random point
+                // picked uniformly within this box.
                 if (region.sweepWaypoints.size() < 2)
                     return false;
                 QRect windowBounds;
@@ -1036,6 +1037,57 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
 
         const QPoint pt(chosen->x() + int(m_rng.bounded(quint32(qMax(1, chosen->width())))),
                          chosen->y() + int(m_rng.bounded(quint32(qMax(1, chosen->height())))));
+        if (!pointExcluded(pt, excludeRegions)) {
+            ok = true;
+            return pt;
+        }
+    }
+    return {};
+}
+
+QPoint RandomActionEngine::pickRandomPointOnSweepPath(const QList<QPoint> &waypoints, int jitterPx,
+                                                       const QList<QRect> &excludeRegions, bool &ok)
+{
+    ok = false;
+    if (waypoints.size() < 2)
+        return {};
+    QRect windowBounds;
+    if (!PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, windowBounds))
+        return {};
+
+    QList<double> segmentLengths;
+    segmentLengths.reserve(waypoints.size() - 1);
+    double totalLength = 0.0;
+    for (int i = 0; i + 1 < waypoints.size(); ++i) {
+        const double dx = waypoints[i + 1].x() - waypoints[i].x();
+        const double dy = waypoints[i + 1].y() - waypoints[i].y();
+        const double len = qSqrt(dx * dx + dy * dy);
+        segmentLengths << len;
+        totalLength += len;
+    }
+    if (totalLength <= 0.0)
+        return {};
+
+    const int jitter = qMax(0, jitterPx);
+    constexpr int kMaxAttempts = 30;
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+        double target = m_rng.generateDouble() * totalLength;
+        int segment = 0;
+        for (; segment + 1 < waypoints.size(); ++segment) {
+            if (target < segmentLengths[segment] || segment + 2 == waypoints.size())
+                break;
+            target -= segmentLengths[segment];
+        }
+        const double t = segmentLengths[segment] > 0.0 ? target / segmentLengths[segment] : 0.0;
+        const QPoint &start = waypoints[segment];
+        const QPoint &end = waypoints[segment + 1];
+        QPoint pt = windowBounds.topLeft() +
+                    QPoint(qRound(start.x() + (end.x() - start.x()) * t),
+                           qRound(start.y() + (end.y() - start.y()) * t));
+        if (jitter > 0) {
+            pt += QPoint(int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter,
+                         int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter);
+        }
         if (!pointExcluded(pt, excludeRegions)) {
             ok = true;
             return pt;
@@ -1636,20 +1688,21 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
 
     bool ok = false;
     // A sweep-type NamedRegion (m_currentRegionIsSweepTarget, set by
-    // resolveStepRegion() just above) takes priority over the step's own
-    // pointSelectionMode: the region itself defines the only sequence of
-    // points that makes sense for it (it has no rectangle a random point
-    // could be picked within), the same way an object-target region
-    // bypasses point-picking entirely in favor of
-    // AccessibleObjectHandle::performDefaultAction().
-    const QPoint pt = m_currentRegionIsSweepTarget
-                           ? pickSweepPoint(m_currentSweepRegionKey, m_currentRegionSweepWaypoints,
+    // resolveStepRegion() just above) defines the only sequence of points
+    // that makes sense for it (it has no rectangle a random point could be
+    // picked within), the same way an object-target region bypasses
+    // point-picking entirely in favor of
+    // AccessibleObjectHandle::performDefaultAction(). The step only
+    // chooses which of the region's own two offered behaviors to use --
+    // see RegionStep::sweepRegionUseRandomPoint's own comment.
+    const QPoint pt = !m_currentRegionIsSweepTarget
+                           ? pickRandomPoint(includeRegions, excludeRegions, ok)
+                       : step.sweepRegionUseRandomPoint
+                           ? pickRandomPointOnSweepPath(m_currentRegionSweepWaypoints,
+                                                         m_currentRegionSweepJitterPx, excludeRegions, ok)
+                           : pickSweepPoint(m_currentSweepRegionKey, m_currentRegionSweepWaypoints,
                                              m_currentRegionSweepIntervalPx, m_currentRegionSweepJitterPx,
-                                             excludeRegions, ok)
-                       : (step.pointSelectionMode == PointSelectionMode::Sweep)
-                           ? pickSweepPoint(&step, {step.sweepStart, step.sweepEnd}, step.sweepIntervalPx,
-                                             step.sweepJitterPx, excludeRegions, ok)
-                           : pickRandomPoint(includeRegions, excludeRegions, ok);
+                                             excludeRegions, ok);
     const bool kindNeedsPoint = kind == ActionKind::Click || kind == ActionKind::DoubleClick ||
                                  kind == ActionKind::Drag || kind == ActionKind::ScrollUp ||
                                  kind == ActionKind::ScrollDown || kind == ActionKind::ScrollHorizontal;

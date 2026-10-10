@@ -1038,24 +1038,36 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("保存先をデフォルトに戻しました:\n%1"),
          QStringLiteral("The save location has been reset to the default:\n%1")},
 
-        // v0.95: sweep point-selection mode for a step (RegionStep::PointSelectionMode) --
-        // StepEditorDialog's new "操作位置の選び方" group.
-        {QStringLiteral("操作位置の選び方"), QStringLiteral("How to Pick the Operation Position")},
-        {QStringLiteral("点列（スイープ）"), QStringLiteral("Point Sequence (Sweep)")},
-        {QStringLiteral("「点列（スイープ）」では、開始位置から終了位置まで指定した間隔で並んだ"
-                        "点を順番に操作します（最後まで行くと開始位置に戻って繰り返します）。"),
-         QStringLiteral("With \"Point Sequence (Sweep)\", points evenly spaced from the start position "
-                        "to the end position are operated on in order (wrapping back to the start once "
-                        "the end is reached).")},
+        // v0.95 (superseded -- see the entries just below this comment for
+        // the current, region-type-driven redesign): a step used to carry
+        // its own independent sweep start/end points, offered regardless of
+        // which kind of region it referenced. Removed in favor of the
+        // region itself (a 点列(スイープ) NamedRegion) being the sole
+        // definition of a sweep path, with a step only choosing between
+        // ランダム and 点列スイープ for that region -- see TestConfig.h's
+        // RegionStep::sweepRegionUseRandomPoint.
         {QStringLiteral("間隔 (px):"), QStringLiteral("Interval (px):")},
         {QStringLiteral("ランダム幅 (px):"), QStringLiteral("Random Offset (px):")},
         {QStringLiteral("※各点を実際に操作する際、上下左右にこの範囲内でランダムにずらします"
                         "（0なら常に同じ位置）。"),
          QStringLiteral("Each point is randomly offset up/down/left/right within this range when it's "
                         "actually operated on (0 always uses the exact same position).")},
-        {QStringLiteral("点列（スイープ）の開始位置・終了位置の両方を選択してください。"),
-         QStringLiteral("Select both the start and end positions for the point sequence (sweep).")},
-        {QStringLiteral(" | [点列（スイープ）]"), QStringLiteral(" | [Point Sequence (Sweep)]")},
+
+        // StepEditorDialog's "この操作領域内での操作位置の選び方" group,
+        // shown only when the step's selected operation region is itself a
+        // 点列(スイープ) NamedRegion.
+        {QStringLiteral("この操作領域内での操作位置の選び方"),
+         QStringLiteral("How to Pick the Operation Position Within This Region")},
+        {QStringLiteral("点列スイープ"), QStringLiteral("Point Sequence Sweep")},
+        {QStringLiteral("「ランダム」はこの操作領域に登録された点列の経路上をランダムに操作し、"
+                        "「点列スイープ」は経路上を間隔・ランダム幅の設定に従って順番に操作します"
+                        "（間隔・ランダム幅は①の操作領域の編集画面で設定します）。"),
+         QStringLiteral("\"Random\" operates on a random point along this region's registered point-"
+                        "sequence path; \"Point Sequence Sweep\" operates on points along that path in "
+                        "order, following the interval/random-offset settings (set in ①'s operation "
+                        "region editor).")},
+        {QStringLiteral(" | [点列：ランダム]"), QStringLiteral(" | [Point Sequence: Random]")},
+        {QStringLiteral(" | [点列：スイープ]"), QStringLiteral(" | [Point Sequence: Sweep]")},
 
         // v0.96: "操作領域を確認" button -- shows every registered named
         // region on screen at once (MainWindow::onToggleShowAllRegions()).

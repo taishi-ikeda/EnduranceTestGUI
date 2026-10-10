@@ -337,25 +337,40 @@ private:
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
                            bool &ok);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
-    // Counterpart to pickRandomPoint() above (SPEC.md 10) for both
-    // RegionStep::PointSelectionMode::Sweep and a sweep-type NamedRegion
-    // (SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/「中点対応」):
-    // advances through the evenly spaced sequence described by `waypoints`/
-    // `intervalPx` (see sweepPointSequence()) one point per call, wrapping
-    // back to the first waypoint once exhausted, adding up to `jitterPx` of
-    // random offset in x/y to the point actually returned. `indexKey` is
-    // used as the key into m_sweepPointIndex to remember this particular
-    // sequence's position independently of every other one in progress --
-    // see m_sweepPointIndex's own comment for what callers pass (a
-    // RegionStep's address, with its two-point `waypoints` built on the
-    // fly, or a NamedRegion's address with its own multi-point
-    // `sweepWaypoints` passed directly) and why both stay valid for the
-    // whole run. Skips (advances past, without returning) any point that
-    // lands in `excludeRegions`, up to once around the whole sequence; `ok`
-    // is false (and the return value meaningless) only if every point in
-    // the sequence is excluded, or `waypoints` has fewer than 2 entries.
+    // Counterpart to pickRandomPoint() above (SPEC.md 10) for a sweep-type
+    // NamedRegion (SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/
+    // 「中点対応」) whose step has RegionStep::sweepRegionUseRandomPoint ==
+    // false (点列スイープ, the deterministic mode): advances through the
+    // evenly spaced sequence described by `waypoints`/`intervalPx` (see
+    // sweepPointSequence()) one point per call, wrapping back to the first
+    // waypoint once exhausted, adding up to `jitterPx` of random offset in
+    // x/y to the point actually returned. `indexKey` is used as the key
+    // into m_sweepPointIndex to remember this particular sequence's
+    // position independently of every other one in progress -- see
+    // m_sweepPointIndex's own comment (a NamedRegion's own address,
+    // m_currentSweepRegionKey, stable for the whole run since m_config is
+    // only ever assigned once, in start()). Skips (advances past, without
+    // returning) any point that lands in `excludeRegions`, up to once
+    // around the whole sequence; `ok` is false (and the return value
+    // meaningless) only if every point in the sequence is excluded, or
+    // `waypoints` has fewer than 2 entries.
     QPoint pickSweepPoint(const void *indexKey, const QList<QPoint> &waypoints, int intervalPx,
                           int jitterPx, const QList<QRect> &excludeRegions, bool &ok);
+    // Counterpart to pickSweepPoint() above for
+    // RegionStep::sweepRegionUseRandomPoint == true (ランダム mode on a
+    // sweep-type NamedRegion): picks a uniform-random point along the
+    // whole connected path through every consecutive pair in `waypoints`
+    // (the same path pickSweepPoint() walks deterministically), weighting
+    // each segment by its own length so the distribution is uniform over
+    // path *distance* rather than over segment count -- a long segment
+    // between two waypoints gets proportionally more candidate points than
+    // a short one. Independently chosen for every call (no index to
+    // remember). Retries a bounded number of times on a point landing in
+    // `excludeRegions` before giving up; `ok` is false (and the return
+    // value meaningless) if every attempt is excluded, the path has zero
+    // total length, or `waypoints` has fewer than 2 entries.
+    QPoint pickRandomPointOnSweepPath(const QList<QPoint> &waypoints, int jitterPx,
+                                      const QList<QRect> &excludeRegions, bool &ok);
     // The fixed sequence of window-relative points pickSweepPoint() steps
     // through for one `waypoints`/`intervalPx` pair: walks each consecutive
     // pair in `waypoints` in order (waypoints[0]->[1], [1]->[2], ...),
@@ -671,14 +686,12 @@ private:
     // just did.
     QList<MouseActionMarker> m_recentMouseActions;
 
-    // pickSweepPoint()'s position within a sweepStart→sweepEnd sequence,
-    // keyed by whichever address identifies the sequence it belongs to: a
-    // RegionStep's own address for RegionStep::pointSelectionMode ==
-    // Sweep (per-step, or per-group/task-member), or a NamedRegion's own
-    // address (m_currentSweepRegionKey) for a sweep-type NamedRegion
-    // (shared by every step that references that region by name) -- both
-    // stable for the whole run, since m_config is only ever assigned once,
-    // in start() (see pickSweepPoint()'s own comment). Reset at the top of
-    // every start().
+    // pickSweepPoint()'s position within a sweep-type NamedRegion's own
+    // waypoint sequence, keyed by that NamedRegion's own address
+    // (m_currentSweepRegionKey) -- shared by every step that references
+    // that region by name, so the sequence advances once per action
+    // regardless of which step(s) use it. Stable for the whole run, since
+    // m_config is only ever assigned once, in start() (see
+    // pickSweepPoint()'s own comment). Reset at the top of every start().
     QMap<const void *, int> m_sweepPointIndex;
 };

@@ -2,17 +2,23 @@
 
 #include <QDialog>
 
+#include "RegionEditContext.h"
 #include "TestConfig.h"
 
 class QRadioButton;
 class QComboBox;
 class QGroupBox;
+class QPushButton;
 class ActionKindEditor;
 class ActionParamsEditor;
 
 // Small modal dialog for picking which region a step operates in -- either
-// the live target-window bounds, or one of the named operation regions
-// already defined in the "①対象選択" column (see NamedRegionEditorDialog).
+// the live target-window bounds, or one of the named operation regions in
+// the shared pool (SPEC.md 6.3) -- and for authoring that pool directly:
+// "新規作成.../編集.../削除" open NamedRegionEditorDialog and mutate
+// `*regionCtx->namedRegions` in place (see RegionEditContext's own comment),
+// so a region created while editing one step is immediately selectable from
+// any other step's dialog.
 //
 // For a top-level step in "②ステップ構成" (includeActionParams=true, the
 // only caller that passes it), this dialog *also* covers everything that
@@ -25,7 +31,9 @@ class ActionParamsEditor;
 // default): StepGroupEditorDialog/TaskEditorDialog already have their own
 // equivalent kind/params editor bound to their own member list, mirroring
 // how this column used to work, and embedding another copy here would just
-// show it twice.
+// show it twice. The region-authoring buttons above, however, are shown
+// regardless of includeActionParams, so a group/task member can create or
+// reuse a region exactly like a top-level step can.
 class StepEditorDialog : public QDialog
 {
     Q_OBJECT
@@ -38,11 +46,15 @@ public:
     // default) for every other caller (a top-level step, or a step-group
     // member) so the option doesn't show there at all.
     //
+    // `regionCtx` must outlive this dialog's exec() call (callers hold it as
+    // a local/member RegionEditContext and pass its address -- see
+    // RegionEditContext.h).
+    //
     // `defaultActionParams` is only read when `includeActionParams` is true
     // (to display what "デフォルトを使う" resolves to, and to seed the
     // custom-params editor the first time the user switches to "このステップ
     // 専用の設定を使う"); ignored otherwise.
-    StepEditorDialog(const RegionStep &initial, const QList<NamedRegion> &availableRegions,
+    StepEditorDialog(const RegionStep &initial, RegionEditContext *regionCtx,
                       QWidget *parent = nullptr, bool allowPopupDialogTarget = false,
                       bool includeActionParams = false,
                       const ActionParams &defaultActionParams = ActionParams());
@@ -71,11 +83,25 @@ private slots:
     void onModeChanged();
     void onActionParamsModeChanged();
     void onRegionSelectionChanged();
+    void onCreateRegion();
+    void onEditRegion();
+    void onDeleteRegion();
 
 private:
+    // Repopulates m_namedRegionCombo from *m_regionCtx->namedRegions,
+    // preserving the current selection by name where possible (or selecting
+    // `selectIndex` if >= 0, e.g. right after a newly created region is
+    // appended at the end of the pool). Also refreshes every enabled state
+    // that depends on whether the pool is currently empty.
+    void refreshRegionCombo(int selectIndex = -1);
+    void updateRegionButtonsEnabled();
+
     QRadioButton *m_wholeWindowRadio = nullptr;
     QRadioButton *m_namedRegionRadio = nullptr;
     QComboBox *m_namedRegionCombo = nullptr;
+    QPushButton *m_createRegionButton = nullptr;
+    QPushButton *m_editRegionButton = nullptr;
+    QPushButton *m_deleteRegionButton = nullptr;
     QRadioButton *m_popupDialogRadio = nullptr;  // null unless allowPopupDialogTarget was true
 
     // Null unless constructed with includeActionParams=true.
@@ -98,6 +124,6 @@ private:
     QRadioButton *m_sweepRandomRadio = nullptr;
     QRadioButton *m_sweepSequenceRadio = nullptr;
 
-    QList<NamedRegion> m_availableRegions;
+    RegionEditContext *m_regionCtx = nullptr;
     bool m_initialSweepRegionUseRandomPoint = false;
 };

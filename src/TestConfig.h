@@ -195,8 +195,8 @@ struct NamedRegion
     // this off.
     //
     // Defaults to true (SPEC.md追加実装及び修正依頼): this only matters for
-    // a *freshly default-constructed* NamedRegion -- i.e. MainWindow::
-    // onAddNamedRegion()'s starting point for a brand-new region, which is
+    // a *freshly default-constructed* NamedRegion -- i.e. StepEditorDialog::
+    // onCreateRegion()'s starting point for a brand-new region, which is
     // what NamedRegionEditorDialog's "対象ウィンドウの移動に追従させる"
     // checkbox's initial checked state is seeded from. A region loaded from
     // a saved preset always gets this explicitly from the JSON (defaulting

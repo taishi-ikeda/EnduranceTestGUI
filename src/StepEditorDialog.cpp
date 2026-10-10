@@ -2,6 +2,7 @@
 #include "ActionKindEditor.h"
 #include "ActionParamsEditor.h"
 #include "I18n.h"
+#include "NamedRegionEditorDialog.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -9,15 +10,41 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
 
-StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedRegion> &availableRegions,
-                                    QWidget *parent, bool allowPopupDialogTarget, bool includeActionParams,
+namespace
+{
+// "操作領域1", "操作領域2", ... -- the first of these not already used by an
+// existing named region, mirroring the naming scheme the old ①対象選択
+// panel's "追加..." button used to generate (see MainWindow::
+// generateDefaultRegionName()'s own identical rationale, now folded in here
+// since region authoring moved to this dialog).
+QString generateDefaultRegionName(const QList<NamedRegion> &existing)
+{
+    for (int n = 1;; ++n) {
+        const QString candidate = I18n::t(QStringLiteral("操作領域%1")).arg(n);
+        bool used = false;
+        for (const NamedRegion &region : existing) {
+            if (region.name == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used)
+            return candidate;
+    }
+}
+}  // namespace
+
+StepEditorDialog::StepEditorDialog(const RegionStep &initial, RegionEditContext *regionCtx, QWidget *parent,
+                                    bool allowPopupDialogTarget, bool includeActionParams,
                                     const ActionParams &defaultActionParams)
     : QDialog(parent), m_defaultActionParams(defaultActionParams),
-      m_initialCustomActionParams(initial.customActionParams), m_availableRegions(availableRegions),
+      m_initialCustomActionParams(initial.customActionParams), m_regionCtx(regionCtx),
       m_initialSweepRegionUseRandomPoint(initial.sweepRegionUseRandomPoint)
 {
     setWindowTitle(includeActionParams ? I18n::t(QStringLiteral("ステップの設定"))
@@ -41,19 +68,31 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
     auto *namedRegionRow = new QHBoxLayout;
     namedRegionRow->addWidget(m_namedRegionRadio);
     m_namedRegionCombo = new QComboBox(this);
-    for (const NamedRegion &region : availableRegions)
-        m_namedRegionCombo->addItem(region.name);
     namedRegionRow->addWidget(m_namedRegionCombo, 1);
     layout->addLayout(namedRegionRow);
+
+    // SPEC.md 追加実装依頼「操作領域の指定をステップ単位のダイアログへ
+    // 統合」: region authoring moved here from the now-removed "①対象選択"
+    // panel -- these mutate *m_regionCtx->namedRegions directly (the same
+    // pool every other step's dialog shares), independently of whether this
+    // whole dialog is later accepted or cancelled, exactly like the old
+    // panel's own add/edit/delete buttons did.
+    auto *namedRegionManageRow = new QHBoxLayout;
+    m_createRegionButton = new QPushButton(I18n::t(QStringLiteral("新規作成...")), this);
+    m_editRegionButton = new QPushButton(I18n::t(QStringLiteral("編集...")), this);
+    m_deleteRegionButton = new QPushButton(I18n::t(QStringLiteral("削除")), this);
+    namedRegionManageRow->addWidget(m_createRegionButton);
+    namedRegionManageRow->addWidget(m_editRegionButton);
+    namedRegionManageRow->addWidget(m_deleteRegionButton);
+    namedRegionManageRow->addStretch();
+    layout->addLayout(namedRegionManageRow);
+
     connect(m_wholeWindowRadio, &QRadioButton::toggled, this, &StepEditorDialog::onModeChanged);
     connect(m_namedRegionCombo, &QComboBox::currentTextChanged, this,
             &StepEditorDialog::onRegionSelectionChanged);
-
-    if (availableRegions.isEmpty()) {
-        m_namedRegionRadio->setEnabled(false);
-        m_namedRegionCombo->setEnabled(false);
-        m_namedRegionCombo->addItem(I18n::t(QStringLiteral("（①対象選択パネルで操作領域を追加してください）")));
-    }
+    connect(m_createRegionButton, &QPushButton::clicked, this, &StepEditorDialog::onCreateRegion);
+    connect(m_editRegionButton, &QPushButton::clicked, this, &StepEditorDialog::onEditRegion);
+    connect(m_deleteRegionButton, &QPushButton::clicked, this, &StepEditorDialog::onDeleteRegion);
 
     if (allowPopupDialogTarget) {
         m_popupDialogRadio = new QRadioButton(
@@ -95,7 +134,7 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
         auto *sweepModeHintLabel = new QLabel(
             I18n::t(QStringLiteral("「ランダム」はこの操作領域に登録された点列の経路上をランダムに操作し、"
                                     "「点列スイープ」は経路上を間隔・ランダム幅の設定に従って順番に操作します"
-                                    "（間隔・ランダム幅は①の操作領域の編集画面で設定します）。")),
+                                    "（間隔・ランダム幅は「編集...」の操作領域編集画面で設定します）。")),
             m_sweepModeGroup);
         sweepModeHintLabel->setWordWrap(true);
         sweepModeLayout->addWidget(sweepModeHintLabel);
@@ -141,10 +180,13 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttonBox);
 
+    refreshRegionCombo();
+
     // Populate from `initial`.
+    const bool hasRegions = m_regionCtx && m_regionCtx->namedRegions && !m_regionCtx->namedRegions->isEmpty();
     if (m_popupDialogRadio && initial.targetsPopupDialog) {
         m_popupDialogRadio->setChecked(true);
-    } else if (initial.useWholeWindow || availableRegions.isEmpty()) {
+    } else if (initial.useWholeWindow || !hasRegions) {
         m_wholeWindowRadio->setChecked(true);
     } else {
         m_namedRegionRadio->setChecked(true);
@@ -172,7 +214,7 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, const QList<NamedR
     if (includeActionParams)
         resize(560, 760);
     else
-        resize(420, allowPopupDialogTarget ? 280 : 200);
+        resize(460, allowPopupDialogTarget ? 320 : 240);
 }
 
 void StepEditorDialog::onModeChanged()
@@ -234,12 +276,13 @@ void StepEditorDialog::applySweepModeTo(RegionStep &step) const
 
 void StepEditorDialog::onRegionSelectionChanged()
 {
+    updateRegionButtonsEnabled();
     if (!m_sweepModeGroup)
         return;
     bool isSweepRegion = false;
-    if (m_namedRegionRadio->isChecked()) {
+    if (m_namedRegionRadio->isChecked() && m_regionCtx && m_regionCtx->namedRegions) {
         const QString name = m_namedRegionCombo->currentText();
-        for (const NamedRegion &region : m_availableRegions) {
+        for (const NamedRegion &region : *m_regionCtx->namedRegions) {
             if (region.name == name && region.isSweepTarget) {
                 isSweepRegion = true;
                 break;
@@ -247,4 +290,123 @@ void StepEditorDialog::onRegionSelectionChanged()
         }
     }
     m_sweepModeGroup->setVisible(isSweepRegion);
+}
+
+void StepEditorDialog::refreshRegionCombo(int selectIndex)
+{
+    const QString previousText =
+        (selectIndex < 0 && m_namedRegionCombo->count() > 0) ? m_namedRegionCombo->currentText() : QString();
+
+    m_namedRegionCombo->blockSignals(true);
+    m_namedRegionCombo->clear();
+    const bool hasRegions = m_regionCtx && m_regionCtx->namedRegions && !m_regionCtx->namedRegions->isEmpty();
+    if (hasRegions) {
+        for (const NamedRegion &region : *m_regionCtx->namedRegions)
+            m_namedRegionCombo->addItem(region.name);
+    } else {
+        m_namedRegionCombo->addItem(
+            I18n::t(QStringLiteral("（操作領域がありません。「新規作成...」から追加してください）")));
+        // The just-deleted (or never-existing) region can no longer be
+        // selected -- fall back to the always-available whole-window
+        // choice rather than leaving the radio checked with nothing valid
+        // behind it.
+        if (m_namedRegionRadio->isChecked())
+            m_wholeWindowRadio->setChecked(true);
+    }
+    m_namedRegionRadio->setEnabled(hasRegions);
+
+    if (selectIndex >= 0 && selectIndex < m_namedRegionCombo->count()) {
+        m_namedRegionCombo->setCurrentIndex(selectIndex);
+    } else if (!previousText.isEmpty()) {
+        const int idx = m_namedRegionCombo->findText(previousText);
+        m_namedRegionCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+    }
+    m_namedRegionCombo->blockSignals(false);
+
+    onModeChanged();  // recomputes combo's own enabled-state from the radios
+    updateRegionButtonsEnabled();
+}
+
+void StepEditorDialog::updateRegionButtonsEnabled()
+{
+    const bool hasValidSelection = m_regionCtx && m_regionCtx->namedRegions &&
+                                    m_namedRegionCombo->currentIndex() >= 0 &&
+                                    m_namedRegionCombo->currentIndex() < m_regionCtx->namedRegions->size();
+    m_editRegionButton->setEnabled(hasValidSelection);
+    m_deleteRegionButton->setEnabled(hasValidSelection);
+}
+
+void StepEditorDialog::onCreateRegion()
+{
+    if (!m_regionCtx || !m_regionCtx->namedRegions)
+        return;
+
+    NamedRegion initial;
+    initial.name = generateDefaultRegionName(*m_regionCtx->namedRegions);
+    NamedRegionEditorDialog dialog(initial, m_regionCtx->targetTopLeft, m_regionCtx->hasTarget,
+                                   m_regionCtx->targetPid, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const NamedRegion region = dialog.result();
+    for (const NamedRegion &existing : *m_regionCtx->namedRegions) {
+        if (existing.name == region.name) {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
+            return;
+        }
+    }
+    m_regionCtx->namedRegions->append(region);
+    refreshRegionCombo(m_regionCtx->namedRegions->size() - 1);
+    m_namedRegionRadio->setChecked(true);
+}
+
+void StepEditorDialog::onEditRegion()
+{
+    if (!m_regionCtx || !m_regionCtx->namedRegions)
+        return;
+    const int idx = m_namedRegionCombo->currentIndex();
+    if (idx < 0 || idx >= m_regionCtx->namedRegions->size())
+        return;
+
+    const QString oldName = (*m_regionCtx->namedRegions)[idx].name;
+    NamedRegionEditorDialog dialog((*m_regionCtx->namedRegions)[idx], m_regionCtx->targetTopLeft,
+                                   m_regionCtx->hasTarget, m_regionCtx->targetPid, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const NamedRegion region = dialog.result();
+    for (int i = 0; i < m_regionCtx->namedRegions->size(); ++i) {
+        if (i != idx && (*m_regionCtx->namedRegions)[i].name == region.name) {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
+            return;
+        }
+    }
+    (*m_regionCtx->namedRegions)[idx] = region;
+    if (oldName != region.name && m_regionCtx->renameReferences)
+        m_regionCtx->renameReferences(oldName, region.name);
+    refreshRegionCombo(idx);
+}
+
+void StepEditorDialog::onDeleteRegion()
+{
+    if (!m_regionCtx || !m_regionCtx->namedRegions)
+        return;
+    const int idx = m_namedRegionCombo->currentIndex();
+    if (idx < 0 || idx >= m_regionCtx->namedRegions->size())
+        return;
+
+    const QString name = (*m_regionCtx->namedRegions)[idx].name;
+    if (m_regionCtx->stepsReferencing) {
+        const QStringList refs = m_regionCtx->stepsReferencing(name);
+        if (!refs.isEmpty()) {
+            QMessageBox::warning(
+                this, I18n::t(QStringLiteral("削除できません")),
+                I18n::t(QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
+                                        "先にそれらのステップの領域を変更するか、ステップを削除してください。"))
+                    .arg(refs.join(QStringLiteral(", "))));
+            return;
+        }
+    }
+    m_regionCtx->namedRegions->removeAt(idx);
+    refreshRegionCombo();
 }

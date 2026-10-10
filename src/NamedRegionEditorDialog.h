@@ -18,8 +18,9 @@ class PointHighlightOverlay;
 
 // Modal dialog for creating/editing one NamedRegion: a name, one or more
 // rectangles drawn via RegionSelectorOverlay, and optional mask/exclude
-// sub-rectangles within them. Used from the "①対象選択" column's operation-
-// region list (add/edit) -- see SPEC.md 6.3.
+// sub-rectangles within them. Used from StepEditorDialog's "新規作成.../
+// 編集..." buttons (region authoring is per-step now, not a standalone
+// "①対象選択" panel -- see RegionEditContext) -- see SPEC.md 6.3.
 //
 // While this dialog is open, the region being built/edited is shown on
 // screen the whole time via RegionHighlightOverlay (updated after every

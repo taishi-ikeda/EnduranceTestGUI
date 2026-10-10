@@ -8,6 +8,7 @@
 #include <QPointer>
 
 #include "RandomActionEngine.h"
+#include "RegionEditContext.h"
 #include "TestConfig.h"
 #include "TestStatistics.h"
 #include "platform/PlatformAutomation.h"
@@ -82,9 +83,6 @@ private slots:
     void onRefreshTargets();
     void refreshPermissionLabel();
 
-    void onAddNamedRegion();
-    void onEditSelectedNamedRegion();
-    void onRemoveSelectedNamedRegion();
     // SPEC.md 10「操作領域を確認するボタン」: toggles m_allRegionsHighlightOverlay
     // showing every entry in m_namedRegions at once, or hides it again.
     void onToggleShowAllRegions();
@@ -192,7 +190,6 @@ private:
     QWidget *buildStepsColumn(QWidget *parent);
 
     void refreshStepList();
-    void refreshNamedRegionList();
     void refreshSetupActionList();
     QString describeSetupAction(const SetupAction &action, int index) const;
     // Live bounds top-left of whatever target is currently selected in
@@ -232,10 +229,6 @@ private:
     // unset) if no target is currently selectable.
     bool currentTargetBounds(QRect &outBounds) const;
     QString describeNamedRegion(const NamedRegion &region) const;
-    // "領域1", "領域2", ... -- the first of these not already used by an
-    // existing named region, so a new region always starts with a usable
-    // name and the user isn't required to type one (SPEC.md 6.3).
-    QString generateDefaultRegionName() const;
     // Names of steps (1-based, human-facing) that reference this named
     // region; used to block deleting/renaming a region still in use.
     // Recurses into group members (a step inside a group can reference a
@@ -245,6 +238,13 @@ private:
     // top-level or inside a group (SPEC.md 6.2/6.3) -- called when a named
     // region is renamed so existing references keep pointing at it.
     void renameRegionReferences(QList<RegionStep> &steps, const QString &oldName, const QString &newName) const;
+    // Bundles m_namedRegions (by pointer, so every step dialog shares the
+    // same pool), the current target's top-left/pid, and the two callbacks
+    // above into one RegionEditContext (see its own comment) -- called
+    // fresh by onAddStep()/onEditSelectedStep() each time a step/group/task
+    // editor dialog is about to open, since region authoring now lives
+    // there instead of a standalone "①対象選択" panel.
+    RegionEditContext buildRegionEditContext();
     // True if every enabled action kind on `step` (or, when it's a group,
     // on every one of its members) has the configuration it needs to
     // actually run (e.g. enableKey needs a non-empty character set) --
@@ -505,11 +505,11 @@ private:
     // applied, etc.). Off by default; a no-op whenever nothing has been saved yet.
     QCheckBox *m_applySavedGeometryOnRelaunchCheck = nullptr;
 
-    // Named operation regions (pool, referenced by name from steps)
-    QListWidget *m_namedRegionListWidget = nullptr;
-    QPushButton *m_addNamedRegionButton = nullptr;
-    QPushButton *m_editNamedRegionButton = nullptr;
-    QPushButton *m_removeNamedRegionButton = nullptr;
+    // Named operation regions (pool, referenced by name from steps -- see
+    // RegionEditContext). No longer has a standalone management UI of its
+    // own: each step's own "編集..." dialog (StepEditorDialog) authors this
+    // pool directly via "新規作成.../編集.../削除", shared across every
+    // step/group/task-member dialog by pointer.
     QList<NamedRegion> m_namedRegions;
 
     // SPEC.md 10「操作領域を確認するボタン」: toggleable on-screen preview
@@ -751,7 +751,6 @@ private:
 
     // Groups (disabled while running)
     QGroupBox *m_targetGroup = nullptr;
-    QGroupBox *m_namedRegionGroup = nullptr;
     QGroupBox *m_stepsGroup = nullptr;
     QGroupBox *m_timingGroup = nullptr;
 

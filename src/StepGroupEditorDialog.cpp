@@ -25,19 +25,33 @@ const ActionParams &effectiveParamsOf(const RegionStep &member, const ActionPara
 }
 }  // namespace
 
-StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup,
-                                              const QList<NamedRegion> &namedRegions,
+StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup, RegionEditContext *regionCtx,
                                               const ActionParams &defaultActionParams,
                                               const RegionStep &defaultActionKindsTemplate,
                                               QWidget *parent)
     : QDialog(parent),
-      m_namedRegions(namedRegions),
+      m_regionCtx(regionCtx ? *regionCtx : RegionEditContext()),
       m_defaultActionParams(defaultActionParams),
       m_defaultActionKindsTemplate(defaultActionKindsTemplate),
       m_members(initialGroup.isGroup ? initialGroup.groupMembers : QList<RegionStep>())
 {
     setWindowTitle(I18n::t(QStringLiteral("グループの編集")));
     resize(720, 560);
+
+    // Wrap the incoming (global, MainWindow::m_steps-based) reference check
+    // so a sibling member inside THIS still-open, not-yet-committed group
+    // also blocks deleting a region it uses -- the global check alone can't
+    // see m_members, since it isn't written back into MainWindow::m_steps
+    // until this whole dialog is accepted.
+    auto globalCheck = m_regionCtx.stepsReferencing;
+    m_regionCtx.stepsReferencing = [this, globalCheck](const QString &name) {
+        QStringList result = globalCheck ? globalCheck(name) : QStringList();
+        for (int i = 0; i < m_members.size(); ++i) {
+            if (!m_members[i].useWholeWindow && m_members[i].regionName == name)
+                result << I18n::t(QStringLiteral("このグループのメンバー%1")).arg(i + 1);
+        }
+        return result;
+    };
 
     auto *layout = new QVBoxLayout(this);
 
@@ -286,7 +300,7 @@ void StepGroupEditorDialog::onMemberSelectionChanged()
 
 void StepGroupEditorDialog::onAddMember()
 {
-    StepEditorDialog dialog(RegionStep(), m_namedRegions, this);
+    StepEditorDialog dialog(RegionStep(), &m_regionCtx, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -313,7 +327,7 @@ void StepGroupEditorDialog::onEditSelectedMember()
     if (row < 0 || row >= m_members.size())
         return;
 
-    StepEditorDialog dialog(m_members[row], m_namedRegions, this);
+    StepEditorDialog dialog(m_members[row], &m_regionCtx, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {

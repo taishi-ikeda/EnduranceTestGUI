@@ -2,6 +2,7 @@
 
 #include <QDialog>
 
+#include "RegionEditContext.h"
 #include "TestConfig.h"
 
 class QListWidget;
@@ -34,7 +35,7 @@ public:
     // effective params from the live default at run time regardless of
     // what was shown here), and `defaultActionKindsTemplate` seeds a
     // newly-added member's kinds/weights (its actionCount is ignored).
-    StepGroupEditorDialog(const RegionStep &initialGroup, const QList<NamedRegion> &namedRegions,
+    StepGroupEditorDialog(const RegionStep &initialGroup, RegionEditContext *regionCtx,
                            const ActionParams &defaultActionParams,
                            const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr);
 
@@ -58,7 +59,12 @@ private:
     void flushMemberEditor();
     void loadMemberEditorForSelection();
 
-    QList<NamedRegion> m_namedRegions;
+    // Own copy (not a pointer into MainWindow's) since this dialog wraps
+    // stepsReferencing() below to also consider its own in-progress
+    // m_members (see the constructor); the incoming RegionEditContext's
+    // other fields (namedRegions pointer, target info) are forwarded
+    // unchanged.
+    RegionEditContext m_regionCtx;
     ActionParams m_defaultActionParams;
     RegionStep m_defaultActionKindsTemplate;
     QList<RegionStep> m_members;

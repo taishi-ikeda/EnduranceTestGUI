@@ -2,6 +2,7 @@
 
 #include <QDialog>
 
+#include "RegionEditContext.h"
 #include "TestConfig.h"
 
 class QListWidget;
@@ -27,7 +28,7 @@ class TaskEditorDialog : public QDialog
 
 public:
     // Same parameter meaning as StepGroupEditorDialog's constructor.
-    TaskEditorDialog(const RegionStep &initialTask, const QList<NamedRegion> &namedRegions,
+    TaskEditorDialog(const RegionStep &initialTask, RegionEditContext *regionCtx,
                       const ActionParams &defaultActionParams,
                       const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr);
 
@@ -50,7 +51,9 @@ private:
     void flushMemberEditor();
     void loadMemberEditorForSelection();
 
-    QList<NamedRegion> m_namedRegions;
+    // Own copy (not a pointer into MainWindow's) -- see StepGroupEditorDialog's
+    // identical member comment.
+    RegionEditContext m_regionCtx;
     ActionParams m_defaultActionParams;
     RegionStep m_defaultActionKindsTemplate;
     QList<RegionStep> m_members;

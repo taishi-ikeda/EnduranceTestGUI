@@ -48,7 +48,6 @@
 #include "LoadMonitorChartWidget.h"
 #include "LoadMonitorWindow.h"
 #include "ManualRecorder.h"
-#include "NamedRegionEditorDialog.h"
 #include "RecordingIndicatorPanel.h"
 #include "OverlayGeometry.h"
 #include "RegionHighlightOverlay.h"
@@ -354,7 +353,6 @@ void MainWindow::buildUi()
 
     rootLayout->addWidget(outerSplitter, 1);
 
-    refreshNamedRegionList();
     refreshStepList();
     updateStatisticsDisplay();
 
@@ -756,46 +754,6 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
 
     layout->addWidget(m_setupActionsGroup);
 
-    // --- Named operation regions ---
-    m_namedRegionGroup = new QGroupBox(
-        I18n::t(QStringLiteral("操作領域（名前付き。②でステップ作成時に選択して使う）")), container);
-    auto *namedRegionLayout = new QVBoxLayout(m_namedRegionGroup);
-    m_namedRegionListWidget = new QListWidget(m_namedRegionGroup);
-    m_namedRegionListWidget->setMaximumHeight(110);
-    namedRegionLayout->addWidget(m_namedRegionListWidget);
-    auto *namedRegionButtonsRow = new QHBoxLayout;
-    m_addNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("追加...")), m_namedRegionGroup);
-    m_editNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("編集...")), m_namedRegionGroup);
-    m_removeNamedRegionButton = new QPushButton(I18n::t(QStringLiteral("削除")), m_namedRegionGroup);
-    namedRegionButtonsRow->addWidget(m_addNamedRegionButton);
-    namedRegionButtonsRow->addWidget(m_editNamedRegionButton);
-    namedRegionButtonsRow->addWidget(m_removeNamedRegionButton);
-    namedRegionLayout->addLayout(namedRegionButtonsRow);
-
-    // SPEC.md 10「操作領域を確認するボタン」: a toggle, separate row from
-    // 追加/編集/削除 above since it acts on every registered region at
-    // once rather than the one currently selected in the list.
-    m_showAllRegionsButton =
-        new QPushButton(I18n::t(QStringLiteral("操作領域を確認")), m_namedRegionGroup);
-    namedRegionLayout->addWidget(m_showAllRegionsButton);
-
-    // See m_allRegionsAutoHideTimer's declaration in MainWindow.h: fires
-    // onToggleShowAllRegions() again after a fixed delay as a safety net,
-    // which hides the overlay since m_showingAllRegions is still true at
-    // that point -- the same handler the button itself calls.
-    m_allRegionsAutoHideTimer = new QTimer(this);
-    m_allRegionsAutoHideTimer->setSingleShot(true);
-    m_allRegionsAutoHideTimer->setInterval(12000);
-    connect(m_allRegionsAutoHideTimer, &QTimer::timeout, this, &MainWindow::onToggleShowAllRegions);
-
-    connect(m_addNamedRegionButton, &QPushButton::clicked, this, &MainWindow::onAddNamedRegion);
-    connect(m_editNamedRegionButton, &QPushButton::clicked, this,
-            &MainWindow::onEditSelectedNamedRegion);
-    connect(m_removeNamedRegionButton, &QPushButton::clicked, this,
-            &MainWindow::onRemoveSelectedNamedRegion);
-    connect(m_showAllRegionsButton, &QPushButton::clicked, this,
-            &MainWindow::onToggleShowAllRegions);
-
     // --- Timing group ---
     m_timingGroup = new QGroupBox(I18n::t(QStringLiteral("タイミング・制限")), container);
     auto *timingForm = new QFormLayout(m_timingGroup);
@@ -1069,12 +1027,7 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     // （コンストラクタで構築、「表示」メニューから開閉）。ここにはもう
     // embedしない。
 
-    // 操作領域とタイミング・制限を横並びに配置する（残りの縦方向の空きは
-    // タイミング・制限側の入力欄の折り返し等に使われがちなので、少し広めに割り当てる）。
-    auto *namedRegionAndTimingRow = new QHBoxLayout;
-    namedRegionAndTimingRow->addWidget(m_namedRegionGroup, 1);
-    namedRegionAndTimingRow->addWidget(m_timingGroup, 1);
-    layout->addLayout(namedRegionAndTimingRow);
+    layout->addWidget(m_timingGroup);
     layout->addWidget(m_loadInjectionGroup);
     layout->addStretch();
 
@@ -1169,6 +1122,28 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     connect(m_ungroupStepButton, &QPushButton::clicked, this, &MainWindow::onUngroupSelectedStep);
     connect(m_taskifyStepsButton, &QPushButton::clicked, this, &MainWindow::onTaskifySelectedSteps);
     connect(m_untaskifyStepButton, &QPushButton::clicked, this, &MainWindow::onUntaskifySelectedStep);
+
+    // SPEC.md 10「操作領域を確認するボタン」: moved here from the now-removed
+    // "①対象選択" named-region panel -- operation regions are now authored
+    // per-step, inside each step's own "編集..." dialog (see
+    // RegionEditContext), so this is the only region-related control left
+    // in the main window. Still a toggle that shows every region currently
+    // in the shared pool at once, each labeled with which step(s)
+    // reference it (see refreshAllRegionsHighlight()).
+    auto *showAllRegionsRow = new QHBoxLayout;
+    m_showAllRegionsButton = new QPushButton(I18n::t(QStringLiteral("操作領域を確認")), m_stepsGroup);
+    showAllRegionsRow->addWidget(m_showAllRegionsButton);
+    stepsLayout->addLayout(showAllRegionsRow);
+
+    // See m_allRegionsAutoHideTimer's declaration in MainWindow.h: fires
+    // onToggleShowAllRegions() again after a fixed delay as a safety net,
+    // which hides the overlay since m_showingAllRegions is still true at
+    // that point -- the same handler the button itself calls.
+    m_allRegionsAutoHideTimer = new QTimer(this);
+    m_allRegionsAutoHideTimer->setSingleShot(true);
+    m_allRegionsAutoHideTimer->setInterval(12000);
+    connect(m_allRegionsAutoHideTimer, &QTimer::timeout, this, &MainWindow::onToggleShowAllRegions);
+    connect(m_showAllRegionsButton, &QPushButton::clicked, this, &MainWindow::onToggleShowAllRegions);
 
     wrapperLayout->addWidget(m_stepsGroup, 1);
     return wrapper;
@@ -1377,12 +1352,6 @@ QString MainWindow::describeNamedRegion(const NamedRegion &region) const
         .arg(region.followsTargetWindow ? I18n::t(QStringLiteral(" [ウィンドウ追従]")) : QString());
 }
 
-void MainWindow::refreshNamedRegionList()
-{
-    m_namedRegionListWidget->clear();
-    for (const NamedRegion &region : m_namedRegions)
-        m_namedRegionListWidget->addItem(describeNamedRegion(region));
-}
 
 QString MainWindow::describeSetupAction(const SetupAction &action, int index) const
 {
@@ -1481,27 +1450,6 @@ void MainWindow::renameRegionReferences(QList<RegionStep> &steps, const QString 
             renameRegionReferences(step.taskMembers, oldName, newName);
         else if (!step.useWholeWindow && step.regionName == oldName)
             step.regionName = newName;
-    }
-}
-
-QString MainWindow::generateDefaultRegionName() const
-{
-    for (int n = 1;; ++n) {
-        // "操作領域N" (not just "領域N") so this doesn't read the same as
-        // the "領域N"/"除外N" labels NamedRegionEditorDialog gives the
-        // individual rectangles drawn inside one operation region -- those
-        // are a different, unrelated numbering scope and having both say
-        // "領域1" was confusing (SPEC.md 6.3).
-        const QString candidate = I18n::t(QStringLiteral("操作領域%1")).arg(n);
-        bool used = false;
-        for (const NamedRegion &existing : m_namedRegions) {
-            if (existing.name == candidate) {
-                used = true;
-                break;
-            }
-        }
-        if (!used)
-            return candidate;
     }
 }
 
@@ -1712,8 +1660,20 @@ bool MainWindow::refreshAllRegionsHighlight()
     QList<RegionHighlightEntry> entries;
     for (const NamedRegion &region : m_namedRegions) {
         QList<QRect> include, exclude;
-        if (resolveNamedRegionForDisplay(region, include, exclude))
-            entries.append(RegionHighlightEntry{region.name, include, exclude});
+        if (resolveNamedRegionForDisplay(region, include, exclude)) {
+            // SPEC.md 追加実装依頼「操作領域の指定をステップ単位のダイアログへ
+            // 統合」: with the standalone "①対象選択" region list gone, this
+            // overlay is now the only place every region's name is visible at
+            // once -- append which step(s) (if any) reference it so a region
+            // can still be identified/managed without hunting through each
+            // step's own dialog.
+            const QStringList refs = stepsReferencing(region.name);
+            const QString label =
+                refs.isEmpty()
+                    ? I18n::t(QStringLiteral("%1 （どのステップからも未参照）")).arg(describeNamedRegion(region))
+                    : I18n::t(QStringLiteral("%1 （%2）")).arg(describeNamedRegion(region), refs.join(QStringLiteral(", ")));
+            entries.append(RegionHighlightEntry{label, include, exclude});
+        }
     }
 
     if (entries.isEmpty()) {
@@ -1748,8 +1708,10 @@ void MainWindow::onToggleShowAllRegions()
     }
 
     if (m_namedRegions.isEmpty()) {
-        QMessageBox::information(this, I18n::t(QStringLiteral("操作領域がありません")),
-                                  I18n::t(QStringLiteral("①で操作領域を追加してから確認してください。")));
+        QMessageBox::information(
+            this, I18n::t(QStringLiteral("操作領域がありません")),
+            I18n::t(QStringLiteral("ステップの「編集...」ダイアログ内の「新規作成...」から"
+                                    "操作領域を追加してから確認してください。")));
         return;
     }
 
@@ -1764,71 +1726,19 @@ void MainWindow::onToggleShowAllRegions()
     m_showAllRegionsButton->setText(I18n::t(QStringLiteral("非表示にする")));
 }
 
-void MainWindow::onAddNamedRegion()
+RegionEditContext MainWindow::buildRegionEditContext()
 {
-    // Avoid two overlays competing for the same screen space: the dialog
-    // about to open shows its own single-region highlight while it's up
-    // (NamedRegionEditorDialog, see its own comment), so hide the "show
-    // all" overlay first rather than leaving it layered underneath.
-    if (m_showingAllRegions)
-        onToggleShowAllRegions();
-
-    NamedRegion initial;
-    initial.name = generateDefaultRegionName();
-    QPoint targetTopLeft;
-    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
-    // NamedRegionEditorDialog visualizes the region being built on screen
-    // itself for the duration it's open (SPEC.md 6.3) -- MainWindow no
-    // longer shows any on-screen highlight from the list selection.
-    NamedRegionEditorDialog dialog(initial, targetTopLeft, hasTarget, currentTargetPidOrInvalid(), this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    const NamedRegion region = dialog.result();
-    for (const NamedRegion &existing : m_namedRegions) {
-        if (existing.name == region.name) {
-            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
-                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
-            return;
-        }
-    }
-    m_namedRegions.append(region);
-    refreshNamedRegionList();
-    m_namedRegionListWidget->setCurrentRow(m_namedRegions.size() - 1);
-}
-
-void MainWindow::onEditSelectedNamedRegion()
-{
-    const int row = m_namedRegionListWidget->currentRow();
-    if (row < 0 || row >= m_namedRegions.size())
-        return;
-    const QString oldName = m_namedRegions[row].name;
-
-    // See onAddNamedRegion()'s identical comment.
-    if (m_showingAllRegions)
-        onToggleShowAllRegions();
-
-    QPoint targetTopLeft;
-    const bool hasTarget = currentTargetTopLeft(targetTopLeft);
-    NamedRegionEditorDialog dialog(m_namedRegions[row], targetTopLeft, hasTarget,
-                                    currentTargetPidOrInvalid(), this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    const NamedRegion region = dialog.result();
-
-    for (int i = 0; i < m_namedRegions.size(); ++i) {
-        if (i != row && m_namedRegions[i].name == region.name) {
-            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
-                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
-            return;
-        }
-    }
-
-    m_namedRegions[row] = region;
-    if (oldName != region.name) {
-        // Keep steps (top-level or inside a group) that referenced the old
-        // name pointing at the same region rather than silently breaking
-        // them.
-        renameRegionReferences(m_steps, oldName, region.name);
+    RegionEditContext ctx;
+    ctx.namedRegions = &m_namedRegions;
+    ctx.hasTarget = currentTargetTopLeft(ctx.targetTopLeft);
+    ctx.targetPid = currentTargetPidOrInvalid();
+    ctx.stepsReferencing = [this](const QString &regionName) { return stepsReferencing(regionName); };
+    ctx.renameReferences = [this](const QString &oldName, const QString &newName) {
+        // Keep steps (top-level or inside a group/task) that referenced the
+        // old name pointing at the same region rather than silently
+        // breaking them -- same rename-propagation the old ①対象選択
+        // panel's "編集..." button used to do.
+        renameRegionReferences(m_steps, oldName, newName);
         // refreshStepList() clears and re-adds all items, which drops the
         // list's current selection -- restore it so the user doesn't lose
         // their place.
@@ -1836,36 +1746,13 @@ void MainWindow::onEditSelectedNamedRegion()
         refreshStepList();
         if (selectedStepRow >= 0 && selectedStepRow < m_steps.size())
             m_stepListWidget->setCurrentRow(selectedStepRow);
-    }
-    refreshNamedRegionList();
-    // refreshNamedRegionList() clears and re-adds all items, dropping the
-    // selection -- restore it so the just-edited region stays selected.
-    m_namedRegionListWidget->setCurrentRow(row);
-}
-
-void MainWindow::onRemoveSelectedNamedRegion()
-{
-    const int row = m_namedRegionListWidget->currentRow();
-    if (row < 0 || row >= m_namedRegions.size())
-        return;
-
-    const QStringList referencingSteps = stepsReferencing(m_namedRegions[row].name);
-    if (!referencingSteps.isEmpty()) {
-        QMessageBox::warning(
-            this, I18n::t(QStringLiteral("削除できません")),
-            I18n::t(QStringLiteral("この操作領域は次のステップで使われているため削除できません: %1\n"
-                            "先にそれらのステップの領域を変更するか、ステップを削除してください。"))
-                .arg(referencingSteps.join(QStringLiteral(", "))));
-        return;
-    }
-
-    m_namedRegions.removeAt(row);
-    refreshNamedRegionList();
-    // Drop the removed region from the "show all" overlay too, if it's
-    // currently up, rather than leaving a stale rectangle on screen for a
-    // region that no longer exists.
-    if (m_showingAllRegions)
-        refreshAllRegionsHighlight();
+        // Also refresh the "操作領域を確認" overlay if it's currently
+        // showing, since its labels embed each region's name and the
+        // step(s) referencing it.
+        if (m_showingAllRegions)
+            refreshAllRegionsHighlight();
+    };
+    return ctx;
 }
 
 void MainWindow::onAddSetupAction()
@@ -2046,12 +1933,21 @@ void MainWindow::onEditDefaultParams()
 
 void MainWindow::onAddStep()
 {
+    // Avoid two overlays competing for the same screen space: the dialog
+    // about to open may itself open NamedRegionEditorDialog, which shows
+    // its own single-region highlight while it's up -- hide the "show all"
+    // overlay first rather than leaving it layered underneath (same
+    // precaution the old ①対象選択 panel's add/edit took).
+    if (m_showingAllRegions)
+        onToggleShowAllRegions();
+
     // Seed kinds/weights/count from the default preset up front (SPEC.md
     // 追加実装及び修正依頼): with the always-visible "③操作パラメータ"
     // column gone, this dialog is now the only place to configure a new
     // step's action kinds/params at all, so it needs a sensible starting
     // point rather than an entirely blank RegionStep().
-    StepEditorDialog dialog(m_defaultActionKinds, m_namedRegions, this, /*allowPopupDialogTarget=*/false,
+    RegionEditContext ctx = buildRegionEditContext();
+    StepEditorDialog dialog(m_defaultActionKinds, &ctx, this, /*allowPopupDialogTarget=*/false,
                             /*includeActionParams=*/true, m_defaultActionParams);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -2109,9 +2005,13 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
+    // See onAddStep()'s identical comment.
+    if (m_showingAllRegions)
+        onToggleShowAllRegions();
+    RegionEditContext ctx = buildRegionEditContext();
+
     if (m_steps[row].isGroup) {
-        StepGroupEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams,
-                                      m_defaultActionKinds, this);
+        StepGroupEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this);
         if (dialog.exec() != QDialog::Accepted)
             return;
         m_steps[row] = dialog.result();
@@ -2121,8 +2021,7 @@ void MainWindow::onEditSelectedStep()
     }
 
     if (m_steps[row].isTask) {
-        TaskEditorDialog dialog(m_steps[row], m_namedRegions, m_defaultActionParams, m_defaultActionKinds,
-                                 this);
+        TaskEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this);
         if (dialog.exec() != QDialog::Accepted)
             return;
         m_steps[row] = dialog.result();
@@ -2131,7 +2030,7 @@ void MainWindow::onEditSelectedStep()
         return;
     }
 
-    StepEditorDialog dialog(m_steps[row], m_namedRegions, this, /*allowPopupDialogTarget=*/false,
+    StepEditorDialog dialog(m_steps[row], &ctx, this, /*allowPopupDialogTarget=*/false,
                             /*includeActionParams=*/true, m_defaultActionParams);
     if (dialog.exec() != QDialog::Accepted)
         return;
@@ -2500,7 +2399,6 @@ void MainWindow::setControlsEnabled(bool enabled)
 {
     m_targetGroup->setEnabled(enabled);
     m_setupActionsGroup->setEnabled(enabled);
-    m_namedRegionGroup->setEnabled(enabled);
     m_stepsGroup->setEnabled(enabled);
     m_editDefaultParamsButton->setEnabled(enabled);
     m_timingGroup->setEnabled(enabled);
@@ -3955,7 +3853,6 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     m_loadMonitorWindow->setIntervalMs(
         timing["loadMonitorIntervalMs"].toInt(m_loadMonitorWindow->intervalMs()));
 
-    refreshNamedRegionList();
     refreshSetupActionList();
     refreshStepList();
     m_targetLaunchCommandEdit->setText(root["targetLaunchCommand"].toString());

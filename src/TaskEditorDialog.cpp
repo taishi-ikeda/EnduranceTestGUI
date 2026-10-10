@@ -24,17 +24,29 @@ const ActionParams &effectiveParamsOf(const RegionStep &member, const ActionPara
 }
 }  // namespace
 
-TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, const QList<NamedRegion> &namedRegions,
+TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, RegionEditContext *regionCtx,
                                     const ActionParams &defaultActionParams,
                                     const RegionStep &defaultActionKindsTemplate, QWidget *parent)
     : QDialog(parent),
-      m_namedRegions(namedRegions),
+      m_regionCtx(regionCtx ? *regionCtx : RegionEditContext()),
       m_defaultActionParams(defaultActionParams),
       m_defaultActionKindsTemplate(defaultActionKindsTemplate),
       m_members(initialTask.isTask ? initialTask.taskMembers : QList<RegionStep>())
 {
     setWindowTitle(I18n::t(QStringLiteral("タスクの編集")));
     resize(720, 560);
+
+    // See StepGroupEditorDialog's identical wrapping -- a sibling member
+    // inside THIS still-open task also blocks deleting a region it uses.
+    auto globalCheck = m_regionCtx.stepsReferencing;
+    m_regionCtx.stepsReferencing = [this, globalCheck](const QString &name) {
+        QStringList result = globalCheck ? globalCheck(name) : QStringList();
+        for (int i = 0; i < m_members.size(); ++i) {
+            if (!m_members[i].useWholeWindow && m_members[i].regionName == name)
+                result << I18n::t(QStringLiteral("このタスクの操作%1")).arg(i + 1);
+        }
+        return result;
+    };
 
     auto *layout = new QVBoxLayout(this);
 
@@ -253,7 +265,7 @@ void TaskEditorDialog::onMemberSelectionChanged()
 
 void TaskEditorDialog::onAddMember()
 {
-    StepEditorDialog dialog(RegionStep(), m_namedRegions, this, /*allowPopupDialogTarget=*/true);
+    StepEditorDialog dialog(RegionStep(), &m_regionCtx, this, /*allowPopupDialogTarget=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && !dialog.targetsPopupDialog() && dialog.regionName().isEmpty()) {
@@ -282,7 +294,7 @@ void TaskEditorDialog::onEditSelectedMember()
     if (row < 0 || row >= m_members.size())
         return;
 
-    StepEditorDialog dialog(m_members[row], m_namedRegions, this, /*allowPopupDialogTarget=*/true);
+    StepEditorDialog dialog(m_members[row], &m_regionCtx, this, /*allowPopupDialogTarget=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && !dialog.targetsPopupDialog() && dialog.regionName().isEmpty()) {

@@ -5415,6 +5415,84 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
   関わらず常に矩形内の一様ランダム点を返すこと、を実際のログ出力（対象ウィンドウ
   相対座標）で確認した。クリーンビルドは-Wall -Wextra -Wpedantic付きで警告0件。
 
+- v1.10: 「インターフェースを変更したいです。現在は操作領域の指定とステップ構成の
+  指定を独立に行っていますが、mainウィンドウの操作領域の指定機能を削除して、代わりに
+  ステップごとにダイアログ内で操作領域を指定できるようにしてください。また、その際
+  他ステップで指定した操作領域を指定できるようにしてください。操作領域の確認する
+  ボタンはステップ構成の欄に残しておいてください。このボタンを押して表示される操作
+  領域にはステップ名などの情報をつけるようにしてください。」との依頼を受けて実装した。
+
+  従来、操作領域（`NamedRegion`）は①対象選択パネルの独立した「操作領域」グループ
+  （一覧表示＋追加/編集/削除ボタン、`NamedRegionEditorDialog`を開く）で一元管理し、
+  ②ステップ構成の各ステップは`StepEditorDialog`のコンボボックスでそこから名前を選ぶ
+  だけだった。この①側の管理UIを完全に撤去し、`StepEditorDialog`（通常のステップに
+  加え、`StepGroupEditorDialog`/`TaskEditorDialog`が内部で使うグループ・タスクメンバー
+  編集でも同一のダイアログを使っているため、全ステップ種別で同様に利用可能）自身に
+  「新規作成.../編集.../削除」の3ボタンを追加し、領域の作成・編集・削除をステップ
+  編集中にその場で行えるようにした。これらのボタンは`NamedRegionEditorDialog`を開いて
+  結果を直接`*namedRegions`（後述）へ書き込むため、ダイアログ自体がOK/キャンセルの
+  どちらで閉じられたかに関わらず、作成・編集・削除は即座に確定する（旧①パネルの
+  追加/編集/削除ボタンが独立していたのと同じ挙動）。「他ステップで指定した操作領域を
+  指定できるように」という要望どおり、領域は引き続き`MainWindow::m_namedRegions`に
+  1つのプールとして保持され、あるステップのダイアログで新規作成・編集した領域は、
+  以後に開く別のステップのダイアログ（別の`StepEditorDialog`インスタンス）でも同じ
+  コンボボックスの選択肢としてすぐに参照できる。
+
+  **実装**: 新設した`RegionEditContext`（`RegionEditContext.h`）が、共有プールへの
+  ポインタ（`QList<NamedRegion> *namedRegions`）、`NamedRegionEditorDialog`用の対象
+  ウィンドウ情報（`targetTopLeft`/`hasTarget`/`targetPid`）、および削除可否判定・
+  リネーム時の参照追従用の2つの`std::function`コールバック
+  （`stepsReferencing`/`renameReferences`、いずれも実体は従来通り`MainWindow::
+  stepsReferencing()`/`renameRegionReferences()`）を1つに束ね、`StepEditorDialog`の
+  コンストラクタ引数を`const QList<NamedRegion> &availableRegions`から
+  `RegionEditContext *regionCtx`に置き換えた。`StepGroupEditorDialog`/`TaskEditorDialog`
+  も同様に`RegionEditContext`を受け取るが、自分の`m_members`（まだ`MainWindow::m_steps`
+  にコミットされていない、編集中のグループ/タスクの手持ちメンバー一覧）をコンストラクタ
+  内で`stepsReferencing`コールバックにラップし、グローバルな判定結果に自分自身の
+  メンバーによる参照も足し合わせてから、そのラップ済みコンテキストを自分の
+  `m_regionCtx`として保持し、ネストした`StepEditorDialog`へその`&m_regionCtx`を渡す
+  （同じセッション内でまだ`m_steps`に反映されていない兄弟メンバーが使っている領域を、
+  グローバルな判定だけでは見逃して誤って削除できてしまう事故を防ぐため）。
+  `MainWindow::buildRegionEditContext()`を新設し、`onAddStep()`/`onEditSelectedStep()`
+  （グループ/タスクの分岐も含む）が、ステップ/グループ/タスクの各編集ダイアログを開く
+  直前に毎回ローカル変数として1つ構築し、そのアドレスを渡す（ダイアログの`exec()`が
+  戻るまでスコープが生きているため寿命は安全）。①側で不要になった
+  `onAddNamedRegion()`/`onEditSelectedNamedRegion()`/`onRemoveSelectedNamedRegion()`/
+  `refreshNamedRegionList()`/`generateDefaultRegionName()`（後者は
+  `StepEditorDialog.cpp`内の無名名前空間の関数として同じ命名規則で作り直した）は削除し、
+  `m_namedRegionGroup`とその子ウィジェット（一覧・追加/編集/削除ボタン）も①の構築コード
+  から削除した。「操作領域を確認」ボタン（`m_showAllRegionsButton`）とその自動非表示
+  タイマーは、ロジック（`onToggleShowAllRegions()`/`refreshAllRegionsHighlight()`）は
+  そのまま、ウィジェットの生成場所だけを①から②ステップ構成の末尾（グループ化/タスク化
+  ボタンの下）へ移設した。「このボタンを押して表示される操作領域にはステップ名などの
+  情報をつける」という要望に応え、`refreshAllRegionsHighlight()`が各`RegionHighlightEntry`
+  のラベルに、既存の`stepsReferencing()`（グループ/タスクメンバーへの再帰込み）の結果を
+  追記するよう変更した（例:「操作領域1（矩形1個・除外0個） （ステップ2, ステップ5）」、
+  どのステップからも参照されていない領域は「（どのステップからも未参照）」と表示）。
+  `NamedRegion`自体のデータ構造・JSON形式（`TestConfigJson.cpp`）は変更していないため、
+  旧プリセットもそのまま読み込める。
+
+  既知の限定事項: `StepGroupEditorDialog`/`TaskEditorDialog`が包むネストした
+  `stepsReferencing`の上書きは「削除」操作の安全性（同一セッション内の兄弟メンバーが
+  使う領域を誤って消さないこと）のみを保証する。領域のリネームを同一セッション内の
+  兄弟メンバーへ反映する処理（`renameReferences`コールバック）は、グローバルな
+  `MainWindow::m_steps`側の参照のみを更新し、まだコミットされていないグループ/タスク
+  編集ダイアログ自身の`m_members`側の参照までは反映しない（ダイアログを一旦OKで確定
+  すればその時点の名前で保存されるため実害は小さいが、同一ダイアログを開いたまま
+  リネームし、かつ別の兄弟メンバーが同じ領域を参照している、という狭いケースでは
+  その兄弟メンバー側の表示名が一時的に古いままになる）。
+
+  実機（Xvfb+openbox）で、①に「操作領域」グループが表示されなくなっていること、
+  ②の「追加...」からステップの設定ダイアログを開くと「新規作成.../編集.../削除」の
+  3ボタンが操作領域コンボボックスの下に表示されること、「新規作成...」から
+  `NamedRegionEditorDialog`を開いて矩形を描画・保存すると自動的にそのステップへ
+  設定された状態でコンボボックスに追加・選択されること、プリセット読み込み後に別の
+  ステップを編集した際、先に作成した領域が同じプールからコンボボックスで選択できる
+  ことを確認した。また②に移設した「操作領域を確認」ボタンを押すと、各領域のハイライト
+  オーバーレイのラベルに参照元ステップ名（または「どのステップからも未参照」）が
+  付与されて表示されることを確認した。クリーンビルドは-Wall -Wextra -Wpedantic付きで
+  警告0件。
+
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 
 v0.40での実機確認（9章）を踏まえた追加提案。**以下の6件はv0.41で全て実装済み**

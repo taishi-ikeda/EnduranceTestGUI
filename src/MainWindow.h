@@ -831,12 +831,17 @@ private:
     // like m_saveSummaryButton above).
     QPushButton *m_saveRegionScreenshotButton = nullptr;
     // Write-through copy of every log line for the run in progress, opened
-    // fresh in onStart() and closed in onEngineFinished() (SPEC.md 6.8/10).
-    // m_logView above is capped at 5000 blocks for display performance and
-    // silently drops older lines once a long run exceeds that -- this file
-    // is not, so "ログを保存..." after a very long run is never missing the
-    // earlier part of what happened. Null/not open when no run has started
-    // yet this session.
+    // fresh in onStart(). m_logView above is capped at 5000 blocks for
+    // display performance and silently drops older lines once a long run
+    // exceeds that -- this file is not, so "ログを保存..." after a very
+    // long run is never missing the earlier part of what happened. Null/not
+    // open when no run has started yet this session. Closed from
+    // continueBatchIfNeeded() (SPEC.md 10 不具合報告 D4), not unconditionally
+    // from onEngineFinished() -- see that function's own comment for why:
+    // a 連続実行/continuous-run continuation logs several of its own lines
+    // after a run ends, and those need to land in the same file as the run
+    // they followed, not be silently dropped because the file had already
+    // been closed by then.
     QFile m_fullLogFile;
 
     RandomActionEngine *m_engine = nullptr;

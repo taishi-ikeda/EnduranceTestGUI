@@ -30,10 +30,17 @@ int main(int argc, char *argv[])
                         "way \"⟳ 連続実行\" would, then exit. Requires the preset to have a "
                         "targetLaunchCommand set (so each repeat gets a fresh instance)."),
         QStringLiteral("preset.json"));
+    // Bug (SPEC.md 10 不具合報告 D5): this help text used to say "overrides
+    // the preset's own saved batch run count", but no such field is ever
+    // saved into a preset JSON in the first place -- the GUI's "連続実行
+    // 回数" spin box (m_batchRunCountSpin) is a live-session-only control,
+    // never written by MainWindow::buildPresetJson()/read back by its
+    // loading counterpart. --repeat is this mode's *only* way to set the
+    // run count; there is nothing in the preset for it to override.
     const QCommandLineOption repeatOption(
         QStringList{QStringLiteral("repeat")},
-        QStringLiteral("Number of consecutive runs (overrides the preset's own saved batch run "
-                        "count). Default: 1."),
+        QStringLiteral("Number of consecutive runs for this headless session (presets do not save "
+                        "a run count of their own). Default: 1."),
         QStringLiteral("count"), QStringLiteral("1"));
     parser.addOption(runOption);
     parser.addOption(repeatOption);

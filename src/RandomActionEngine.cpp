@@ -1372,6 +1372,26 @@ void RandomActionEngine::performRandomAction()
                /*isAnomaly=*/true, /*targetCrashed=*/true);
         return;
     }
+    // Checked every tick (not just the slower WM_PING cadence in
+    // checkTargetResponsiveness()) -- see PlatformAutomation::
+    // isProcessSuspended()'s own comment for why this exists as a second,
+    // independent hang signal: the _NET_WM_PING protocol depends on the
+    // target's own toolkit actually implementing the reply side, which was
+    // found to silently never happen at all for ordinary, healthy Qt
+    // widget apps in at least one real environment, tripping
+    // checkWindowResponsive()'s "never once responded" self-disable within
+    // the first few checks of nearly every run -- long before a
+    // deliberately-induced hang (e.g. `kill -STOP`) ever occurred, leaving
+    // it permanently undetected for the rest of that run (SPEC.md 10 不具合
+    // 報告 D10). Reading the process's own OS-level state needs no
+    // cooperation from the target's event loop, so it still catches this
+    // exact scenario regardless of whether WM_PING works at all.
+    if (PlatformAutomation::isProcessSuspended(m_config.targetPid)) {
+        doStop(I18n::t(QStringLiteral("対象アプリケーションが外部から一時停止（SIGSTOP等）されており応答できない"
+                                      "状態であることを検知したため停止しました")),
+               /*isAnomaly=*/true);
+        return;
+    }
     if (!currentActionTargetsPopupDialog() && handleUnexpectedWindows())
         return;
 

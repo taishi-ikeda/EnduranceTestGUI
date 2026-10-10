@@ -57,6 +57,53 @@ QString atomText(Display *dpy, Window w, Atom atom, Atom utf8, bool *ok)
     return result;
 }
 
+// Bug (SPEC.md 10 不具合報告 D8): _NET_CLIENT_LIST (the list collectWindows()
+// below enumerates) is documented by EWMH as "windows managed by the window
+// manager", but at least one real window manager (openbox, used throughout
+// this project's own Xvfb sandbox) was found to include its own panel/dock
+// windows in that list alongside ordinary application windows -- there is no
+// guarantee any other WM behaves differently. Nothing in collectWindows()
+// previously excluded them, so a panel could appear in ①'s target-selection
+// combo box next to real windows and, depending on enumeration order, even
+// end up the default selection: starting a run against a panel generally
+// has nothing for the configured steps to click that resembles the intended
+// target, so it runs to the step/time limit with the execution count stuck
+// at 0, and any "操作領域を確認"/anomaly screenshot ends up showing the
+// panel instead of the application under test. _NET_WM_WINDOW_TYPE is the
+// standard EWMH way for a window to self-identify as a dock/panel (or the
+// desktop background, equally not a meaningful test target) rather than a
+// normal application window -- check it and exclude both.
+bool isDockOrDesktopWindow(Display *dpy, Window w)
+{
+    const Atom netWmWindowType = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", True);
+    if (netWmWindowType == None)
+        return false;
+    const Atom netWmWindowTypeDock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", True);
+    const Atom netWmWindowTypeDesktop = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DESKTOP", True);
+
+    Atom type;
+    int format;
+    unsigned long nItems, bytesAfter;
+    unsigned char *data = nullptr;
+    if (XGetWindowProperty(dpy, w, netWmWindowType, 0, 16, False, XA_ATOM, &type, &format, &nItems,
+                            &bytesAfter, &data) != Success || !data) {
+        return false;
+    }
+    bool isDockOrDesktop = false;
+    if (type == XA_ATOM) {
+        const Atom *types = reinterpret_cast<Atom *>(data);
+        for (unsigned long i = 0; i < nItems; ++i) {
+            if ((netWmWindowTypeDock != None && types[i] == netWmWindowTypeDock) ||
+                (netWmWindowTypeDesktop != None && types[i] == netWmWindowTypeDesktop)) {
+                isDockOrDesktop = true;
+                break;
+            }
+        }
+    }
+    XFree(data);
+    return isDockOrDesktop;
+}
+
 qint64 windowPid(Display *dpy, Window w, Atom netWmPid)
 {
     Atom type;
@@ -126,6 +173,8 @@ QList<WindowInfo> collectWindows()
 
         qint64 pid = netWmPid != None ? windowPid(dpy, w, netWmPid) : -1;
         if (pid == selfPid)
+            continue;
+        if (isDockOrDesktopWindow(dpy, w))
             continue;
 
         QRect bounds;
@@ -462,6 +511,29 @@ bool isBeingDebugged(qint64 pid)
             return line.mid(10).trimmed().toLongLong() != 0;
     }
     return false;
+}
+
+bool isProcessSuspended(qint64 pid)
+{
+    if (pid <= 0)
+        return false;
+    // Same /proc/<pid>/stat parsing as isProcessRunning()'s zombie check
+    // above, just reading the state character itself instead of only
+    // checking for 'Z': 'T' means stopped by a job-control signal
+    // (SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU) and 't' means stopped while being
+    // traced (e.g. sitting at a ptrace-stop) -- either way, the kernel
+    // guarantees this process is not scheduled to run at all right now, so
+    // it cannot possibly be pumping its own event loop (SPEC.md 10 不具合
+    // 報告 D10).
+    QFile statFile(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!statFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+    const QString content = QString::fromUtf8(statFile.readAll());
+    const int closeParen = content.lastIndexOf(')');
+    if (closeParen < 0)
+        return false;
+    const QString afterComm = content.mid(closeParen + 1).trimmed();
+    return afterComm.startsWith(QLatin1Char('T')) || afterComm.startsWith(QLatin1Char('t'));
 }
 
 void terminateProcess(qint64 pid)

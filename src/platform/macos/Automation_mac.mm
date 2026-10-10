@@ -255,6 +255,24 @@ bool isBeingDebugged(qint64 pid)
     return (info.pbi_flags & PROC_FLAG_TRACED) != 0;
 }
 
+bool isProcessSuspended(qint64 pid)
+{
+    if (pid <= 0)
+        return false;
+    // SSTOP mirrors the BSD process status set while a process is stopped
+    // by a job-control signal (SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU) -- same
+    // proc_bsdinfo struct and pattern as the zombie check in
+    // isProcessRunning() above, just checking for a different status value.
+    // Not independently verified on real macOS hardware (see SPEC.md 8) --
+    // mirrors Automation_linux.cpp's isProcessSuspended() in spirit (SPEC.md
+    // 10 不具合報告 D10).
+    struct proc_bsdinfo info;
+    const int size = proc_pidinfo((pid_t)pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info));
+    if (size != sizeof(info))
+        return false;
+    return info.pbi_status == SSTOP;
+}
+
 void terminateProcess(qint64 pid)
 {
     // Best-effort/asynchronous by design (see the header comment) -- a

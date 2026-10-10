@@ -163,6 +163,31 @@ bool activateProcess(qint64 pid);
 // having closed).
 bool isProcessRunning(qint64 pid);
 
+// True if the process is currently externally suspended (SIGSTOP, or
+// stopped under ptrace) rather than merely slow/busy -- an unambiguous,
+// toolkit-independent "this can't possibly be processing input right now"
+// signal, unlike checkWindowResponsive() below. That _NET_WM_PING-based
+// check depends on the target's own GUI toolkit actually implementing the
+// reply side of the protocol, which was found (SPEC.md 10 不具合報告 D10)
+// to not hold even for ordinary, healthy Qt widget applications in at
+// least one real environment (a bare/non-compositing X11 session): every
+// single ping went unanswered there, for the entire length of every run,
+// whether the target was genuinely hung or not -- meaning
+// checkWindowResponsive()'s own self-disable safety valve (guarding
+// against exactly an unimplemented-but-advertised toolkit) was tripping
+// within the first few checks of practically every run, long before a
+// deliberately-induced hang (e.g. `kill -STOP`) ever happened, permanently
+// disabling hang detection for the rest of that run. This check gives
+// RandomActionEngine a second, independent way to catch that exact
+// scenario regardless of whether WM_PING works at all: reads the process's
+// own state directly from the OS (no cooperation from the target's event
+// loop required), so it still fires even where ping-based detection
+// cannot. Checked on every action tick (not just the slower WM_PING
+// cadence) since there is no "grace period" reasoning needed here the way
+// there is for a single missed ping -- the process is either currently
+// stopped or it isn't.
+bool isProcessSuspended(qint64 pid);
+
 // True if another process (a debugger such as gdb/lldb, or an equivalent
 // tracer) is currently attached to this pid and so able to pause its
 // execution at will -- e.g. at a breakpoint. Used so RandomActionEngine can

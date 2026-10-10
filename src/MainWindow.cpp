@@ -2881,6 +2881,11 @@ void MainWindow::onStop()
                       : I18n::t(QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）")));
         m_batchProgressLabel->setText(QString());
         setControlsEnabled(true);
+        // The previous run's m_fullLogFile (see its own comment) was left
+        // open in case the batch continued -- it just did not, so this is
+        // this file's own terminal point (SPEC.md 10 不具合報告 D4).
+        if (m_fullLogFile.isOpen())
+            m_fullLogFile.close();
         return;
     }
     if (m_launchWaitTimer->isActive()) {
@@ -3097,23 +3102,44 @@ void MainWindow::onEngineFinished(const QString &reason)
             item->setText(describeSetupAction(m_setupActions[finishedSetupActionIndex], finishedSetupActionIndex));
     }
 
-    if (m_fullLogFile.isOpen())
-        m_fullLogFile.close();
-
+    // Bug (SPEC.md 10 不具合報告 D4): this used to unconditionally close
+    // m_fullLogFile right here, before continueBatchIfNeeded() below had a
+    // chance to run -- but that function (連続実行/continuous-run mode) logs
+    // several of its own lines (run N/M finished, waiting for the target to
+    // reappear, etc.) *after* this point, which is exactly the "実行終了後に
+    // 出るログ行" the report describes: they still appeared on screen (
+    // m_logView), just never made it into run_*.log because the file was
+    // already closed by the time appendLog() tried to write them. The file
+    // is instead left open here and closed explicitly below, from inside
+    // continueBatchIfNeeded() itself, only once nothing more will be logged
+    // against it: either this wasn't a batch run at all, or the batch has
+    // now fully completed. The one remaining case -- continuing on to
+    // another run -- must NOT close it here, because
+    // continueBatchIfNeeded() can call all the way down to beginRun() for
+    // the next run *synchronously* (waitForTargetThenContinueBatch() ->
+    // tryReselectLastTarget() succeeding immediately), which itself already
+    // closes-then-reopens m_fullLogFile for that new run; closing it again
+    // after continueBatchIfNeeded() returned would have torn down that
+    // brand new run's own log file instants after opening it.
     m_setupOnlyTestRun = false;
     continueBatchIfNeeded();
 }
 
 void MainWindow::continueBatchIfNeeded()
 {
-    if (!m_batchModeActive)
+    if (!m_batchModeActive) {
+        if (m_fullLogFile.isOpen())
+            m_fullLogFile.close();
         return;
+    }
     ++m_batchRunsCompleted;
     if (m_batchRunsCompleted >= m_batchRunsRequested) {
         appendLog(I18n::t(QStringLiteral("連続実行が完了しました（%1/%2回）")).arg(m_batchRunsCompleted).arg(m_batchRunsRequested));
         m_batchModeActive = false;
         m_continuousRunMode = false;
         m_batchProgressLabel->setText(QString());
+        if (m_fullLogFile.isOpen())
+            m_fullLogFile.close();
         checkHeadlessCompletion();
         return;
     }

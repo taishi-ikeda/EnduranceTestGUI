@@ -49,6 +49,31 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
       m_objectPicked(initial.isObjectTarget && !initial.objectTarget.name.isEmpty()),
       m_sweepWaypoints(initial.sweepWaypoints)
 {
+    // Bug (SPEC.md 10 不具合報告 D2): a follow-enabled region's
+    // regions/excludeRegions are stored as plain absolute rectangles, valid
+    // only while the target window's top-left sits at `anchorTopLeft` --
+    // RandomActionEngine::resolveStepRegion() and MainWindow::
+    // resolveNamedRegionForDisplay() both translate them by (current target
+    // top-left - anchorTopLeft) before use/display, but this dialog used to
+    // load them straight from `initial` with no such translation, so editing
+    // an existing follow-enabled region after moving the target window showed
+    // (and drew new rectangles alongside) the stale, pre-move rectangles.
+    // Rebase both the rectangles and the anchor to the target's CURRENT
+    // top-left right here, together, before anything is displayed or drawn:
+    // unlike the anchor-only rebase result() guards against below (which
+    // would move the anchor without moving the rectangles, causing a jump),
+    // translating both in lock step is a no-op for correctness -- the pair
+    // still describes exactly the same on-screen rectangles, just expressed
+    // relative to the window's current position instead of its old one.
+    if (m_hadExistingAnchor && m_hasTarget && m_existingAnchorTopLeft != m_targetTopLeft) {
+        const QPoint delta = m_targetTopLeft - m_existingAnchorTopLeft;
+        for (QRect &r : m_regions)
+            r.translate(delta);
+        for (QRect &r : m_excludeRegions)
+            r.translate(delta);
+        m_existingAnchorTopLeft = m_targetTopLeft;
+    }
+
     setWindowTitle(I18n::t(QStringLiteral("操作領域の設定")));
     // RegionHighlightOverlay's per-screen windows (shown continuously while
     // this dialog is open, see updateHighlight() below) use

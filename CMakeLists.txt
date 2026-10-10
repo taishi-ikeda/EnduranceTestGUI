@@ -169,11 +169,16 @@ elseif(UNIX)
             "-- required for the startup setup '記録' (record) feature's system-wide input observation "
             "(src/platform/linux/InputRecorder_linux.cpp)")
     endif()
+    if(NOT X11_Xext_FOUND)
+        message(FATAL_ERROR "Xext (Shape extension) development files not found (libxext-dev / libXext-devel) "
+            "-- required for PlatformAutomation::setWindowClickThrough (src/platform/linux/Automation_linux.cpp)")
+    endif()
     target_include_directories(EnduranceTestGUI PRIVATE ${X11_INCLUDE_DIR})
     target_link_libraries(EnduranceTestGUI PRIVATE
         ${X11_LIBRARIES}
         ${X11_XTest_LIB}
         ${X11_Xi_LIB}
+        ${X11_Xext_LIB}
         gobject-2.0
     )
 

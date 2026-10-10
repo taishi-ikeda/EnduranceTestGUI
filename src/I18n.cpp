@@ -579,9 +579,15 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Specify a position via \"Select End Position...\".")},
         {QStringLiteral("文字入力（%1文字、内容はログに記録しません）"),
          QStringLiteral("Text input (%1 characters, content not logged)")},
-        {QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません。"),
+        {QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません"
+                        "（文字数のみ記録されます）。ただし、手動で「テスト設定を保存...」した"
+                        "プリセットJSONには、再現用にこの内容が平文のまま保存されます。異常停止時に"
+                        "自動保存されるプリセットには含まれません。"),
          QStringLiteral("Passwords and other sensitive text can be entered here too. The content "
-                        "itself is never written to the run log.")},
+                        "itself is never written to the run log (only its character count is). "
+                        "However, a preset JSON you save manually via \"Save test settings...\" does "
+                        "store this text in plain text, so it can be replayed later; a preset saved "
+                        "automatically on an abnormal stop never includes it.")},
         {QStringLiteral("起動時セットアップを開始します（%1件） -- 完了後にランダム操作を開始します"),
          QStringLiteral("Starting startup setup (%1 actions) -- random actions will begin once it's done")},
         {QStringLiteral("起動時セットアップが完了しました。ランダム操作を開始します"),

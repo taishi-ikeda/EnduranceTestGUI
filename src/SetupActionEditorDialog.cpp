@@ -245,7 +245,12 @@ QWidget *SetupActionEditorDialog::buildTypeTextPage()
     layout->addWidget(new QLabel(I18n::t(QStringLiteral("入力するテキスト:")), page));
     m_typeTextEdit = new QLineEdit(page);
     layout->addWidget(m_typeTextEdit);
-    auto *hint = new QLabel(I18n::t(QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません。")), page);
+    auto *hint = new QLabel(
+        I18n::t(QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません"
+                                "（文字数のみ記録されます）。ただし、手動で「テスト設定を保存...」した"
+                                "プリセットJSONには、再現用にこの内容が平文のまま保存されます。異常停止時に"
+                                "自動保存されるプリセットには含まれません。")),
+        page);
     hint->setWordWrap(true);
     layout->addWidget(hint);
     layout->addStretch(1);

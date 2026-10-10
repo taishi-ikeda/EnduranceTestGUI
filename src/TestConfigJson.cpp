@@ -412,7 +412,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     return s;
 }
 
-QJsonObject setupActionToJson(const SetupAction &a)
+QJsonObject setupActionToJson(const SetupAction &a, bool redactSensitiveText)
 {
     QJsonObject o;
     o["type"] = setupActionTypeToString(a.type);
@@ -420,7 +420,15 @@ QJsonObject setupActionToJson(const SetupAction &a)
     o["pointY"] = a.point.y();
     o["dragToPointX"] = a.dragToPoint.x();
     o["dragToPointY"] = a.dragToPoint.y();
-    o["text"] = a.text;
+    // See this function's declaration comment in TestConfigJson.h: only the
+    // automatic anomaly-snapshot preset asks for this, so a password typed
+    // as a startup-setup "文字入力" action doesn't silently end up in
+    // plaintext in a file the user never chose to write (SPEC.md 10 不具合
+    // 報告 D3). The character count alone (not the text) is kept so the
+    // redacted preset still shows *that* a TypeText action was configured.
+    o["text"] = (redactSensitiveText && a.type == SetupActionType::TypeText)
+                    ? QStringLiteral("(%1文字、プライバシーのため非表示)").arg(a.text.size())
+                    : a.text;
     o["keySequence"] = a.keySequence;
     o["waitMs"] = a.waitMs;
     o["scrollDx"] = a.scrollDx;

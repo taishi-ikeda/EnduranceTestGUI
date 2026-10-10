@@ -118,6 +118,27 @@ void openScreenRecordingSettings();
 // which path is used.
 bool supportsWindowTransparency();
 
+// Forces a top-level window to be click-through at the X server/WindowServer
+// level, regardless of any Qt-level attribute the window itself already
+// carries. RegionHighlightOverlay's full-screen highlight windows already
+// set Qt::WA_TransparentForMouseEvents, which is normally enough -- but that
+// was found unreliable in practice for a borderless, Qt::WindowStaysOnTopHint,
+// repeatedly shown/hidden full-screen window under a bare (non-compositing)
+// X11 window manager such as this project's own Xvfb+openbox sandbox: the
+// window kept absorbing clicks meant for whatever sat underneath it (the
+// NamedRegionEditorDialog's own OK button), making that dialog look
+// permanently hung to anyone driving it with a mouse, even though its own
+// event loop and keyboard input were both still alive (SPEC.md 10 不具合
+// 報告 D1). Linux: sets the window's input shape to empty via the X11 Shape
+// extension (XShapeCombineRectangles(..., ShapeInput, ...)), which makes the
+// window invisible to pointer hit-testing at the protocol level -- a
+// stronger guarantee than the Qt attribute alone. macOS: no-op; AppKit's
+// window server was not observed to have this same failure mode, and Qt's
+// own WA_TransparentForMouseEvents (NSWindow ignoresMouseEvents) has been
+// sufficient there. Safe/cheap to call every time the window is (re)shown,
+// since re-asserting an already-empty input shape is a no-op.
+void setWindowClickThrough(quint32 windowId);
+
 // Enumerates on-screen, normal top-level windows owned by other running
 // processes/applications. Excludes this process's own windows.
 QList<WindowInfo> listWindows();

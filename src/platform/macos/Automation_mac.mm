@@ -79,6 +79,16 @@ bool supportsWindowTransparency()
     return true;
 }
 
+void setWindowClickThrough(quint32 /*windowId*/)
+{
+    // No-op: see this function's declaration comment in PlatformAutomation.h.
+    // The X11-specific click-through failure this exists to work around
+    // (Qt::WA_TransparentForMouseEvents not reliably making a full-screen,
+    // always-on-top window click-through under a bare/non-compositing window
+    // manager) has no macOS equivalent -- AppKit always composites, and Qt's
+    // own attribute (NSWindow.ignoresMouseEvents) has been sufficient there.
+}
+
 static QList<WindowInfo> collectWindows()
 {
     QList<WindowInfo> result;
@@ -194,6 +204,15 @@ bool activateProcess(qint64 pid)
 
 bool isProcessRunning(qint64 pid)
 {
+    // See Automation_linux.cpp's isProcessRunning() for why pid <= 0 must be
+    // rejected before ever calling kill(): those values are POSIX's
+    // broadcast-to-a-group forms, not a specific-process check, so
+    // kill(-1, 0) "succeeds" unconditionally and would otherwise make a
+    // window with no owning pid (e.g. one windowPid()-equivalent lookup
+    // defaults to -1 for) look permanently alive (SPEC.md 10 不具合報告 D9).
+    if (pid <= 0)
+        return false;
+
     // Signal 0 sends nothing but still validates that the pid exists and is
     // reachable; ESRCH means it is gone (crashed/quit), EPERM still means
     // it exists (just owned by another user).

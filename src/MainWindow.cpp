@@ -3447,7 +3447,12 @@ void MainWindow::onRunSummaryReady(const RandomActionEngine::RunSummary &summary
         const QString baseDir = RandomActionEngine::anomalyArtifactsDirectory();
         QDir().mkpath(baseDir);
 
-        QJsonObject preset = buildPresetJson();
+        // redactSensitiveText=true: this file is written silently, without
+        // the user ever choosing to save a preset -- unlike onSavePreset()'s
+        // deliberate, manual save, a startup-setup "文字入力" action's typed
+        // text (which can be a password) must not end up in plaintext here
+        // (SPEC.md 10 不具合報告 D3).
+        QJsonObject preset = buildPresetJson(/*redactSensitiveText=*/true);
         // The UI's own rngSeed field may be 0 ("ランダム"); what actually
         // reproduces this run is the seed the engine ended up using.
         QJsonObject timing = preset["timing"].toObject();
@@ -3644,7 +3649,7 @@ void MainWindow::onOpenScreenRecordingSettings()
     PlatformAutomation::openScreenRecordingSettings();
 }
 
-QJsonObject MainWindow::buildPresetJson() const
+QJsonObject MainWindow::buildPresetJson(bool redactSensitiveText) const
 {
     QJsonObject root;
     root["formatVersion"] = 1;
@@ -3679,7 +3684,7 @@ QJsonObject MainWindow::buildPresetJson() const
 
     QJsonArray setupActionsArr;
     for (const SetupAction &a : m_setupActions)
-        setupActionsArr.append(setupActionToJson(a));
+        setupActionsArr.append(setupActionToJson(a, redactSensitiveText));
     root["setupActions"] = setupActionsArr;
     root["setupActionsFirstRunOnly"] = m_setupActionsFirstRunOnlyCheck->isChecked();
 

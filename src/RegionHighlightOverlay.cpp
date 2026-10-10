@@ -97,6 +97,16 @@ public:
         // above by the time the paint actually happens.
         m_origin = screenGeom.topLeft();
         raise();
+        // Qt::WA_TransparentForMouseEvents (set once, in the constructor)
+        // was found unreliable for this exact window -- full-screen,
+        // Qt::WindowStaysOnTopHint, repeatedly shown/hidden, under a bare
+        // (non-compositing) X11 window manager -- leaving it able to absorb
+        // clicks meant for whatever dialog it's highlighting on top of
+        // (SPEC.md 10 不具合報告 D1). Re-asserted on every show()/resize
+        // rather than only once in the constructor, since this needs a
+        // valid native window handle (winId()), which show() is what
+        // actually creates.
+        PlatformAutomation::setWindowClickThrough(quint32(winId()));
         update();
     }
 

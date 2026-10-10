@@ -275,7 +275,11 @@ private:
     // in (SPEC.md 10) -- shared by onSavePreset() and the anomaly auto-save
     // in onRunSummaryReady(), so a bug report's config file is produced the
     // same way a manually-saved preset is.
-    QJsonObject buildPresetJson() const;
+    // `redactSensitiveText`: forwarded to setupActionToJson() -- see its
+    // declaration comment in TestConfigJson.h for why onRunSummaryReady()'s
+    // silent, automatic anomaly snapshot passes true while onSavePreset()'s
+    // deliberate, manual save never does (SPEC.md 10 不具合報告 D3).
+    QJsonObject buildPresetJson(bool redactSensitiveText = false) const;
     // The actual "given a path, load and apply it" logic behind onLoadPreset()
     // (which wraps this with a QFileDialog + an overwrite-confirmation
     // prompt) -- factored out so runHeadless() can load a preset given

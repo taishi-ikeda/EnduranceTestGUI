@@ -25,5 +25,15 @@ QJsonObject regionStepToJson(const RegionStep &step);
 RegionStep regionStepFromJson(const QJsonObject &obj);
 
 // TestConfig::setupActions entries ("起動時セットアップ", SPEC.md 6.x).
-QJsonObject setupActionToJson(const SetupAction &action);
+// `redactSensitiveText`: when true, a SetupActionType::TypeText action's
+// typed `text` (which can be a password -- see SetupActionEditorDialog's own
+// hint) is replaced with a placeholder instead of written out in full. The
+// deliberate, manual "テスト設定を保存..." path needs the real text to round-
+// trip (it's meant to be reloaded and replayed later), so that path always
+// passes false; the automatic, silent anomaly-crash preset snapshot
+// (MainWindow::doStop()) has no such need and passes true instead, so a
+// password typed during startup setup doesn't end up sitting in plaintext in
+// a diagnostics file the user never explicitly chose to write (SPEC.md 10
+// 不具合報告 D3).
+QJsonObject setupActionToJson(const SetupAction &action, bool redactSensitiveText = false);
 SetupAction setupActionFromJson(const QJsonObject &obj);

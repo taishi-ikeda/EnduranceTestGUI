@@ -412,6 +412,21 @@ private:
     // should skip this tick's action entirely (either because it just
     // tried to dismiss one, or because it gave up and stopped the run).
     bool handleUnexpectedWindows();
+    // The crash-detection check performRandomAction() runs every tick.
+    // PlatformAutomation::isProcessRunning() alone can't answer this for a
+    // target with no identifiable owning process (config.targetPid <= 0 --
+    // e.g. a window with no _NET_WM_PID hint, shown as "(pid -1)" in ①'s
+    // target list): kill(pid, 0) with a non-positive pid is POSIX's
+    // broadcast-to-a-group form, not a specific-process check, so it must
+    // never be trusted as a liveness signal either way (see
+    // PlatformAutomation::isProcessRunning()'s own comment). Falls back to
+    // the originally-selected window (config.targetWindowId) still being
+    // enumerable on screen as the best-effort substitute in that case, so
+    // such a target can still run normally and a real crash (the window
+    // disappearing) still gets detected -- rather than either trusting it
+    // forever (the original bug, SPEC.md 10 不具合報告 D9) or treating it as
+    // permanently "crashed" from the very first tick.
+    bool isTargetStillAlive() const;
     // SPEC.md 10 追加提案「メモリリークの自動検知」: called from
     // sampleResourceUsage() (only when TestConfig::memoryLeakDetectionEnabled
     // is on) with each new memory sample. Appends it to m_memoryLeakSamples

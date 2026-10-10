@@ -15,6 +15,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <X11/extensions/XTest.h>
+#include <X11/extensions/shape.h>
 
 #ifdef HAVE_ATSPI
 #include <atspi/atspi.h>
@@ -297,6 +298,22 @@ bool supportsWindowTransparency()
     return XGetSelectionOwner(dpy, compositorManagerAtom) != None;
 }
 
+void setWindowClickThrough(quint32 windowId)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return;
+    // An empty input region (zero rectangles) means the window is never the
+    // target of pointer hit-testing at all -- events simply fall through to
+    // whatever is stacked beneath it -- unlike Qt::WA_TransparentForMouseEvents,
+    // which was found unreliable for this exact window (see this function's
+    // declaration comment in PlatformAutomation.h). ShapeSet (not ShapeUnion/
+    // ShapeSubtract) so repeated calls as the window is resized/reshown just
+    // reassert the same empty shape rather than accumulate.
+    XShapeCombineRectangles(dpy, Window(windowId), ShapeInput, 0, 0, nullptr, 0, ShapeSet, Unsorted);
+    XFlush(dpy);
+}
+
 QList<WindowInfo> listWindows()
 {
     return collectWindows();
@@ -389,6 +406,21 @@ bool activateProcess(qint64 pid)
 
 bool isProcessRunning(qint64 pid)
 {
+    // kill(pid, 0) with pid <= 0 is not a single-process existence check at
+    // all: 0 targets every process in the caller's process group, -1 every
+    // process the caller may signal, and a negative pid the whole process
+    // group -pid -- POSIX's broadcast forms, not "does process -1 exist".
+    // At least one of those always succeeds (this process itself is a
+    // member of its own group), so kill(-1, 0) returns 0 unconditionally,
+    // which previously made this function report "running" forever for a
+    // pid that was never a real, specific process to begin with. That
+    // exact pid (-1) is what windowPid() below returns for a window with no
+    // _NET_WM_PID property, so selecting such a window ("(pid -1)" in the
+    // target combo) made a genuine crash of it undetectable: the check
+    // "succeeded" no matter what (SPEC.md 10 不具合報告 D9).
+    if (pid <= 0)
+        return false;
+
     if (kill((pid_t)pid, 0) != 0 && errno != EPERM)
         return false;
 

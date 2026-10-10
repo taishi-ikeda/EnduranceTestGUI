@@ -1282,6 +1282,24 @@ constexpr int kMaxPopupDialogWaitStrikes = 50;
 constexpr int kMaxMinimizedWindowWaitStrikes = 10;
 }  // namespace
 
+bool RandomActionEngine::isTargetStillAlive() const
+{
+    if (m_config.targetPid > 0)
+        return PlatformAutomation::isProcessRunning(m_config.targetPid);
+    // No identifiable owning process for this target (e.g. a window with no
+    // _NET_WM_PID hint, shown as "(pid -1)" in ①'s target list) --
+    // isProcessRunning() correctly refuses to answer for such a pid (see its
+    // own comment), so there is nothing meaningful to ask it here. Fall back
+    // to the originally-selected window itself still being enumerable on
+    // screen as the best-effort liveness signal instead, so this target can
+    // still run normally and a real crash (the window disappearing) is
+    // still detected (SPEC.md 10 不具合報告 D9) -- rather than either
+    // trusting a dead pid forever (the original bug) or treating every such
+    // target as permanently "crashed" from the very first tick.
+    QRect unusedBounds;
+    return PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, unusedBounds);
+}
+
 bool RandomActionEngine::currentActionTargetsPopupDialog() const
 {
     if (m_inSetupPhase || m_currentStepIndex < 0 || m_currentStepIndex >= m_config.steps.size())
@@ -1347,7 +1365,7 @@ void RandomActionEngine::performRandomAction()
         doStop(I18n::t(QStringLiteral("シーケンスの繰り返し回数の上限に達したため停止しました")));
         return;
     }
-    if (!PlatformAutomation::isProcessRunning(m_config.targetPid)) {
+    if (!isTargetStillAlive()) {
         const QString stepLabel = I18n::t(QStringLiteral("ステップ %1")).arg(m_currentStepIndex + 1);
         doStop(I18n::t(QStringLiteral("%1の実行中に対象アプリケーションの異常終了（クラッシュ）を検知したため停止しました"))
                    .arg(stepLabel),

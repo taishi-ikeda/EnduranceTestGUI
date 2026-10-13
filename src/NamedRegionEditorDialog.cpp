@@ -54,11 +54,12 @@ QString generateDefaultRegionName(const QList<NamedRegion> &existing, const QStr
 NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, const QPoint &targetTopLeft,
                                                    bool hasTarget, qint64 targetPid, QWidget *parent,
                                                    const QList<NamedRegion> *existingRegionsForNaming,
-                                                   bool autoManageName)
+                                                   bool autoManageName, const QString &selfOriginalName)
     : QDialog(parent),
       m_existingRegionsForNaming(existingRegionsForNaming),
       m_autoManageName(autoManageName),
       m_lastAutoName(autoManageName ? initial.name : QString()),
+      m_selfOriginalName(selfOriginalName),
       m_regions(initial.regions),
       m_excludeRegions(initial.excludeRegions),
       m_targetTopLeft(targetTopLeft),
@@ -619,9 +620,25 @@ void NamedRegionEditorDialog::refreshExcludeList()
 
 void NamedRegionEditorDialog::onAccept()
 {
-    if (m_nameEdit->text().trimmed().isEmpty()) {
+    const QString name = m_nameEdit->text().trimmed();
+    if (name.isEmpty()) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")), I18n::t(QStringLiteral("名前を入力してください。")));
         return;
+    }
+    // SPEC.md 不具合報告 E3: checked here, inline, alongside the other
+    // input-error cases below, rather than only by the caller after this
+    // dialog has already accept()-ed and closed -- catching it only
+    // afterward meant the dialog (and everything drawn in it -- rectangles,
+    // waypoints) was already gone by the time the duplicate was reported,
+    // so retrying meant redoing all of it from scratch.
+    if (m_existingRegionsForNaming) {
+        for (const NamedRegion &existing : *m_existingRegionsForNaming) {
+            if (existing.name == name && existing.name != m_selfOriginalName) {
+                QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                      I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
+                return;
+            }
+        }
     }
     if (m_objectModeRadio->isChecked()) {
         if (!m_objectPicked) {

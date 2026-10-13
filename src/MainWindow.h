@@ -27,6 +27,7 @@ class QPushButton;
 class QGroupBox;
 class QTimer;
 class QAction;
+class QCloseEvent;
 class StopPanel;
 class RecordingIndicatorPanel;
 class GlobalHotkey;
@@ -78,6 +79,15 @@ public:
     // launch command is configured (required so each repeat gets a fresh
     // instance -- same requirement "⟳ 連続実行" already has).
     bool runHeadless(const QString &presetPath, int repeatCount);
+
+protected:
+    // SPEC.md 不具合報告 E6: previously closed immediately with no warning,
+    // silently discarding an entire test setup (steps/operation regions/
+    // startup setup) that was never saved to a preset. Mirrors the
+    // existing (if unconditional, rather than true dirty-tracking)
+    // confirm-before-discard pattern onLoadPreset() already uses for the
+    // exact same data.
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void onRefreshTargets();
@@ -191,6 +201,11 @@ private:
 
     void refreshStepList();
     void refreshSetupActionList();
+    // SPEC.md 不具合報告 E9: same rationale as updateGroupButtonsEnabled()
+    // below, applied to the 起動時セットアップ list's own
+    // 編集.../削除/↑上へ/↓下へ buttons, which had the identical "stays
+    // enabled with nothing selected, does nothing when clicked" gap.
+    void updateSetupActionButtonsEnabled();
     QString describeSetupAction(const SetupAction &action, int index) const;
     // Live bounds top-left of whatever target is currently selected in
     // m_targetCombo, if any -- used as the anchor point for a named

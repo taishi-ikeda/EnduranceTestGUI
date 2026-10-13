@@ -53,6 +53,25 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup, Reg
         return result;
     };
 
+    // Same rationale as the stepsReferencing wrap above, but for renames
+    // instead of deletes (SPEC.md 不具合報告 E1): without this, renaming a
+    // region from inside one sibling member's own edit dialog (opened via
+    // onEditSelectedMember()/onAddMember() below) only patched
+    // MainWindow::m_steps via the global callback -- any OTHER member in
+    // THIS still-open group that already referenced the old name was left
+    // pointing at a name that no longer exists in the pool, silently, with
+    // no error until the group was actually run (at which point it failed
+    // with an "operation region not found" abnormal stop).
+    auto globalRename = m_regionCtx.renameReferences;
+    m_regionCtx.renameReferences = [this, globalRename](const QString &oldName, const QString &newName) {
+        if (globalRename)
+            globalRename(oldName, newName);
+        for (RegionStep &member : m_members) {
+            if (!member.useWholeWindow && member.regionName == oldName)
+                member.regionName = newName;
+        }
+    };
+
     auto *layout = new QVBoxLayout(this);
 
     auto *topRow = new QHBoxLayout;

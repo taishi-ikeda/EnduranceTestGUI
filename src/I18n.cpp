@@ -765,9 +765,6 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("%1's target window (a dialog, etc.) never appeared, so the test was stopped "
                         "for safety")},
 
-        // v0.64: 起動時セットアップに「全消去」ボタン
-        {QStringLiteral("全消去"), QStringLiteral("Clear All")},
-
         // v0.65: 起動時セットアップに「ホイールスクロール」「メニュー項目を選択」
         {QStringLiteral("ホイールスクロール"), QStringLiteral("Wheel Scroll")},
         {QStringLiteral("メニュー項目を選択"), QStringLiteral("Select Menu Item")},

@@ -8,6 +8,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDir>
@@ -704,7 +705,11 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     auto *setupActionsOrderRow = new QHBoxLayout;
     m_moveSetupActionUpButton = new QPushButton(I18n::t(QStringLiteral("↑ 上へ")), m_setupActionsGroup);
     m_moveSetupActionDownButton = new QPushButton(I18n::t(QStringLiteral("↓ 下へ")), m_setupActionsGroup);
-    m_clearSetupActionsButton = new QPushButton(I18n::t(QStringLiteral("全消去")), m_setupActionsGroup);
+    // SPEC.md 不具合報告 E9: was "全消去", inconsistent with the equivalent
+    // "すべて削除" button in the ②ステップ構成 panel below for the exact
+    // same kind of action (clear a whole list) -- standardized on the
+    // latter's wording.
+    m_clearSetupActionsButton = new QPushButton(I18n::t(QStringLiteral("すべて削除")), m_setupActionsGroup);
     setupActionsOrderRow->addWidget(m_moveSetupActionUpButton);
     setupActionsOrderRow->addWidget(m_moveSetupActionDownButton);
     setupActionsOrderRow->addWidget(m_clearSetupActionsButton);
@@ -746,6 +751,8 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
             &MainWindow::onEditSelectedSetupAction);
     connect(m_removeSetupActionButton, &QPushButton::clicked, this,
             &MainWindow::onRemoveSelectedSetupAction);
+    connect(m_setupActionListWidget, &QListWidget::itemSelectionChanged, this,
+            &MainWindow::updateSetupActionButtonsEnabled);
     connect(m_moveSetupActionUpButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionUp);
     connect(m_moveSetupActionDownButton, &QPushButton::clicked, this, &MainWindow::onMoveSetupActionDown);
     connect(m_clearSetupActionsButton, &QPushButton::clicked, this, &MainWindow::onClearSetupActions);
@@ -1153,6 +1160,28 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     return wrapper;
 }
 
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    // Headless mode never shows() this window (see runHeadless()'s own doc
+    // comment), so close() is never reached that way -- but guard anyway
+    // rather than risk popping a confirmation dialog nothing can answer in
+    // an unattended run.
+    if (m_headlessMode || (m_steps.isEmpty() && m_setupActions.isEmpty() && m_namedRegions.isEmpty())) {
+        event->accept();
+        return;
+    }
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("終了しますか？")),
+        I18n::t(QStringLiteral("現在の起動時セットアップ・操作領域・ステップ構成はファイルに保存されて"
+                                "いません。このまま終了すると失われます。先に「テスト設定を保存...」で"
+                                "保存することもできます。終了しますか？")),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply == QMessageBox::Yes)
+        event->accept();
+    else
+        event->ignore();
+}
+
 void MainWindow::onRefreshTargets()
 {
     refreshTargetList(/*preserveLastTargetHint=*/false);
@@ -1418,6 +1447,18 @@ void MainWindow::refreshSetupActionList()
     m_setupActionListWidget->clear();
     for (int i = 0; i < m_setupActions.size(); ++i)
         m_setupActionListWidget->addItem(describeSetupAction(m_setupActions[i], i));
+    updateSetupActionButtonsEnabled();
+}
+
+void MainWindow::updateSetupActionButtonsEnabled()
+{
+    const int row = m_setupActionListWidget->currentRow();
+    const bool validSelection =
+        m_setupActionsGroup->isEnabled() && row >= 0 && row < m_setupActions.size();
+    m_editSetupActionButton->setEnabled(validSelection);
+    m_removeSetupActionButton->setEnabled(validSelection);
+    m_moveSetupActionUpButton->setEnabled(validSelection && row > 0);
+    m_moveSetupActionDownButton->setEnabled(validSelection && row < m_setupActions.size() - 1);
 }
 
 QStringList MainWindow::stepsReferencing(const QString &regionName) const
@@ -1818,6 +1859,17 @@ void MainWindow::onMoveSetupActionDown()
 
 void MainWindow::onClearSetupActions()
 {
+    // SPEC.md 不具合報告 E6: previously cleared instantly with no way back.
+    if (m_setupActions.isEmpty())
+        return;
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("起動時セットアップをすべて削除しますか？")),
+        I18n::t(QStringLiteral("登録済みの起動時セットアップ操作（%1件）をすべて削除します。元に戻せません。"
+                                "削除しますか？"))
+            .arg(m_setupActions.size()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+        return;
     m_setupActions.clear();
     refreshSetupActionList();
 }
@@ -2093,6 +2145,16 @@ void MainWindow::onMoveStepDown()
 
 void MainWindow::onClearSteps()
 {
+    // SPEC.md 不具合報告 E6: previously cleared instantly with no way back.
+    if (m_steps.isEmpty())
+        return;
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("ステップをすべて削除しますか？")),
+        I18n::t(QStringLiteral("登録済みのステップ（%1件）をすべて削除します。元に戻せません。削除しますか？"))
+            .arg(m_steps.size()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+        return;
     m_steps.clear();
     refreshStepList();
 }
@@ -2194,6 +2256,34 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
 {
     if (step.isWaitStep || step.isGroup || step.isTask)
         return true;  // nothing here to validate (a group's/task's members are validated individually)
+    // SPEC.md 不具合報告 E1: every other "did the user forget to configure
+    // this" case here is caught at save time by the editing dialogs
+    // themselves (an empty regionName can't even be saved -- see
+    // StepEditorDialog/TaskEditorDialog::onAddMember()'s own "操作領域が
+    // 選択されていません" checks), but a NON-empty regionName that no
+    // longer exists in m_namedRegions (e.g. the region was renamed from
+    // inside a sibling member's own edit dialog before the rename-
+    // propagation fix above existed, or a hand-edited preset) previously
+    // went undetected until the engine actually tried to resolve it
+    // mid-run, aborting with an abnormal stop. Catch it here instead, as a
+    // normal configuration error.
+    if (!step.useWholeWindow && !step.regionName.isEmpty()) {
+        bool regionExists = false;
+        for (const NamedRegion &region : m_namedRegions) {
+            if (region.name == step.regionName) {
+                regionExists = true;
+                break;
+            }
+        }
+        if (!regionExists) {
+            errorMessage = I18n::t(QStringLiteral("%1が参照している操作領域「%2」が見つかりません"
+                                            "（削除されたか、名前が変更された可能性があります）。"
+                                            "②でこのステップの操作領域を選び直してください。"))
+                               .arg(stepLabel)
+                               .arg(step.regionName);
+            return false;
+        }
+    }
     if (!step.hasAnyActionEnabled()) {
         errorMessage = I18n::t(QStringLiteral("%1は操作種別が選択されていません。②でこのステップの「編集...」を開き、"
             "操作種別を1つ以上有効にしてください。"))
@@ -2393,6 +2483,7 @@ void MainWindow::setControlsEnabled(bool enabled)
         m_resourceUsageLabel->clear();
     }
     updateGroupButtonsEnabled();
+    updateSetupActionButtonsEnabled();
 }
 
 void MainWindow::updateGroupButtonsEnabled()
@@ -2411,10 +2502,17 @@ void MainWindow::updateGroupButtonsEnabled()
     // doc comment.
     m_addTaskButton->setEnabled(m_stepsGroup->isEnabled());
     const int row = m_stepListWidget->currentRow();
-    m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
-                                     row < m_steps.size() && m_steps[row].isGroup);
-    m_untaskifyStepButton->setEnabled(m_stepsGroup->isEnabled() && selected.size() == 1 && row >= 0 &&
-                                       row < m_steps.size() && m_steps[row].isTask);
+    const bool singleValidSelection = selected.size() == 1 && row >= 0 && row < m_steps.size();
+    m_ungroupStepButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection && m_steps[row].isGroup);
+    m_untaskifyStepButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection && m_steps[row].isTask);
+    // SPEC.md 不具合報告 E9: these stayed enabled-but-inert with nothing
+    // selected (clicking them silently did nothing) -- apply the same
+    // selection-based enablement the group/task buttons above already had.
+    m_editStepButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection);
+    m_removeStepButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection);
+    m_moveStepUpButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection && row > 0);
+    m_moveStepDownButton->setEnabled(m_stepsGroup->isEnabled() && singleValidSelection &&
+                                      row < m_steps.size() - 1);
 }
 
 bool MainWindow::beginRun(bool interactive)
@@ -3351,6 +3449,18 @@ void MainWindow::updateElapsedLabel()
 
 void MainWindow::onClearLog()
 {
+    // SPEC.md 不具合報告 E6: previously cleared instantly with no way back
+    // (and no reminder that "ログを保存..." exists if the log is worth
+    // keeping first).
+    if (m_logView->document()->isEmpty())
+        return;
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("ログをクリアしますか？")),
+        I18n::t(QStringLiteral("表示中のログをすべて消去します（保存済みのログファイルには影響しません）。"
+                                "必要であれば先に「ログを保存...」で保存してください。クリアしますか？")),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+        return;
     m_logView->clear();
 }
 

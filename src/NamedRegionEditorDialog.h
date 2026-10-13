@@ -65,10 +65,22 @@ public:
     // next free number -- but only as long as the field still holds exactly
     // the auto-generated value it last set; once the user types their own
     // name, mode switches no longer touch it.
+    //
+    // `existingRegionsForNaming` doubles as the pool onAccept() checks the
+    // typed name against for duplicates (SPEC.md 不具合報告 E3) -- callers
+    // should pass it even when `autoManageName` is false (onEditRegion()
+    // does), so a duplicate is caught right here, inline, with the drawn
+    // rectangles/waypoints still intact and nothing to redo, instead of
+    // only being caught by the caller after this dialog has already closed
+    // and discarded them. `selfOriginalName` is the region's own name
+    // before this editing session (empty when creating a brand-new one) --
+    // excluded from that duplicate check so keeping the name unchanged
+    // while editing isn't flagged as colliding with itself.
     explicit NamedRegionEditorDialog(const NamedRegion &initial, const QPoint &targetTopLeft,
                                       bool hasTarget, qint64 targetPid, QWidget *parent = nullptr,
                                       const QList<NamedRegion> *existingRegionsForNaming = nullptr,
-                                      bool autoManageName = false);
+                                      bool autoManageName = false,
+                                      const QString &selfOriginalName = QString());
 
     NamedRegion result() const;
 
@@ -118,6 +130,9 @@ private:
     const QList<NamedRegion> *m_existingRegionsForNaming = nullptr;
     bool m_autoManageName = false;
     QString m_lastAutoName;
+    // See the constructor's doc comment -- the name to exclude from
+    // onAccept()'s duplicate-name check against m_existingRegionsForNaming.
+    QString m_selfOriginalName;
 
     QListWidget *m_regionListWidget = nullptr;
     QPushButton *m_drawButton = nullptr;

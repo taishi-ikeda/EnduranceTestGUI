@@ -311,7 +311,16 @@ void StepEditorDialog::refreshRegionCombo(int selectIndex)
 
 void StepEditorDialog::updateRegionButtonsEnabled()
 {
+    // SPEC.md 不具合報告 E2: m_namedRegionCombo keeps a valid
+    // currentIndex() even while it's grayed out (e.g. "対象GUIの全領域"
+    // is selected instead of "登録済みの操作領域から選択", so the combo
+    // itself is disabled per m_namedRegionRadio's onModeChanged() logic) --
+    // checking only the index let "編集..."/"削除" stay clickable and act
+    // on whatever region happened to still be showing in the disabled
+    // combo, even though the user had no way to see or change which one
+    // that was. Requiring the combo to actually be enabled closes that gap.
     const bool hasValidSelection = m_regionCtx && m_regionCtx->namedRegions &&
+                                    m_namedRegionCombo->isEnabled() &&
                                     m_namedRegionCombo->currentIndex() >= 0 &&
                                     m_namedRegionCombo->currentIndex() < m_regionCtx->namedRegions->size();
     m_editRegionButton->setEnabled(hasValidSelection);
@@ -330,14 +339,13 @@ void StepEditorDialog::onCreateRegion()
                                    /*autoManageName=*/true);
     if (dialog.exec() != QDialog::Accepted)
         return;
+    // Duplicate-name checking now happens inline inside the dialog itself
+    // (SPEC.md 不具合報告 E3, via the existingRegionsForNaming/
+    // selfOriginalName passed above/below) -- accepted() here already
+    // means the name is unique, so there's nothing left to re-check (and
+    // re-checking after the fact would be too late to matter anyway: the
+    // dialog and whatever it held is already gone by this point).
     const NamedRegion region = dialog.result();
-    for (const NamedRegion &existing : *m_regionCtx->namedRegions) {
-        if (existing.name == region.name) {
-            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
-                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
-            return;
-        }
-    }
     m_regionCtx->namedRegions->append(region);
     refreshRegionCombo(m_regionCtx->namedRegions->size() - 1);
     m_namedRegionRadio->setChecked(true);
@@ -353,17 +361,14 @@ void StepEditorDialog::onEditRegion()
 
     const QString oldName = (*m_regionCtx->namedRegions)[idx].name;
     NamedRegionEditorDialog dialog((*m_regionCtx->namedRegions)[idx], m_regionCtx->targetTopLeft,
-                                   m_regionCtx->hasTarget, m_regionCtx->targetPid, this);
+                                   m_regionCtx->hasTarget, m_regionCtx->targetPid, this,
+                                   m_regionCtx->namedRegions, /*autoManageName=*/false, oldName);
     if (dialog.exec() != QDialog::Accepted)
         return;
+    // See onCreateRegion()'s identical comment -- the dialog itself already
+    // blocked a duplicate (excluding this region's own pre-edit name, via
+    // `oldName` above) before accept()-ing.
     const NamedRegion region = dialog.result();
-    for (int i = 0; i < m_regionCtx->namedRegions->size(); ++i) {
-        if (i != idx && (*m_regionCtx->namedRegions)[i].name == region.name) {
-            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
-                                  I18n::t(QStringLiteral("同じ名前の操作領域が既に存在します。")));
-            return;
-        }
-    }
     (*m_regionCtx->namedRegions)[idx] = region;
     if (oldName != region.name && m_regionCtx->renameReferences)
         m_regionCtx->renameReferences(oldName, region.name);
@@ -390,6 +395,20 @@ void StepEditorDialog::onDeleteRegion()
             return;
         }
     }
+    // SPEC.md 不具合報告 E2/E6: this pool is shared across every step (not
+    // just this dialog's own), and deleting from it used to happen
+    // instantly with no confirmation and no way back -- even cancelling
+    // the rest of this step-edit session afterward didn't restore the
+    // removed region. Ask first, same as the app's other destructive
+    // actions (すべて削除/全消去/ログをクリア get the same treatment below).
+    const auto reply = QMessageBox::question(
+        this, I18n::t(QStringLiteral("操作領域を削除しますか？")),
+        I18n::t(QStringLiteral("操作領域「%1」を削除します。この操作領域は他のステップからも参照できる"
+                                "共有の一覧から削除され、元に戻せません。削除しますか？"))
+            .arg(name),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (reply != QMessageBox::Yes)
+        return;
     m_regionCtx->namedRegions->removeAt(idx);
     refreshRegionCombo();
 }

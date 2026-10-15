@@ -18,6 +18,7 @@
 #include "PointPickerOverlay.h"
 #include "RegionHighlightOverlay.h"
 #include "RegionSelectorOverlay.h"
+#include "SweepPath.h"
 #include "I18n.h"
 #include "platform/PlatformAutomation.h"
 
@@ -294,6 +295,13 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     m_sweepIntervalSpin->setValue(initial.sweepIntervalPx > 0 ? initial.sweepIntervalPx : 50);
     sweepIntervalRow->addWidget(m_sweepIntervalSpin, 1);
     sweepLayout->addLayout(sweepIntervalRow);
+    // Both spin boxes feed updateSweepHighlight()'s interval-mark/error-bar
+    // preview (SPEC.md 追加実装依頼「点列の間隔マーク・ランダム幅のエラー
+    // バー表示」), so changing either while this dialog is open updates the
+    // on-screen preview immediately, the same as adding/removing a waypoint
+    // already does.
+    connect(m_sweepIntervalSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            &NamedRegionEditorDialog::updateSweepHighlight);
 
     auto *sweepJitterRow = new QHBoxLayout;
     sweepJitterRow->addWidget(new QLabel(I18n::t(QStringLiteral("ランダム幅 (px):")), m_sweepModeGroup));
@@ -302,6 +310,8 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     m_sweepJitterSpin->setValue(qMax(0, initial.sweepJitterPx));
     sweepJitterRow->addWidget(m_sweepJitterSpin, 1);
     sweepLayout->addLayout(sweepJitterRow);
+    connect(m_sweepJitterSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            &NamedRegionEditorDialog::updateSweepHighlight);
     auto *sweepJitterHint = new QLabel(
         I18n::t(QStringLiteral("※各点を実際に操作する際、上下左右にこの範囲内でランダムにずらします"
                                 "（0なら常に同じ位置）。")),
@@ -400,9 +410,21 @@ void NamedRegionEditorDialog::updateSweepHighlight()
             m_sweepHighlightOverlay->hide();
         return;
     }
+
+    // Interval marks + jitter error bars (SPEC.md 追加実装依頼「点列の間隔
+    // マーク・ランダム幅のエラーバー表示」): the exact same
+    // SweepPath::pointSequence() RandomActionEngine::pickSweepPoint() walks
+    // at runtime, so this preview reflects actual behavior (including its
+    // known "区間等分" imprecision -- SPEC.md 不具合報告E5/E8 -- rather than
+    // a simplified approximation). Window-relative like m_sweepWaypoints,
+    // so it needs the same +m_targetTopLeft conversion to screen-absolute.
+    QList<QPoint> intervalMarks;
+    for (const QPoint &p : SweepPath::pointSequence(m_sweepWaypoints, m_sweepIntervalSpin->value()))
+        intervalMarks << (p + m_targetTopLeft);
+
     if (!m_sweepHighlightOverlay)
         m_sweepHighlightOverlay = new PointHighlightOverlay(this);
-    m_sweepHighlightOverlay->showPoints(points, labels);
+    m_sweepHighlightOverlay->showSweepPath(points, labels, intervalMarks, m_sweepJitterSpin->value());
     // See updateHighlight()'s identical comment.
     raise();
     activateWindow();

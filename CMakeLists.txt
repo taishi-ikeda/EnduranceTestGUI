@@ -52,6 +52,7 @@ set(SOURCES
     src/I18n.cpp
     src/MainWindow.cpp
     src/RandomActionEngine.cpp
+    src/SweepPath.cpp
     src/RegionSelectorOverlay.cpp
     src/RegionHighlightOverlay.cpp
     src/PointPickerOverlay.cpp
@@ -85,6 +86,7 @@ set(SOURCES
 set(HEADERS
     src/MainWindow.h
     src/RandomActionEngine.h
+    src/SweepPath.h
     src/RegionSelectorOverlay.h
     src/RegionHighlightOverlay.h
     src/OverlayGeometry.h

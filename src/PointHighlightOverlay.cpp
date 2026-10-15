@@ -28,11 +28,14 @@ public:
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
 
-    void setContent(QScreen *screen, const QList<QPoint> &points, const QList<QString> &labels)
+    void setContent(QScreen *screen, const QList<QPoint> &points, const QList<QString> &labels,
+                     const QList<QPoint> &intervalMarks = {}, int jitterPx = 0)
     {
         m_screen = screen;
         m_points = points;
         m_labels = labels;
+        m_intervalMarks = intervalMarks;
+        m_jitterPx = jitterPx;
         // See RegionHighlightOverlay::setContent()'s identical guard: only
         // re-grab while not already visible, so a still-visible window
         // doesn't capture its own last-painted frame instead of the real
@@ -91,6 +94,33 @@ protected:
             p.setPen(Qt::white);
             p.drawText(labelBg, Qt::AlignCenter, m_labels[i]);
         }
+
+        // Interval marks + jitter error bars (SPEC.md 追加実装依頼「点列の
+        // 間隔マーク・ランダム幅のエラーバー表示」): drawn in addition to
+        // the waypoint markers/path above, not replacing them, so both the
+        // raw waypoints the user clicked and the actual interval-spaced
+        // sequence RandomActionEngine::pickSweepPoint() steps through at
+        // runtime (see SweepPath::pointSequence()) are visible at once.
+        // Small dot (no label -- there can be many) for each mark, plus a
+        // cross-shaped error bar sized ±m_jitterPx when jitter is nonzero,
+        // depicting the independent random x/y offset applied at runtime.
+        if (!m_intervalMarks.isEmpty()) {
+            p.setPen(QPen(QColor(0, 160, 220), 2));
+            p.setBrush(QColor(0, 160, 220, 200));
+            for (const QPoint &mark : m_intervalMarks) {
+                const QPoint local = mark - m_origin;
+                if (m_jitterPx > 0) {
+                    const int j = m_jitterPx;
+                    p.drawLine(local.x() - j, local.y(), local.x() + j, local.y());
+                    p.drawLine(local.x() - j, local.y() - 4, local.x() - j, local.y() + 4);
+                    p.drawLine(local.x() + j, local.y() - 4, local.x() + j, local.y() + 4);
+                    p.drawLine(local.x(), local.y() - j, local.x(), local.y() + j);
+                    p.drawLine(local.x() - 4, local.y() - j, local.x() + 4, local.y() - j);
+                    p.drawLine(local.x() - 4, local.y() + j, local.x() + 4, local.y() + j);
+                }
+                p.drawEllipse(local, 3, 3);
+            }
+        }
     }
 
 private:
@@ -98,6 +128,8 @@ private:
     QPoint m_origin;
     QList<QPoint> m_points;
     QList<QString> m_labels;
+    QList<QPoint> m_intervalMarks;
+    int m_jitterPx = 0;
     QPixmap m_background;
 };
 
@@ -110,8 +142,16 @@ PointHighlightOverlay::~PointHighlightOverlay()
 
 void PointHighlightOverlay::showPoints(const QList<QPoint> &points, const QList<QString> &labels)
 {
-    m_points = points;
-    m_labels = labels;
+    showSweepPath(points, labels, {}, 0);
+}
+
+void PointHighlightOverlay::showSweepPath(const QList<QPoint> &waypoints, const QList<QString> &waypointLabels,
+                                           const QList<QPoint> &intervalMarks, int jitterPx)
+{
+    m_points = waypoints;
+    m_labels = waypointLabels;
+    m_intervalMarks = intervalMarks;
+    m_jitterPx = jitterPx;
 
     const QList<QScreen *> screens = QGuiApplication::screens();
 
@@ -126,7 +166,7 @@ void PointHighlightOverlay::showPoints(const QList<QPoint> &points, const QList<
     }
 
     for (int i = 0; i < m_screenWindows.size(); ++i)
-        m_screenWindows[i]->setContent(screens[i], m_points, m_labels);
+        m_screenWindows[i]->setContent(screens[i], m_points, m_labels, m_intervalMarks, m_jitterPx);
 }
 
 void PointHighlightOverlay::hide()

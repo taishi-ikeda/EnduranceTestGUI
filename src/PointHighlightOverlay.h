@@ -34,10 +34,31 @@ public:
     // 「操作領域を点列（スイープ）で指定」中点対応 -- drawn as one dashed
     // polyline through every point in order, each with its own label).
     void showPoints(const QList<QPoint> &points, const QList<QString> &labels);
+
+    // Same waypoint markers/polyline as showPoints() above, plus two
+    // additions drawn on top (SPEC.md 追加実装依頼「点列の間隔マーク・
+    // ランダム幅のエラーバー表示」), so NamedRegionEditorDialog's sweep-mode
+    // preview can show exactly what RandomActionEngine::pickSweepPoint()
+    // actually walks at runtime, not just the raw waypoints the user
+    // clicked:
+    //   - `intervalMarks` (screen-absolute, same coordinate space as
+    //     `waypoints`): one small dot per point in the interval-spaced
+    //     sequence (see SweepPath::pointSequence()) the engine steps
+    //     through in order.
+    //   - `jitterPx`: if > 0, a cross-shaped error bar (horizontal and
+    //     vertical bars of half-length jitterPx, with small end caps) is
+    //     drawn centered on each interval mark, depicting the independent
+    //     ±jitterPx random offset pickSweepPoint() applies to x and y when
+    //     actually operating that point. 0 draws no error bars (the engine
+    //     always uses the exact mark position).
+    void showSweepPath(const QList<QPoint> &waypoints, const QList<QString> &waypointLabels,
+                        const QList<QPoint> &intervalMarks, int jitterPx);
     void hide();
 
 private:
     QList<QPoint> m_points;
     QList<QString> m_labels;
+    QList<QPoint> m_intervalMarks;
+    int m_jitterPx = 0;
     QList<PointHighlightScreenWindow *> m_screenWindows;
 };

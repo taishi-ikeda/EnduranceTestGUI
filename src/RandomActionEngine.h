@@ -342,7 +342,7 @@ private:
     // 「中点対応」) whose step has RegionStep::sweepRegionUseRandomPoint ==
     // false (点列スイープ, the deterministic mode): advances through the
     // evenly spaced sequence described by `waypoints`/`intervalPx` (see
-    // sweepPointSequence()) one point per call, wrapping back to the first
+    // SweepPath::pointSequence()) one point per call, wrapping back to the first
     // waypoint once exhausted, adding up to `jitterPx` of random offset in
     // x/y to the point actually returned. `indexKey` is used as the key
     // into m_sweepPointIndex to remember this particular sequence's
@@ -371,19 +371,6 @@ private:
     // total length, or `waypoints` has fewer than 2 entries.
     QPoint pickRandomPointOnSweepPath(const QList<QPoint> &waypoints, int jitterPx,
                                       const QList<QRect> &excludeRegions, bool &ok);
-    // The fixed sequence of window-relative points pickSweepPoint() steps
-    // through for one `waypoints`/`intervalPx` pair: walks each consecutive
-    // pair in `waypoints` in order (waypoints[0]->[1], [1]->[2], ...),
-    // subdividing each pair into points evenly spaced roughly `intervalPx`
-    // apart (the exact spacing within each pair is adjusted slightly so
-    // that pair's own end is always included exactly, rather than possibly
-    // falling short by less than one interval) and concatenating the
-    // results, so the whole sequence passes through every waypoint in
-    // order without any waypoint appearing twice in a row where two
-    // consecutive pairs meet. A pair whose two points are identical (or
-    // `intervalPx` <= 0) contributes just that single point. Returns an
-    // empty list if `waypoints` has fewer than 2 entries.
-    QList<QPoint> sweepPointSequence(const QList<QPoint> &waypoints, int intervalPx) const;
     ActionKind pickWeightedActionKind(const RegionStep &step);
     // Called right after a right-button mouse action (Click or Drag) that
     // may have opened a native context/popup menu: resolves it (selects a

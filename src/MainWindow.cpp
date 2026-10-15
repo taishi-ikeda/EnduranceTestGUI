@@ -8,6 +8,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
@@ -80,6 +81,41 @@ QLabel *columnHeader(const QString &text, QWidget *parent)
 const ActionParams &effectiveParamsOf(const RegionStep &step, const ActionParams &defaults)
 {
     return step.useDefaultActionParams ? defaults : step.customActionParams;
+}
+
+// SPEC.md 追加実装依頼「ステップの右クリックで選択してコピーとペースト」:
+// copied steps go on the system clipboard as JSON (reusing regionStepToJson/
+// regionStepFromJson, which already recurse into groupMembers/taskMembers),
+// wrapped in an object keyed by this marker so pasting doesn't try to
+// interpret arbitrary JSON (or any other text) a user happens to have
+// copied from somewhere else as steps.
+const QString kStepClipboardKey = QStringLiteral("enduranceTestGuiSteps");
+
+QString stepsToClipboardJson(const QList<RegionStep> &steps)
+{
+    QJsonArray arr;
+    for (const RegionStep &s : steps)
+        arr.append(regionStepToJson(s));
+    QJsonObject root;
+    root[kStepClipboardKey] = arr;
+    return QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+}
+
+// Returns an empty list if `text` isn't this app's own step-clipboard JSON
+// (missing/malformed marker, or an empty array) -- the caller treats that as
+// "nothing to paste" rather than an error.
+QList<RegionStep> stepsFromClipboardJson(const QString &text)
+{
+    QList<RegionStep> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+    if (!doc.isObject() || !doc.object().contains(kStepClipboardKey))
+        return result;
+    const QJsonArray arr = doc.object().value(kStepClipboardKey).toArray();
+    for (const QJsonValue &v : arr) {
+        if (v.isObject())
+            result.append(regionStepFromJson(v.toObject()));
+    }
+    return result;
 }
 }  // namespace
 
@@ -1108,6 +1144,11 @@ QWidget *MainWindow::buildStepsColumn(QWidget *parent)
     // Multiple steps can be selected at once so they can be combined into a
     // group (SPEC.md 6.2, m_groupStepsButton below).
     m_stepListWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // SPEC.md 追加実装依頼「ステップの右クリックで選択してコピーとペースト」:
+    // right-clicking shows a コピー/貼り付け menu (see onStepListContextMenu()).
+    m_stepListWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_stepListWidget, &QListWidget::customContextMenuRequested, this,
+            &MainWindow::onStepListContextMenu);
     stepsLayout->addWidget(m_stepListWidget, 1);
 
     auto *stepButtonsRow = new QHBoxLayout;
@@ -2289,6 +2330,78 @@ void MainWindow::onUntaskifySelectedStep()
     refreshStepList();
     if (!members.isEmpty())
         m_stepListWidget->setCurrentRow(row);
+}
+
+void MainWindow::onStepListContextMenu(const QPoint &pos)
+{
+    QListWidgetItem *item = m_stepListWidget->itemAt(pos);
+    if (item && !item->isSelected()) {
+        m_stepListWidget->clearSelection();
+        item->setSelected(true);
+        m_stepListWidget->setCurrentItem(item);
+    }
+
+    QMenu menu(this);
+    QAction *copyAction = menu.addAction(I18n::t(QStringLiteral("コピー")));
+    copyAction->setEnabled(!m_stepListWidget->selectedItems().isEmpty());
+    QAction *pasteAction = menu.addAction(I18n::t(QStringLiteral("貼り付け")));
+    pasteAction->setEnabled(
+        !stepsFromClipboardJson(QGuiApplication::clipboard()->text()).isEmpty());
+
+    QAction *chosen = menu.exec(m_stepListWidget->viewport()->mapToGlobal(pos));
+    if (chosen == copyAction)
+        onCopySelectedSteps();
+    else if (chosen == pasteAction)
+        onPasteSteps();
+}
+
+void MainWindow::onCopySelectedSteps()
+{
+    QList<int> rows;
+    for (QListWidgetItem *item : m_stepListWidget->selectedItems())
+        rows.append(m_stepListWidget->row(item));
+    if (rows.isEmpty())
+        return;
+    std::sort(rows.begin(), rows.end());
+
+    QList<RegionStep> steps;
+    for (int row : rows) {
+        if (row >= 0 && row < m_steps.size())
+            steps.append(m_steps[row]);
+    }
+    if (steps.isEmpty())
+        return;
+    QGuiApplication::clipboard()->setText(stepsToClipboardJson(steps));
+}
+
+void MainWindow::onPasteSteps()
+{
+    const QList<RegionStep> steps = stepsFromClipboardJson(QGuiApplication::clipboard()->text());
+    if (steps.isEmpty())
+        return;
+
+    // After the last selected row, so pasting right after copying puts the
+    // new steps directly below what was copied; at the end of the list if
+    // nothing is currently selected.
+    int insertAt = m_steps.size();
+    const QList<QListWidgetItem *> selected = m_stepListWidget->selectedItems();
+    if (!selected.isEmpty()) {
+        int lastRow = -1;
+        for (QListWidgetItem *item : selected)
+            lastRow = qMax(lastRow, m_stepListWidget->row(item));
+        insertAt = lastRow + 1;
+    }
+
+    for (int i = 0; i < steps.size(); ++i)
+        m_steps.insert(insertAt + i, steps[i]);
+
+    refreshStepList();
+    m_stepListWidget->clearSelection();
+    for (int i = 0; i < steps.size(); ++i) {
+        if (auto *item = m_stepListWidget->item(insertAt + i))
+            item->setSelected(true);
+    }
+    m_stepListWidget->setCurrentRow(insertAt);
 }
 
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,

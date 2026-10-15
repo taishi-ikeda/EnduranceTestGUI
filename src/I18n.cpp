@@ -1384,6 +1384,10 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("このグループのメンバー%1"), QStringLiteral("Member %1 of this group")},
         {QStringLiteral("このタスクの操作%1"), QStringLiteral("Operation %1 of this task")},
         {QStringLiteral("(%1文字、プライバシーのため非表示)"), QStringLiteral("(%1 characters, hidden for privacy)")},
+
+        // v1.19: SPEC.md 追加実装依頼「ステップの右クリックで選択してコピーと
+        // ペースト」。
+        {QStringLiteral("貼り付け"), QStringLiteral("Paste")},
     };
     return table;
 }

@@ -134,6 +134,22 @@ private slots:
     void onUngroupSelectedStep();
     void onAddTask();
     void onUntaskifySelectedStep();
+    // SPEC.md 追加実装依頼「ステップの右クリックで選択してコピーとペースト」:
+    // right-click on ②'s step list first makes the clicked row part of the
+    // current selection (replacing it, unless the click landed inside an
+    // already-selected multi-selection -- the usual list-widget convention),
+    // then shows a コピー/貼り付け context menu.
+    void onStepListContextMenu(const QPoint &pos);
+    // Copies every currently selected step (in list order) to the system
+    // clipboard as JSON; a no-op with nothing selected.
+    void onCopySelectedSteps();
+    // Inserts the clipboard's steps (if it holds this app's own step JSON --
+    // see stepsFromClipboardJson() in MainWindow.cpp) right after the
+    // current row, or at the end of the list if nothing is selected; a
+    // no-op if the clipboard doesn't hold steps. The newly inserted steps
+    // are selected afterward, the same as onGroupSelectedSteps() does for
+    // the group it just created.
+    void onPasteSteps();
     void onEditDefaultParams();
 
     void onStart();

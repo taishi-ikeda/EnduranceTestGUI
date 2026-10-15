@@ -1,5 +1,7 @@
 #include "TestConfigJson.h"
 
+#include "I18n.h"
+
 #include <QJsonArray>
 
 namespace
@@ -402,7 +404,7 @@ QJsonObject setupActionToJson(const SetupAction &a, bool redactSensitiveText)
     // 報告 D3). The character count alone (not the text) is kept so the
     // redacted preset still shows *that* a TypeText action was configured.
     o["text"] = (redactSensitiveText && a.type == SetupActionType::TypeText)
-                    ? QStringLiteral("(%1文字、プライバシーのため非表示)").arg(a.text.size())
+                    ? I18n::t(QStringLiteral("(%1文字、プライバシーのため非表示)")).arg(a.text.size())
                     : a.text;
     o["keySequence"] = a.keySequence;
     o["waitMs"] = a.waitMs;

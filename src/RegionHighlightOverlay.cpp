@@ -1,4 +1,5 @@
 #include "RegionHighlightOverlay.h"
+#include "I18n.h"
 #include "OverlayGeometry.h"
 #include "platform/PlatformAutomation.h"
 
@@ -145,7 +146,7 @@ protected:
             if (!entry.includeRegions.isEmpty()) {
                 const QRect first = entry.includeRegions.first().translated(-m_origin);
                 p.setFont(QFont(font().family(), 12, QFont::Bold));
-                const QString label = QStringLiteral("操作領域「%1」").arg(entry.name);
+                const QString label = I18n::t(QStringLiteral("操作領域「%1」")).arg(entry.name);
                 const QRect labelBg(first.left(), qMax(0, first.top() - 26), qMax(160, first.width()), 24);
                 p.fillRect(labelBg, QColor(0, 150, 0, 220));
                 p.setPen(Qt::white);

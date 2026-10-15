@@ -423,7 +423,7 @@ void NamedRegionEditorDialog::onModeChanged()
     // user has typed their own, so leave it alone from here on.
     if (m_autoManageName && m_existingRegionsForNaming && m_nameEdit->text() == m_lastAutoName) {
         const QString nameTemplate =
-            sweepMode ? QStringLiteral("操作線分%1") : QStringLiteral("操作領域%1");
+            sweepMode ? I18n::t(QStringLiteral("操作線分%1")) : I18n::t(QStringLiteral("操作領域%1"));
         m_lastAutoName = generateDefaultRegionName(*m_existingRegionsForNaming, nameTemplate);
         m_nameEdit->setText(m_lastAutoName);
     }

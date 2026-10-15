@@ -15,7 +15,7 @@ RecordingIndicatorPanel::RecordingIndicatorPanel(QWidget *parent) : QWidget(pare
     auto *layout = new QVBoxLayout(this);
     auto *titleLabel = new QLabel(I18n::t(QStringLiteral("● 記録中... (Escで終了)")), this);
     titleLabel->setStyleSheet("color: white; font-weight: bold;");
-    m_countLabel = new QLabel(I18n::t(QStringLiteral("記録件数: 0")), this);
+    m_countLabel = new QLabel(I18n::t(QStringLiteral("記録件数: %1")).arg(0), this);
     m_countLabel->setStyleSheet("color: white;");
 
     auto *stopButton = new QPushButton(I18n::t(QStringLiteral("■ 記録終了")), this);

@@ -1,5 +1,7 @@
 #include "GifEncoder.h"
 
+#include "I18n.h"
+
 #include <QFile>
 #include <QHash>
 #include <QPainter>
@@ -332,7 +334,7 @@ bool writeAnimatedGif(const QString &outputPath, const QVector<QImage> &frames, 
     };
 
     if (frames.isEmpty())
-        return fail(QStringLiteral("フレームがありません"));
+        return fail(I18n::t(QStringLiteral("フレームがありません")));
 
     // ManualRecorder re-queries the target window's bounds every frame so
     // it keeps following the window if it moves or gets resized mid-
@@ -347,7 +349,7 @@ bool writeAnimatedGif(const QString &outputPath, const QVector<QImage> &frames, 
         height = std::max(height, f.height());
     }
     if (width <= 0 || height <= 0)
-        return fail(QStringLiteral("フレームの画像サイズが不正です"));
+        return fail(I18n::t(QStringLiteral("フレームの画像サイズが不正です")));
 
     QVector<QImage> normalized;
     normalized.reserve(frames.size());
@@ -366,7 +368,7 @@ bool writeAnimatedGif(const QString &outputPath, const QVector<QImage> &frames, 
 
     QFile file(outputPath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return fail(QStringLiteral("出力ファイルを開けませんでした: %1").arg(outputPath));
+        return fail(I18n::t(QStringLiteral("出力ファイルを開けませんでした: %1")).arg(outputPath));
 
     file.write("GIF89a", 6);
     writeU16LE(file, quint16(width));
@@ -385,7 +387,7 @@ bool writeAnimatedGif(const QString &outputPath, const QVector<QImage> &frames, 
     for (int frameIdx = 0; frameIdx < normalized.size(); ++frameIdx) {
         if (progressCallback && !progressCallback(frameIdx, normalized.size())) {
             file.close();
-            return fail(QStringLiteral("キャンセルされました"), /*removePartialFile=*/true);
+            return fail(I18n::t(QStringLiteral("キャンセルされました")), /*removePartialFile=*/true);
         }
 
         const QuantizedFrame q = quantizeFrame(normalized[frameIdx]);

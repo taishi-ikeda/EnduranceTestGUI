@@ -1305,6 +1305,85 @@ const QHash<QString, QString> &translationTable()
         // v1.16: SPEC.md 不具合報告E7「実行の度にログが消える」-- 実行開始時に
         // ログをクリアする代わりに挿入する区切り線。
         {QStringLiteral("────── 実行開始 ──────"), QStringLiteral("────── Run started ──────")},
+
+        // v1.17: SPEC.md 不具合報告E4/E10「英語UI翻訳漏れ」-- I18n::t()で
+        // 呼び出されているのに翻訳表に対応するキーが無かった（＝英語モードでも
+        // 日本語のまま表示されていた）文字列、および呼び出し側でI18n::t()の
+        // ラップ自体が漏れていた文字列（GifEncoder.cpp/NamedRegionEditorDialog.cpp/
+        // StepEditorDialog.cpp/RegionHighlightOverlay.cpp/TestConfigJson.cppは
+        // 呼び出し側も修正済み）をまとめて洗い出して追加。
+        {QStringLiteral("フレームがありません"), QStringLiteral("No frames")},
+        {QStringLiteral("フレームの画像サイズが不正です"), QStringLiteral("Invalid frame image size")},
+        {QStringLiteral("出力ファイルを開けませんでした: %1"), QStringLiteral("Could not open the output file: %1")},
+        {QStringLiteral("終了しますか？"), QStringLiteral("Quit?")},
+        {QStringLiteral("現在の起動時セットアップ・操作領域・ステップ構成はファイルに保存されて"
+                        "いません。このまま終了すると失われます。先に「テスト設定を保存...」で"
+                        "保存することもできます。終了しますか？"),
+         QStringLiteral("The current startup setup, operation regions, and step configuration have "
+                        "not been saved to a file. Quitting now will lose them. You can save first "
+                        "with \"Save test settings...\". Quit anyway?")},
+        // Purely structural (number/colon/bracket layout); identical in both
+        // languages, but still needs a table entry so it isn't reported as a
+        // translation gap.
+        {QStringLiteral("%1%2: %3%4"), QStringLiteral("%1%2: %3%4")},
+        {QStringLiteral("%1 （どのステップからも未参照）"), QStringLiteral("%1 (not referenced by any step)")},
+        {QStringLiteral("%1 （%2）"), QStringLiteral("%1 (%2)")},
+        {QStringLiteral("ステップの「編集...」ダイアログ内の「新規作成...」から操作領域を追加してから"
+                        "確認してください。"),
+         QStringLiteral("Add an operation region first from \"New...\" inside a step's \"Edit...\" "
+                        "dialog, then check again.")},
+        {QStringLiteral("起動時セットアップをすべて削除しますか？"), QStringLiteral("Delete all startup setup actions?")},
+        {QStringLiteral("登録済みの起動時セットアップ操作（%1件）をすべて削除します。元に戻せません。"
+                        "削除しますか？"),
+         QStringLiteral("This will delete all %1 registered startup setup action(s). This cannot be "
+                        "undone. Delete them?")},
+        {QStringLiteral("ステップをすべて削除しますか？"), QStringLiteral("Delete all steps?")},
+        {QStringLiteral("登録済みのステップ（%1件）をすべて削除します。元に戻せません。削除しますか？"),
+         QStringLiteral("This will delete all %1 registered step(s). This cannot be undone. Delete "
+                        "them?")},
+        {QStringLiteral("%1が参照している操作領域「%2」が見つかりません（削除されたか、名前が変更"
+                        "された可能性があります）。②でこのステップの操作領域を選び直してください。"),
+         QStringLiteral("The operation region \"%2\" referenced by %1 could not be found (it may have "
+                        "been deleted or renamed). Please re-select this step's operation region in "
+                        "②.")},
+        {QStringLiteral("連続実行を使うには、①に対象アプリの自動起動コマンドを設定してください。"
+                        "プリセットJSONにtargetLaunchCommandが含まれているか確認してください。"),
+         QStringLiteral("To use Continuous Run, set the target app's auto-launch command in ①. Check "
+                        "that the preset JSON includes targetLaunchCommand.")},
+        {QStringLiteral("ヘッドレス実行終了のため対象アプリ（PID %1）を終了します"),
+         QStringLiteral("Terminating the target app (PID %1) because the headless run has ended")},
+        {QStringLiteral("連続実行: 対象ウィンドウのPIDを特定できないため終了できません。既存の"
+                        "ウィンドウをそのまま使って実行します"),
+         QStringLiteral("Continuous Run: cannot terminate the target window because its PID could not "
+                        "be determined. Continuing with the existing window as-is")},
+        {QStringLiteral("ログをクリアしますか？"), QStringLiteral("Clear the log?")},
+        {QStringLiteral("表示中のログをすべて消去します（保存済みのログファイルには影響しません）。"
+                        "必要であれば先に「ログを保存...」で保存してください。クリアしますか？"),
+         QStringLiteral("This will clear all of the displayed log (saved log files are not affected). "
+                        "If needed, save it first with \"Save log...\". Clear it?")},
+        {QStringLiteral("対象アプリケーションが外部から一時停止（SIGSTOP等）されており応答できない"
+                        "状態であることを検知したため停止しました"),
+         QStringLiteral("Stopped because the target application was detected to be externally "
+                        "suspended (e.g. SIGSTOP) and unable to respond")},
+        {QStringLiteral("例: 削除"), QStringLiteral("e.g. Delete")},
+        {QStringLiteral("新規作成..."), QStringLiteral("New...")},
+        {QStringLiteral("「ランダム」はこの操作領域に登録された点列の経路上をランダムに操作し、"
+                        "「点列スイープ」は経路上を間隔・ランダム幅の設定に従って順番に操作します"
+                        "（間隔・ランダム幅は「編集...」の操作領域編集画面で設定します）。"),
+         QStringLiteral("\"Random\" operates at random points along this operation region's "
+                        "registered path; \"Sweep\" operates along the path in order, according to "
+                        "the interval/random-width settings (set the interval/random width in the "
+                        "region's own \"Edit...\" screen).")},
+        {QStringLiteral("（操作領域がありません。「新規作成...」から追加してください）"),
+         QStringLiteral("(No operation regions. Add one from \"New...\")")},
+        {QStringLiteral("操作領域を削除しますか？"), QStringLiteral("Delete this operation region?")},
+        {QStringLiteral("操作領域「%1」を削除します。この操作領域は他のステップからも参照できる"
+                        "共有の一覧から削除され、元に戻せません。削除しますか？"),
+         QStringLiteral("This will delete operation region \"%1\". It is removed from the shared list "
+                        "that other steps can also reference, and this cannot be undone. Delete it?")},
+        {QStringLiteral("このグループのメンバー%1"), QStringLiteral("Member %1 of this group")},
+        {QStringLiteral("このタスクの操作%1"), QStringLiteral("Operation %1 of this task")},
+        {QStringLiteral("(%1文字、プライバシーのため非表示)"), QStringLiteral("(%1 characters, hidden for privacy)")},
     };
     return table;
 }

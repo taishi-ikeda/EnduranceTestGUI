@@ -333,7 +333,7 @@ void StepEditorDialog::onCreateRegion()
         return;
 
     NamedRegion initial;
-    initial.name = generateDefaultRegionName(*m_regionCtx->namedRegions, QStringLiteral("操作領域%1"));
+    initial.name = generateDefaultRegionName(*m_regionCtx->namedRegions, I18n::t(QStringLiteral("操作領域%1")));
     NamedRegionEditorDialog dialog(initial, m_regionCtx->targetTopLeft, m_regionCtx->hasTarget,
                                    m_regionCtx->targetPid, this, m_regionCtx->namedRegions,
                                    /*autoManageName=*/true);

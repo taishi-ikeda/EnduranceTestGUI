@@ -23,6 +23,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -231,6 +232,14 @@ void MainWindow::buildUi()
     // narrow (SPEC.md 6.9).
     auto *controlsRow = new QHBoxLayout;
     m_startButton = new QPushButton(I18n::t(QStringLiteral("▶ 開始")), central);
+    // SPEC.md 不具合報告E9: 最もよく使うボタンにツールチップが無かった。
+    m_startButton->setToolTip(
+        I18n::t(QStringLiteral("①で選択中の対象に対して、現在の②ステップ構成・タイミング設定で耐久テスト"
+                                "を開始します。「開始時にこのコマンドで対象ツールを起動してから開始する」が"
+                                "オンの場合は、まず対象アプリを起動してから開始します。連続実行回数が"
+                                "1より大きい場合は、1回終わるたびに自動的に次を開始し、指定回数繰り返します"
+                                "（対象アプリは再起動しません。再起動しながら繰り返したい場合は"
+                                "「⟳ 連続実行」を使ってください）。ショートカット: F5。")));
     // SPEC.md 10 ⑤: 独立した「連続実行」ボタン -- 押すと対象アプリが起動中
     // かどうかに関わらず必ず終了→再起動してから②③を実行し、それを
     // 連続実行回数（m_batchRunCountSpinを共用）だけ繰り返す。▶開始＋
@@ -241,8 +250,18 @@ void MainWindow::buildUi()
         I18n::t(QStringLiteral("対象アプリが起動中でも必ず一度終了してから新しく起動し、起動時セットアップと"
                                 "ステップ構成の実行を行います。実行後に対象アプリが残っていれば終了し、"
                                 "連続実行回数の分だけ繰り返します。①の自動起動コマンドの設定が必要です。")));
+    // F5/Shift+F5 for start/stop follows the same convention many IDEs use
+    // for "run"/"stop" (SPEC.md 不具合報告E9) -- chosen over single letters
+    // (e.g. plain "S") specifically to avoid colliding with normal typing
+    // in any of this window's own text fields, since a QPushButton's
+    // shortcut fires whenever its top-level window has focus, not just
+    // when the button itself does.
+    m_startButton->setShortcut(QKeySequence(Qt::Key_F5));
     m_stopButton = new QPushButton(I18n::t(QStringLiteral("■ 停止")), central);
     m_stopButton->setEnabled(false);
+    m_stopButton->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
+    m_stopButton->setToolTip(
+        I18n::t(QStringLiteral("実行中のテストを安全に停止します。ショートカット: Shift+F5。")));
     m_pauseResumeButton = new QPushButton(I18n::t(QStringLiteral("‖ 一時停止")), central);
     m_pauseResumeButton->setEnabled(false);
     // 常時録画: deliberately NOT disabled/enabled alongside m_startButton/
@@ -351,6 +370,20 @@ void MainWindow::buildUi()
     outerSplitter->setStretchFactor(0, 0);
     outerSplitter->setStretchFactor(1, 3);
     outerSplitter->setStretchFactor(2, 1);
+    // SPEC.md 不具合報告E7: the stretch factors above only govern how
+    // *extra* space is redistributed once the window is resized -- they
+    // don't by themselves give ① a compact *initial* height at the default
+    // window size. Without an explicit initial split, Qt instead sized each
+    // pane from its own sizeHint() (①'s own QScrollArea reports one based
+    // on its full, unscrolled content -- target selection, startup setup,
+    // タイミング・制限, 負荷注入 all stacked together), which at the default
+    // 1200x900 window left ① occupying nearly the whole window, pushing
+    // ②ステップ構成 and the controls+ログ row almost entirely out of view.
+    // These ratios (roughly 1:3:1, matching the stretch factors above) make
+    // ① start at a genuinely compact height instead, so ②/ログ are visible
+    // immediately; ①'s own internal scroll area still reaches everything
+    // below the fold, and the user can still drag any handle to taste.
+    outerSplitter->setSizes({200, 500, 200});
 
     rootLayout->addWidget(outerSplitter, 1);
 
@@ -368,8 +401,15 @@ void MainWindow::buildMenuBar()
     // target app, or on another machine).
     auto *fileMenu = menuBar()->addMenu(I18n::t(QStringLiteral("ファイル")));
     m_savePresetAction = fileMenu->addAction(I18n::t(QStringLiteral("テスト設定を保存...")));
+    // SPEC.md 不具合報告E9: アプリ全体でキーボードショートカットが1つも
+    // 設定されておらず、キーボードだけでの操作が実質できなかった。まずは
+    // 最も使用頻度が高く、かつ他の一般的なデスクトップアプリとの慣習が
+    // 確立している保存/開く/実行系の操作にのみ標準的なショートカットを
+    // 割り当てる。
+    m_savePresetAction->setShortcut(QKeySequence::Save);
     connect(m_savePresetAction, &QAction::triggered, this, &MainWindow::onSavePreset);
     m_loadPresetAction = fileMenu->addAction(I18n::t(QStringLiteral("テスト設定を読み込む...")));
+    m_loadPresetAction->setShortcut(QKeySequence::Open);
     connect(m_loadPresetAction, &QAction::triggered, this, &MainWindow::onLoadPreset);
 
     fileMenu->addSeparator();
@@ -2322,6 +2362,22 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
     return true;
 }
 
+bool MainWindow::validateIntervalSettings(QString &errorMessage) const
+{
+    if (m_intervalModeRateRadio->isChecked()) {
+        if (m_minRateSpin->value() > m_maxRateSpin->value()) {
+            errorMessage = I18n::t(QStringLiteral("操作間隔の「回数/秒」設定で、下限（最小）が上限（最大）を"
+                                            "上回っています。下限を上限以下の値に直してください。"));
+            return false;
+        }
+    } else if (m_minIntervalSpin->value() > m_maxIntervalSpin->value()) {
+        errorMessage = I18n::t(QStringLiteral("操作間隔(ms)の設定で、下限（最小）が上限（最大）を上回って"
+                                        "います。下限を上限以下の値に直してください。"));
+        return false;
+    }
+    return true;
+}
+
 TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
 {
     ok = false;
@@ -2384,6 +2440,8 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
             return config;
     }
 
+    if (!validateIntervalSettings(errorMessage))
+        return config;
     if (m_intervalModeRateRadio->isChecked()) {
         // Rate (ops/sec) is the reciprocal of the interval (ms): the
         // fastest rate (max回/秒) gives the shortest interval, and the
@@ -2445,6 +2503,8 @@ TestConfig MainWindow::buildSetupOnlyConfigFromUi(bool &ok, QString &errorMessag
     // even valid, just to check the setup sequence itself.
     config.setupActions = m_setupActions;
 
+    if (!validateIntervalSettings(errorMessage))
+        return config;
     if (m_intervalModeRateRadio->isChecked()) {
         config.minIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_maxRateSpin->value())));
         config.maxIntervalMs = qMax(1, int(1000.0 / qMax(0.01, m_minRateSpin->value())));
@@ -2627,7 +2687,15 @@ bool MainWindow::beginRun(bool interactive)
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
     m_stopPanel->show();
 
-    m_logView->clear();
+    // SPEC.md 不具合報告E7「実行のたびにログ表示が消える」: this used to
+    // unconditionally clear() here, wiping out not just the previous
+    // separate run but every earlier iteration *within the very same*
+    // batch/連続実行 sequence the user is still watching progress through.
+    // m_logView already silently caps itself at 5000 blocks (see
+    // appendLog()'s comment) and the full, uncapped per-run log file below
+    // captures everything regardless, so there's no size concern in simply
+    // not clearing -- a separator line marks where each run starts instead.
+    appendLog(I18n::t(QStringLiteral("────── 実行開始 ──────")));
     if (m_batchModeActive) {
         appendLog(I18n::t(QStringLiteral("連続実行: %1/%2回目を開始します"))
                        .arg(m_batchRunsCompleted + 1)
@@ -2731,7 +2799,8 @@ void MainWindow::onTestSetupActions()
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
     m_stopPanel->show();
 
-    m_logView->clear();
+    // See beginRun()'s identical comment (SPEC.md 不具合報告E7).
+    appendLog(I18n::t(QStringLiteral("────── 実行開始 ──────")));
     appendLog(I18n::t(QStringLiteral("起動時セットアップの実行確認を開始します（%1件）。完了次第、自動的に"
                                       "停止します"))
                    .arg(config.setupActions.size()));

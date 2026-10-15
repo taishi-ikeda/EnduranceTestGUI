@@ -268,6 +268,18 @@ private:
     // `stepLabel`) and returns false.
     bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                    QString &errorMessage) const;
+    // SPEC.md 不具合報告E9: both buildConfigFromUi()/buildSetupOnlyConfigFromUi()
+    // used to silently feed whichever of min/max ended up larger straight
+    // into RandomActionEngine::scheduleNext() (which itself re-normalizes
+    // via qMin/qMax with no complaint), so entering the lower bound above
+    // the upper bound -- in either ms mode or 回数/秒 mode -- "worked" but
+    // silently used different numbers than the ones actually typed. Called
+    // by both before they read m_minIntervalSpin/m_maxIntervalSpin (direct
+    // ms) or m_minRateSpin/m_maxRateSpin (回数/秒, inverted order since a
+    // higher rate is a shorter interval); fills `errorMessage` and returns
+    // false on an inverted pair so it's caught as an ordinary configuration
+    // error instead.
+    bool validateIntervalSettings(QString &errorMessage) const;
     void setControlsEnabled(bool enabled);
     // Enables m_groupStepsButton/m_ungroupStepButton/m_untaskifyStepButton
     // based on the current ②list selection (2+ plain steps -> グループ化;

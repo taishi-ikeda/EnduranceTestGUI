@@ -6,6 +6,7 @@
 
 #include "I18n.h"
 #include "MainWindow.h"
+#include "ScrollWheelFocusGuard.h"
 
 int main(int argc, char *argv[])
 {
@@ -70,6 +71,14 @@ int main(int argc, char *argv[])
                                translationsPath))
             app.installTranslator(&qtTranslator);
     }
+
+    // SPEC.md 不具合報告E7「ホイールの死角」: installed application-wide
+    // (not just on MainWindow) so it also covers every dialog's own
+    // spin boxes/combo boxes/lists. No-op in headless mode (`window` is
+    // never shown(), so nothing ever receives a wheel event there), but
+    // harmless to install regardless.
+    ScrollWheelFocusGuard scrollWheelFocusGuard;
+    app.installEventFilter(&scrollWheelFocusGuard);
 
     MainWindow window;
 

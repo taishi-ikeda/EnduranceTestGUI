@@ -81,8 +81,16 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
     painter.drawRect(memPlotRect);
 
     if (samples.size() < 2) {
+        // SPEC.md 不具合報告E9「負荷モニターの初期表示」: ウィンドウを開いた
+        // 直後（まだテストを一度も実行していない、または「負荷モニターを
+        // 有効にする」がオフのまま）は、ただ「データなし」とだけ表示されて
+        // おり、これが何も壊れていない初期状態なのか、何か操作が必要なのか
+        // 判断できなかった。どちらの場合にも当てはまる具体的な案内に変更。
         painter.setPen(QPen(QColor(140, 140, 140)));
-        painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, I18n::t(QStringLiteral("データなし")));
+        painter.drawText(
+            QRect(QPoint(0, 0), size), Qt::AlignCenter,
+            I18n::t(QStringLiteral("データなし\n上の「負荷モニターを有効にする」をオンにしてテストを"
+                                    "実行すると、ここにCPU/メモリの推移が表示されます。")));
         return;
     }
 

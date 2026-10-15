@@ -78,6 +78,7 @@ set(SOURCES
     src/LoadMonitor.cpp
     src/LoadMonitorChartWidget.cpp
     src/LoadMonitorWindow.cpp
+    src/ScrollWheelFocusGuard.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -112,6 +113,7 @@ set(HEADERS
     src/LoadMonitor.h
     src/LoadMonitorChartWidget.h
     src/LoadMonitorWindow.h
+    src/ScrollWheelFocusGuard.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

@@ -1199,7 +1199,14 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Saved the CPU/memory history leading up to the abnormal stop: %1")},
         {QStringLiteral("異常停止時点までのCPU/メモリ推移のグラフ画像を保存しました: %1"),
          QStringLiteral("Saved a graph image of the CPU/memory history leading up to the abnormal stop: %1")},
-        {QStringLiteral("データなし"), QStringLiteral("No Data")},
+        // v1.16: was bare "データなし" (SPEC.md 不具合報告E9「負荷モニターの
+        // 初期表示」) -- gave no hint whether this was the normal pre-test
+        // state or something was wrong, so reworded to cover both "haven't
+        // enabled it yet" and "enabled but no run yet" at once.
+        {QStringLiteral("データなし\n上の「負荷モニターを有効にする」をオンにしてテストを"
+                        "実行すると、ここにCPU/メモリの推移が表示されます。"),
+         QStringLiteral("No data\nEnable \"Enable load monitoring\" above and run a test to see "
+                        "CPU/memory history here.")},
         {QStringLiteral("(非対応)"), QStringLiteral("(unsupported)")},
 
         // v1.02: SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・
@@ -1263,6 +1270,41 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("CPU使用率（対象: %1%  システム: %2）"),
          QStringLiteral("CPU Usage (target: %1%  system: %2)")},
         {QStringLiteral("メモリ使用量（%1MB）"), QStringLiteral("Memory Usage (%1MB)")},
+
+        // v1.16: SPEC.md 不具合報告E9「ショートカット」-- ▶開始/■停止の
+        // ツールチップとキーボードショートカット案内。
+        {QStringLiteral("①で選択中の対象に対して、現在の②ステップ構成・タイミング設定で耐久テスト"
+                        "を開始します。「開始時にこのコマンドで対象ツールを起動してから開始する」が"
+                        "オンの場合は、まず対象アプリを起動してから開始します。連続実行回数が"
+                        "1より大きい場合は、1回終わるたびに自動的に次を開始し、指定回数繰り返します"
+                        "（対象アプリは再起動しません。再起動しながら繰り返したい場合は"
+                        "「⟳ 連続実行」を使ってください）。ショートカット: F5。"),
+         QStringLiteral("Starts the endurance test against the target currently selected in ①, "
+                        "using the current ②step configuration and timing settings. If \"Launch the "
+                        "target tool with this command before starting\" is on, the target app is "
+                        "launched first. If the batch run count is greater than 1, the next run "
+                        "starts automatically as soon as each one finishes, repeated that many times "
+                        "(the target app is not restarted between runs -- use \"⟳ Continuous Run\" "
+                        "instead if you want it restarted each time). Shortcut: F5.")},
+        {QStringLiteral("実行中のテストを安全に停止します。ショートカット: Shift+F5。"),
+         QStringLiteral("Safely stops the running test. Shortcut: Shift+F5.")},
+
+        // v1.16: SPEC.md 不具合報告E9「操作間隔の上限下限逆転」-- 下限が
+        // 上限を上回る設定のまま実行しようとした際のエラーメッセージ。
+        {QStringLiteral("操作間隔の「回数/秒」設定で、下限（最小）が上限（最大）を"
+                        "上回っています。下限を上限以下の値に直してください。"),
+         QStringLiteral("In the operation-interval \"times/sec\" setting, the lower bound (minimum) "
+                        "is greater than the upper bound (maximum). Please set the lower bound to a "
+                        "value at or below the upper bound.")},
+        {QStringLiteral("操作間隔(ms)の設定で、下限（最小）が上限（最大）を上回って"
+                        "います。下限を上限以下の値に直してください。"),
+         QStringLiteral("In the operation-interval (ms) setting, the lower bound (minimum) is "
+                        "greater than the upper bound (maximum). Please set the lower bound to a "
+                        "value at or below the upper bound.")},
+
+        // v1.16: SPEC.md 不具合報告E7「実行の度にログが消える」-- 実行開始時に
+        // ログをクリアする代わりに挿入する区切り線。
+        {QStringLiteral("────── 実行開始 ──────"), QStringLiteral("────── Run started ──────")},
     };
     return table;
 }

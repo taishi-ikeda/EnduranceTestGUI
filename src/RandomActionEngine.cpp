@@ -206,6 +206,9 @@ void RandomActionEngine::start(const TestConfig &config)
     m_iterationCount = 0;
     m_currentStepIndex = 0;
     m_currentStepActionsDone = 0;
+    m_waitStepInProgress = false;
+    m_waitStepDurationMs = 0;
+    m_waitStepElapsedMs = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
@@ -289,6 +292,13 @@ void RandomActionEngine::pause()
         return;
     m_paused = true;
     m_pausedElapsedMs += m_elapsed.elapsed();
+    // Mirror that same running-total pattern for a 待機 step's own delay if
+    // one is currently in progress, so resume() below can work out how much
+    // of it is still left (m_timer itself gets stopped right here, so it
+    // can't answer that on its own) -- without this, resuming mid-wait
+    // would otherwise have to either drop the rest of the wait or guess.
+    if (m_waitStepInProgress)
+        m_waitStepElapsedMs += m_waitStepElapsed.elapsed();
     m_timer.stop();
     m_resourceTimer.stop();
     m_hangCheckTimer.stop();
@@ -304,7 +314,16 @@ void RandomActionEngine::resume()
     m_elapsed.restart();
     emit pausedChanged(false);
     emit logMessage(I18n::t(QStringLiteral("再開しました")));
-    scheduleNext();
+    if (m_waitStepInProgress) {
+        // Continue the SAME 待機 step's delay for whatever time is left,
+        // rather than abandoning it for an ordinary short randomized
+        // interval (scheduleNext()) -- that would silently cut the wait
+        // short by however long was left when paused.
+        m_waitStepElapsed.start();
+        m_timer.start(qMax(1, m_waitStepDurationMs - int(m_waitStepElapsedMs)));
+    } else {
+        scheduleNext();
+    }
     m_resourceTimer.start();
     m_hangCheckTimer.start();
 }
@@ -1434,10 +1453,37 @@ void RandomActionEngine::performRandomAction()
         // meaningful. Doesn't count as an "action" (no iteration-count
         // increment), and the wait itself replaces the usual randomized
         // scheduleNext() delay before the next step's first action.
-        emit logMessage(
-            I18n::t(QStringLiteral("ステップ %1: %2 ms 待機します")).arg(m_currentStepIndex + 1).arg(step.waitDurationMs));
+        //
+        // This branch is reached on two different ticks of the same
+        // QTimer: once to *start* the wait, and again once it has actually
+        // elapsed. m_waitStepInProgress tells them apart. Previously,
+        // advanceToNextStep() (and the currentStepChanged() signal it
+        // emits, which drives ②'s "実行中" step highlight) ran on the
+        // *first* tick, immediately -- so the highlight jumped to whatever
+        // step follows the wait right away, making the wait step look like
+        // it had been "consumed"/skipped on the spot, even though the
+        // delay itself was still being honored correctly underneath
+        // (SPEC.md 不具合報告「待機ステップがすぐに消化される」). Only
+        // advancing once the wait has truly elapsed keeps the highlight on
+        // this wait step for its whole duration instead.
+        if (!m_waitStepInProgress) {
+            emit logMessage(I18n::t(QStringLiteral("ステップ %1: %2 ms 待機します"))
+                                 .arg(m_currentStepIndex + 1)
+                                 .arg(step.waitDurationMs));
+            m_waitStepInProgress = true;
+            m_waitStepDurationMs = step.waitDurationMs;
+            m_waitStepElapsedMs = 0;
+            m_waitStepElapsed.start();
+            m_timer.start(qMax(1, step.waitDurationMs));
+            return;
+        }
+        m_waitStepInProgress = false;
         advanceToNextStep();
-        m_timer.start(qMax(1, step.waitDurationMs));
+        // Continue right away (no extra randomized scheduleNext() gap
+        // tacked onto the end of the wait) -- matches this branch's prior
+        // timing exactly, just with the step-index advance now happening
+        // after the wait instead of before it.
+        m_timer.start(1);
         return;
     }
 

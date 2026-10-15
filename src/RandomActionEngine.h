@@ -490,6 +490,32 @@ private:
     qint64 m_iterationCount = 0;
     int m_currentStepIndex = 0;
     qint64 m_currentStepActionsDone = 0;
+    // True from the first tick a 待機 (wait) step's own delay starts until
+    // the tick where it has actually elapsed -- see performRandomAction()'s
+    // isWaitStep branch. Needed because both "just landed on this wait
+    // step, start waiting" and "the wait already running has now elapsed,
+    // advance past it" arrive as the very same step.isWaitStep branch, on
+    // two different firings of the same QTimer; without this flag,
+    // advanceToNextStep() (and the currentStepChanged() it emits, which
+    // drives ②'s "実行中" step highlight) would have to run immediately,
+    // before the wait itself had actually elapsed, making the highlight
+    // jump to whatever step follows the wait right away -- visually
+    // indistinguishable from the wait step being skipped entirely, even
+    // though the delay was still being honored underneath (SPEC.md 不具合
+    // 報告「待機ステップがすぐに消化される」). Also consulted by pause()/
+    // resume() below, so pausing mid-wait and resuming continues the SAME
+    // wait for whatever time is left, instead of abandoning it for an
+    // ordinary short randomized interval.
+    bool m_waitStepInProgress = false;
+    // The current wait step's own configured duration, and wall-clock time
+    // already spent waiting toward it before the current running segment
+    // (i.e. excluding time spent paused) -- together let resume() compute
+    // how much of the wait is still left. Mirrors m_elapsed/
+    // m_pausedElapsedMs's identical role for the whole run's own elapsed-
+    // time tracking, just scoped to one wait step instead.
+    int m_waitStepDurationMs = 0;
+    qint64 m_waitStepElapsedMs = 0;
+    QElapsedTimer m_waitStepElapsed;
     // Index into the current top-level task step's taskMembers, i.e. how
     // many of its members have run so far in the pass currently in
     // progress. Reset to 0 by advanceToNextStep() (both when a task step

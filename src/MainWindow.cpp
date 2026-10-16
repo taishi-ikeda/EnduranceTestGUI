@@ -2798,6 +2798,7 @@ bool MainWindow::beginRun(bool interactive)
 
     m_stopPanel = new StopPanel();
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
+    connect(m_stopPanel, &StopPanel::pauseResumeRequested, this, &MainWindow::onPauseResume);
     m_stopPanel->show();
 
     // SPEC.md 不具合報告E7「実行のたびにログ表示が消える」: this used to
@@ -2910,6 +2911,7 @@ void MainWindow::onTestSetupActions()
 
     m_stopPanel = new StopPanel();
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
+    connect(m_stopPanel, &StopPanel::pauseResumeRequested, this, &MainWindow::onPauseResume);
     m_stopPanel->show();
 
     // See beginRun()'s identical comment (SPEC.md 不具合報告E7).
@@ -3076,6 +3078,11 @@ void MainWindow::onEnginePausedChanged(bool paused)
 {
     m_pauseResumeButton->setText(paused ? I18n::t(QStringLiteral("▶ 再開")) : I18n::t(QStringLiteral("‖ 一時停止")));
     m_statusLabel->setText(paused ? I18n::t(QStringLiteral("一時停止中")) : I18n::t(QStringLiteral("実行中")));
+    // The floating StopPanel (shown when the target window may be covering
+    // this one -- see its own comment) carries the same pause/resume control,
+    // so it needs the same text update.
+    if (m_stopPanel)
+        m_stopPanel->setPaused(paused);
 }
 
 void MainWindow::onToggleLoadInjectionManual()

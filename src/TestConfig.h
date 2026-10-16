@@ -11,6 +11,22 @@ enum class DragDirectionMode { Random, Up, Down, Left, Right };
 
 enum class ContextMenuSelectionMode { ByName, ByIndex };
 
+// SPEC.md 追加実装依頼「異常入力ファジング」: how a chosen fuzz-string
+// corpus entry (ActionKind::FuzzString) actually reaches the target.
+// KeyByKey sends it one character at a time via the same keyTap()/
+// keyTapNamed() mechanism ActionKind::Key uses (so it exercises per-
+// keystroke input handling, but -- a pre-existing limitation of keyTap()'s
+// one-QChar-at-a-time X11 keysym mapping, not something this feature tries
+// to work around -- can't reliably deliver characters outside the Latin-1
+// range, e.g. most emoji or combining marks). Paste writes the whole
+// string to the clipboard and sends Ctrl+V, so it reaches the target as a
+// single paste event regardless of its content (correctly handling any
+// Unicode), exercising a different code path than per-keystroke input
+// (some apps validate as you type but not on paste). Random picks between
+// the two, independently, each time this action fires, so a single step
+// exercises both without needing two separately-weighted entries.
+enum class FuzzStringDeliveryMode { KeyByKey, Paste, Random };
+
 // When RandomActionEngine captures an internal screenshot of the current
 // step's operation region (region boundary drawn on top, for later
 // inspection via MainWindow's "操作領域画像を保存..." button -- SPEC.md
@@ -108,6 +124,19 @@ struct ActionParams
     // popup dialog when this action kind fires. Same accessibility-tree
     // caveats as enableContextMenuSelection above.
     QStringList dialogButtonNames;
+
+    // SPEC.md 追加実装依頼「異常入力ファジング」 (RegionStep::enableFuzzString,
+    // ActionKind::FuzzString): true (default) picks a candidate uniformly
+    // at random from the entire app-wide fuzz-string corpus
+    // (TestConfig::fuzzStringCorpus) every time this action fires. false
+    // restricts the random pick to just fuzzStringSelectedEntries below --
+    // a literal copy of whichever corpus entries the user checked in this
+    // step's own settings (not a reference by index/name into the corpus),
+    // so it stays meaningful even if the corpus is later reordered or
+    // trimmed, and remains reproducible when this preset is shared.
+    bool fuzzStringUseAllEntries = true;
+    QStringList fuzzStringSelectedEntries;
+    FuzzStringDeliveryMode fuzzStringDeliveryMode = FuzzStringDeliveryMode::Random;
 };
 
 // A named, reusable operation target resolved via the OS accessibility tree
@@ -323,6 +352,33 @@ struct RegionStep
     // isWaitStep's own wait uses, just scoped to a single weighted-pick
     // action kind instead of a whole step.
     bool enableTypingBurst = false;
+    // SPEC.md 追加実装依頼「異常入力ファジング」 (ActionKind::FuzzString):
+    // picks one entry at random from either the whole app-wide fuzz-string
+    // corpus or this step's own fuzzStringSelectedEntries (see
+    // ActionParams::fuzzStringUseAllEntries) and sends it to the target --
+    // via per-keystroke input, a clipboard paste, or a random mix of both
+    // (ActionParams::fuzzStringDeliveryMode) -- to probe how the target
+    // handles malformed/adversarial text input (long strings, control
+    // characters, SQL/script injection patterns, Unicode edge cases, etc.).
+    bool enableFuzzString = false;
+    // SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」
+    // (ActionKind::FuzzAllFieldsInRegion): unlike enableFuzzString (which
+    // sends one fuzz string to whatever currently has keyboard focus),
+    // this searches the target's accessibility tree (AT-SPI on Linux /
+    // Accessibility API on macOS -- see PlatformAutomation::
+    // findEditableObjectsInRegion()) for every editable widget whose
+    // on-screen bounds fall within this step's resolved region, clicks each
+    // one to focus it, and sends it its own randomly-picked fuzz string --
+    // so a single occurrence can exercise every text field, spin box, and
+    // text area in a form at once, not just whichever one a prior click
+    // happened to land on. Shares ActionParams::fuzzStringUseAllEntries/
+    // fuzzStringSelectedEntries/fuzzStringDeliveryMode with enableFuzzString
+    // above -- the corpus and delivery method are the same setting either
+    // way, only how many widgets receive it differs. Same accessibility-
+    // backend caveats as NamedRegion::isObjectTarget (not exhaustively
+    // verified against every toolkit, no-op when accessibility is disabled/
+    // unusable in this environment).
+    bool enableFuzzAllFields = false;
     bool enableScrollUp = false;
     bool enableScrollDown = false;
     bool enableScrollHorizontal = false;
@@ -352,6 +408,8 @@ struct RegionStep
     int dragWeight = 1;
     int keyWeight = 1;
     int typingBurstWeight = 1;
+    int fuzzStringWeight = 1;
+    int fuzzAllFieldsWeight = 1;
     int scrollUpWeight = 1;
     int scrollDownWeight = 1;
     int scrollHorizontalWeight = 1;
@@ -450,8 +508,8 @@ struct RegionStep
         if (isWaitStep || isGroup || isTask)
             return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
         return enableClick || enableDoubleClick || enableDrag || enableKey || enableTypingBurst ||
-               enableScrollUp || enableScrollDown || enableScrollHorizontal || enableShortcut ||
-               (enableWindowOp && !targetsPopupDialog) ||
+               enableFuzzString || enableFuzzAllFields || enableScrollUp || enableScrollDown ||
+               enableScrollHorizontal || enableShortcut || (enableWindowOp && !targetsPopupDialog) ||
                (enableDialogButtonPress && targetsPopupDialog);
     }
 };
@@ -556,6 +614,21 @@ struct TestConfig
     // Default action parameters, used by any step whose
     // useDefaultActionParams is true.
     ActionParams defaultActionParams;
+
+    // SPEC.md 追加実装依頼「異常入力ファジング」: the app-wide fuzz-string
+    // corpus (built-in defaults plus whatever the user has added/edited via
+    // the "表示" menu's "ファズ文字列リストを編集..." dialog) that
+    // ActionKind::FuzzString picks from when a step's ActionParams::
+    // fuzzStringUseAllEntries is true. Deliberately NOT part of a saved
+    // preset (TestConfigJson never serializes it): MainWindow populates
+    // this fresh, straight from its own QSettings-backed master list, every
+    // time a run actually starts, rather than loading/saving it like
+    // namedRegions/defaultActionParams above. A step's own
+    // fuzzStringSelectedEntries (ActionParams) IS part of the preset --
+    // it's a self-contained list of literal strings, not a reference into
+    // this corpus, so it stays reproducible even on a machine whose corpus
+    // has since changed.
+    QStringList fuzzStringCorpus;
 
     int minIntervalMs = 20;
     int maxIntervalMs = 100;

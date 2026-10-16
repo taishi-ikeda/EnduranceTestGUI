@@ -194,6 +194,8 @@ private:
         Drag,
         Key,
         TypingBurst,
+        FuzzString,
+        FuzzAllFieldsInRegion,
         ScrollUp,
         ScrollDown,
         ScrollHorizontal,
@@ -302,6 +304,64 @@ private:
     // m_config.steps[m_currentStepIndex] for the relevant threshold since
     // that index cannot have changed while the burst was in progress.
     void finishTypingBurst();
+    // Continues an in-progress ActionKind::FuzzString whose delivery mode
+    // resolved to KeyByKey (see m_fuzzStringInProgress): called instead of
+    // the normal step/group/task dispatch at the top of
+    // performRandomAction() on every tick while one is running. Mirrors
+    // continueTypingBurst()'s multi-tick pattern, except completion is
+    // driven by m_fuzzStringCharIndex reaching the chosen fuzz string's
+    // length rather than by an elapsed duration -- a fuzz corpus entry can
+    // be up to 65536 characters (see FuzzStringDefaults.cpp), and
+    // PlatformAutomation::keyTap() blocks for ~10ms per call, so sending it
+    // in one synchronous loop would freeze the UI/Stop/Pause for
+    // potentially minutes.
+    void continueFuzzStringKeyByKey();
+    // Sends exactly one character of m_fuzzStringText (the character at
+    // m_fuzzStringCharIndex) via PlatformAutomation::keyTap() and advances
+    // the index. Shared by the KeyByKey delivery's first character (sent
+    // synchronously from runOneAction() the moment it's picked) and every
+    // subsequent one (continueFuzzStringKeyByKey()). Note keyTap() only
+    // reliably encodes Latin-1 (U+0020-U+00FF) -- see
+    // FuzzStringDeliveryMode's own doc comment in TestConfig.h for why
+    // full-Unicode corpus entries should use Paste delivery instead.
+    void sendOneFuzzStringChar();
+    // Finishes an in-progress KeyByKey ActionKind::FuzzString once every
+    // character of m_fuzzStringText has been sent: logs/counts it as
+    // exactly one action, then performs whichever of
+    // performRandomAction()/performGroupAction()/performTaskAction()'s own
+    // completion bookkeeping m_fuzzStringContext says it was dispatched
+    // from -- mirrors finishTypingBurst() exactly, just keyed on a
+    // different in-progress flag/context.
+    void finishFuzzString();
+    // Called once when ActionKind::FuzzAllFieldsInRegion's delivery mode
+    // resolves to KeyByKey, after m_fuzzAllFieldsTargets has already been
+    // populated: advances m_fuzzAllFieldsFieldIndex past any field whose
+    // on-screen point no longer resolves to the target (skipped, not
+    // fatal -- the accessibility-tree snapshot and the actual click can be
+    // milliseconds apart), clicks the next usable field to focus it, and
+    // picks its own random fuzz-string candidate. Returns false once every
+    // remaining field has been tried (whether skipped or actually typed
+    // into) -- the caller (runOneAction()/continueFuzzAllFieldsKeyByKey())
+    // then knows the whole sweep is done.
+    bool beginNextFuzzAllFieldsField();
+    // Continues an in-progress ActionKind::FuzzAllFieldsInRegion whose
+    // delivery mode resolved to KeyByKey: called instead of the normal
+    // step/group/task dispatch at the top of performRandomAction() on every
+    // tick while one is running. Mirrors continueFuzzStringKeyByKey()'s
+    // per-character multi-tick pattern, except once the *current* field's
+    // text is exhausted it calls beginNextFuzzAllFieldsField() to move on to
+    // the next match instead of finishing outright -- the whole sweep over
+    // every matched field counts as just one action occurrence.
+    void continueFuzzAllFieldsKeyByKey();
+    // Finishes an in-progress KeyByKey ActionKind::FuzzAllFieldsInRegion
+    // once every matched field has been tried: logs/counts it as exactly
+    // one action (how many fields actually received a fuzz string), then
+    // performs whichever of performRandomAction()/performGroupAction()/
+    // performTaskAction()'s own completion bookkeeping
+    // m_fuzzAllFieldsContext says it was dispatched from -- mirrors
+    // finishFuzzString() exactly, just keyed on a different in-progress
+    // flag/context.
+    void finishFuzzAllFields();
     // Resolves a step's region: the live target-window bounds, the
     // NamedRegion it references by name (see TestConfig::namedRegions), or
     // -- when step.targetsPopupDialog is set -- the current bounds of
@@ -592,6 +652,72 @@ private:
     // target is confirmed active again, in the TypingBurst case of
     // runOneAction() (a fresh burst starting), and in start().
     int m_typingBurstInactiveStrikes = 0;
+
+    // State for an in-progress ActionKind::FuzzString (SPEC.md 10
+    // "ファジングテスト対応") whose delivery mode resolved to KeyByKey --
+    // mirrors m_typingBurstInProgress's identical multi-tick pattern, just
+    // keyed on how many characters of m_fuzzStringText have been sent
+    // (m_fuzzStringCharIndex) rather than an elapsed duration, since a fuzz
+    // corpus entry has a fixed length rather than a randomized time budget.
+    // Paste-mode delivery never touches any of this -- it's a single
+    // synchronous clipboard-set/Ctrl+V/restore cycle dispatched entirely
+    // within one runOneAction() call, fast regardless of string length.
+    bool m_fuzzStringInProgress = false;
+    StepContext m_fuzzStringContext = StepContext::Step;
+    QString m_fuzzStringText;
+    int m_fuzzStringCharIndex = 0;
+    // Consecutive ticks in a row continueFuzzStringKeyByKey() has found some
+    // other process active instead of the target -- same rationale as
+    // m_typingBurstInactiveStrikes (most notably: the user pressing
+    // "■ 停止"/"‖ 一時停止" on this application's own window necessarily
+    // activates it first). Reset to 0 whenever the target is confirmed
+    // active again, when a fresh KeyByKey delivery starts, and in start().
+    int m_fuzzStringInactiveStrikes = 0;
+
+    // State for an in-progress ActionKind::FuzzAllFieldsInRegion (SPEC.md
+    // 10 "ファジングテスト: 領域内の全入力項目") whose delivery mode
+    // resolved to KeyByKey -- mirrors the FuzzString state just above, with
+    // an extra outer loop over every matched editable field
+    // (m_fuzzAllFieldsTargets, resolved once via
+    // PlatformAutomation::findEditableObjectsInRegion() when the action
+    // starts) instead of a single fixed string. Paste-mode delivery never
+    // touches any of this -- the whole sweep over every field is dispatched
+    // synchronously within one runOneAction() call, same as Paste-mode
+    // FuzzString.
+    bool m_fuzzAllFieldsInProgress = false;
+    StepContext m_fuzzAllFieldsContext = StepContext::Step;
+    // Bounding boxes (screen coordinates) of every editable field this
+    // sweep found, snapshotted once at the start -- not re-queried per
+    // field, so a field that has since moved/closed is simply skipped (see
+    // beginNextFuzzAllFieldsField()) rather than causing the whole sweep to
+    // fail.
+    QList<QRect> m_fuzzAllFieldsTargets;
+    // Which of m_fuzzAllFieldsTargets beginNextFuzzAllFieldsField() will try
+    // next (already-tried entries, whether skipped or typed into, are
+    // behind this index).
+    int m_fuzzAllFieldsFieldIndex = 0;
+    // Corpus snapshot (either the whole app-wide corpus or this step's own
+    // selected subset, per ActionParams::fuzzStringUseAllEntries) captured
+    // at the start of the sweep -- continueFuzzAllFieldsKeyByKey()'s later
+    // ticks have no access to the ActionParams the sweep was started under,
+    // same reason m_typingBurstChars/m_fuzzStringText are copied out rather
+    // than re-read from params each tick.
+    QStringList m_fuzzAllFieldsCandidates;
+    // The fuzz string currently being typed into the current field, and how
+    // many of its characters have been sent so far -- same role as
+    // m_fuzzStringText/m_fuzzStringCharIndex, just reset by
+    // beginNextFuzzAllFieldsField() every time the sweep moves to a new
+    // field instead of being fixed for the whole action.
+    QString m_fuzzAllFieldsCurrentText;
+    int m_fuzzAllFieldsCharIndex = 0;
+    // How many of m_fuzzAllFieldsTargets actually got clicked and typed
+    // into (as opposed to skipped for no longer resolving to the target) --
+    // included in finishFuzzAllFields()'s completion log message.
+    int m_fuzzAllFieldsFieldsFuzzed = 0;
+    // Same bounded-tolerance role as m_fuzzStringInactiveStrikes, just
+    // scoped to this sweep's own per-tick active-process safety check.
+    int m_fuzzAllFieldsInactiveStrikes = 0;
+
     // Index into the current top-level task step's taskMembers, i.e. how
     // many of its members have run so far in the pass currently in
     // progress. Reset to 0 by advanceToNextStep() (both when a task step

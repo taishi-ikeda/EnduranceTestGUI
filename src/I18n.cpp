@@ -102,6 +102,69 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("%1: %2 ms間の連続キー入力を開始します"),
          QStringLiteral("%1: Starting continuous typing for %2 ms")},
         {QStringLiteral("連続キー入力（%1 ms、%2回）"), QStringLiteral("Continuous typing (%1 ms, %2 presses)")},
+        {QStringLiteral("ファズ文字列入力"), QStringLiteral("Fuzz String Input")},
+        {QStringLiteral("「表示」メニューの「ファズ文字列リストを編集...」で管理する文字列一覧から"
+                        "1つ選んで対象へ送信します（キー入力・クリップボード貼り付け・候補の絞り込み"
+                        "は③操作パラメータで設定）。"),
+         QStringLiteral("Sends one entry, picked from the list managed via \"Edit Fuzz String "
+                        "List...\" in the \"View\" menu, to the target (the delivery method and "
+                        "candidate restriction are set in ③ Action Parameters).")},
+        {QStringLiteral("ファズ文字列の送信方法:"), QStringLiteral("Fuzz string delivery method:")},
+        {QStringLiteral("ランダム（キー入力/貼り付けを毎回選択）"),
+         QStringLiteral("Random (picks key input/paste each time)")},
+        {QStringLiteral("キー入力（1文字ずつ送信）"), QStringLiteral("Key input (sent one character at a time)")},
+        {QStringLiteral("クリップボード貼り付け（Ctrl+V）"), QStringLiteral("Clipboard paste (Ctrl+V)")},
+        {QStringLiteral("すべてのファズ文字列を使う"), QStringLiteral("Use all fuzz strings")},
+        {QStringLiteral("選択した文字列のみを使う"), QStringLiteral("Use only selected strings")},
+        {QStringLiteral("候補（チェックした文字列だけが「選択した文字列のみを使う」の対象になります。"
+                        "一覧自体は「表示」メニューの「ファズ文字列リストを編集...」で追加・変更できます）:"),
+         QStringLiteral("Candidates (only checked strings are used by \"Use only selected strings\"; "
+                        "the list itself can be added to/changed via \"Edit Fuzz String List...\" in "
+                        "the \"View\" menu):")},
+        {QStringLiteral("%1...(全%2文字)"), QStringLiteral("%1...(%2 characters total)")},
+        {QStringLiteral("ファズ文字列の候補がありません（コーパスが空、または選択された候補がありません）"),
+         QStringLiteral("No fuzz string candidates (the corpus is empty, or no candidates are selected)")},
+        {QStringLiteral("ファズ文字列入力（貼り付け、%1文字）"), QStringLiteral("Fuzz string input (paste, %1 characters)")},
+        {QStringLiteral("%1: ファズ文字列入力（キー入力、%2文字）を開始します"),
+         QStringLiteral("%1: Starting fuzz string input (key input, %2 characters)")},
+        {QStringLiteral("ファズ文字列入力（キー入力、%1文字）"), QStringLiteral("Fuzz string input (key input, %1 characters)")},
+        {QStringLiteral("領域内の全入力項目にファズ入力"), QStringLiteral("Fuzz All Input Fields in Region")},
+        {QStringLiteral("この操作領域内にある入力可能な項目（テキスト欄・スピンボックス等）を"
+                        "すべて探し、1つずつファズ文字列を送信します（アクセシビリティ機能が必要。"
+                        "候補・送信方法は「ファズ文字列入力」と共通の③操作パラメータ設定を使用）。"),
+         QStringLiteral("Finds every input-capable widget (text fields, spin boxes, etc.) within this "
+                        "operation region and sends each one its own fuzz string (requires "
+                        "accessibility features; shares the same ③ Action Parameters corpus/delivery "
+                        "settings as \"Fuzz String Input\").")},
+        {QStringLiteral("この操作領域内に入力可能な項目が見つかりませんでした（アクセシビリティ機能が無効/"
+                        "未対応か、対象アプリがこのツールキットのアクセシビリティ情報を公開していない可能性があります）"),
+         QStringLiteral("No input-capable items were found in this operation region (accessibility "
+                        "features may be disabled/unsupported, or the target app may not expose "
+                        "accessibility information for its toolkit)")},
+        {QStringLiteral("領域内の入力項目へのファズ入力（貼り付け、%1件）"),
+         QStringLiteral("Fuzz input to fields in region (paste, %1 fields)")},
+        {QStringLiteral("この操作領域内の入力項目は対象ウィンドウ外へ移動していたため、ファズ入力をスキップしました"),
+         QStringLiteral("Skipped fuzz input because the input fields in this operation region had "
+                        "moved outside the target window")},
+        {QStringLiteral("%1: 領域内の入力項目へのファズ入力（キー入力、%2件）を開始します"),
+         QStringLiteral("%1: Starting fuzz input to fields in region (key input, %2 fields)")},
+        {QStringLiteral("領域内の入力項目へのファズ入力（キー入力、%1件）"),
+         QStringLiteral("Fuzz input to fields in region (key input, %1 fields)")},
+        {QStringLiteral("ファズ文字列リストを編集..."), QStringLiteral("Edit Fuzz String List...")},
+        {QStringLiteral("ファズ文字列リストを編集"), QStringLiteral("Edit Fuzz String List")},
+        {QStringLiteral("「ファズ文字列入力」操作が送信先として使う文字列の一覧です（アプリ全体で共有されます）。"),
+         QStringLiteral("The list of strings the \"Fuzz String Input\" action sends to the target "
+                        "(shared across the whole app).")},
+        {QStringLiteral("ファズ文字列を追加"), QStringLiteral("Add Fuzz String")},
+        {QStringLiteral("対象に送信する文字列を入力してください（制御文字や改行もそのまま使えます）:"),
+         QStringLiteral("Enter the string to send to the target (control characters and line breaks "
+                        "can be used as-is):")},
+        {QStringLiteral("ファズ文字列を編集"), QStringLiteral("Edit Fuzz String")},
+        {QStringLiteral("デフォルトに戻しますか？"), QStringLiteral("Reset to defaults?")},
+        {QStringLiteral("現在の一覧をすべて削除し、組み込みのデフォルト一覧に置き換えます。"
+                        "この操作は元に戻せません。よろしいですか？"),
+         QStringLiteral("This deletes the current list entirely and replaces it with the built-in "
+                        "default list. This cannot be undone. Are you sure?")},
         {QStringLiteral("グループにステップを最低1つ追加してください。"), QStringLiteral("Please add at least one step to the group.")},
         {QStringLiteral("グループの編集"), QStringLiteral("Edit Group")},
         {QStringLiteral("グループ内での重み（大きいほど選ばれやすい）:"),
@@ -1039,6 +1102,7 @@ const QHash<QString, QString> &translationTable()
                         "Current location:\n%1")},
         {QStringLiteral("フォルダを選択..."), QStringLiteral("Choose Folder...")},
         {QStringLiteral("デフォルトに戻す"), QStringLiteral("Reset to Default")},
+        {QStringLiteral("デフォルトに戻す..."), QStringLiteral("Reset to Default...")},
         {QStringLiteral("保存先フォルダを選択"), QStringLiteral("Select Output Folder")},
         {QStringLiteral("保存先を変更しました"), QStringLiteral("Location Changed")},
         {QStringLiteral("今後の録画・クラッシュ時の記録はこちらに保存されます:\n%1\n\n"

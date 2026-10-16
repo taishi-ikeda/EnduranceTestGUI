@@ -20,6 +20,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -78,6 +79,43 @@ TestTargetWindow::TestTargetWindow(QWidget *parent) : QMainWindow(parent)
     m_keyInputEdit->installEventFilter(this);
     keyLayout->addWidget(m_keyInputEdit);
     rootLayout->addWidget(keyGroup);
+
+    // --- Multiple input fields in one region (SPEC.md 追加実装依頼
+    // 「ファジングテスト: 領域内の全入力項目」の確認用): several
+    // differently-typed editable widgets grouped together so a single
+    // drawn operation region can exercise ActionKind::FuzzAllFieldsInRegion
+    // against all of them at once, not just whichever one a prior click
+    // happened to land on.
+    auto *multiFieldGroup = new QGroupBox(
+        QStringLiteral("複数入力フィールド領域（領域内の全入力項目にファズ入力の確認用）"), central);
+    auto *multiFieldLayout = new QVBoxLayout(multiFieldGroup);
+    const QStringList multiFieldPlaceholders = {QStringLiteral("フィールドA（未入力）"),
+                                                 QStringLiteral("フィールドB（未入力）"),
+                                                 QStringLiteral("フィールドC（未入力）")};
+    for (int i = 0; i < multiFieldPlaceholders.size(); ++i) {
+        auto *edit = new QLineEdit(multiFieldGroup);
+        edit->setPlaceholderText(multiFieldPlaceholders[i]);
+        connect(edit, &QLineEdit::textChanged, this,
+                [this, i](const QString &text) { onMultiFieldLineEditChanged(i, text); });
+        multiFieldLayout->addWidget(edit);
+        m_multiFieldEdits.append(edit);
+    }
+    m_multiFieldSpin = new QSpinBox(multiFieldGroup);
+    m_multiFieldSpin->setRange(-999999, 999999);
+    connect(m_multiFieldSpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            &TestTargetWindow::onMultiFieldSpinChanged);
+    multiFieldLayout->addWidget(m_multiFieldSpin);
+    m_multiFieldTextEdit = new QPlainTextEdit(multiFieldGroup);
+    m_multiFieldTextEdit->setPlaceholderText(QStringLiteral("フィールドD（複数行・未入力）"));
+    m_multiFieldTextEdit->setMaximumHeight(60);
+    connect(m_multiFieldTextEdit, &QPlainTextEdit::textChanged, this,
+            &TestTargetWindow::onMultiFieldPlainTextChanged);
+    multiFieldLayout->addWidget(m_multiFieldTextEdit);
+    m_multiFieldTouched.fill(false, 5);
+    m_multiFieldStatsLabel =
+        new QLabel(QStringLiteral("入力検知: 0/5 項目 (変化回数合計:0)"), multiFieldGroup);
+    multiFieldLayout->addWidget(m_multiFieldStatsLabel);
+    rootLayout->addWidget(multiFieldGroup);
 
     // --- Scroll areas (vertical + horizontal) ---
     auto *scrollGroup = new QGroupBox(QStringLiteral("スクロール対象領域 (縦)"), central);
@@ -181,7 +219,7 @@ TestTargetWindow::TestTargetWindow(QWidget *parent) : QMainWindow(parent)
     statsTimer->start(500);
     updateStatsLabel();
 
-    resize(560, 900);
+    resize(560, 1050);
     updateGeometryLabel();
 }
 
@@ -244,6 +282,44 @@ void TestTargetWindow::onHScrollValueChanged(int value)
 {
     ++m_hScrollEventCount;
     Q_UNUSED(value);
+}
+
+void TestTargetWindow::onMultiFieldLineEditChanged(int index, const QString &text)
+{
+    ++m_multiFieldChangeCount;
+    if (!text.isEmpty())
+        m_multiFieldTouched[index] = true;
+    appendLog(QStringLiteral("複数入力フィールド[%1]に入力: '%2'").arg(index).arg(text));
+    updateMultiFieldStatsLabel();
+}
+
+void TestTargetWindow::onMultiFieldSpinChanged(int value)
+{
+    ++m_multiFieldChangeCount;
+    m_multiFieldTouched[3] = true;
+    appendLog(QStringLiteral("複数入力フィールド[スピンボックス]に入力: %1").arg(value));
+    updateMultiFieldStatsLabel();
+}
+
+void TestTargetWindow::onMultiFieldPlainTextChanged()
+{
+    ++m_multiFieldChangeCount;
+    if (!m_multiFieldTextEdit->toPlainText().isEmpty())
+        m_multiFieldTouched[4] = true;
+    appendLog(QStringLiteral("複数入力フィールド[複数行]に入力"));
+    updateMultiFieldStatsLabel();
+}
+
+void TestTargetWindow::updateMultiFieldStatsLabel()
+{
+    int touchedCount = 0;
+    for (bool touched : m_multiFieldTouched) {
+        if (touched)
+            ++touchedCount;
+    }
+    m_multiFieldStatsLabel->setText(QStringLiteral("入力検知: %1/5 項目 (変化回数合計:%2)")
+                                         .arg(touchedCount)
+                                         .arg(m_multiFieldChangeCount));
 }
 
 void TestTargetWindow::onContextMenuRequested(const QPoint &pos)
@@ -346,6 +422,13 @@ void TestTargetWindow::onResetCounters()
     m_minimizeCount = 0;
     m_maximizeCount = 0;
     m_keyInputEdit->clear();
+    for (QLineEdit *edit : m_multiFieldEdits)
+        edit->clear();
+    m_multiFieldSpin->setValue(0);
+    m_multiFieldTextEdit->clear();
+    m_multiFieldTouched.fill(false, 5);
+    m_multiFieldChangeCount = 0;
+    updateMultiFieldStatsLabel();
     m_logView->clear();
     m_uptime.restart();
     appendLog(QStringLiteral("カウンタをリセットしました"));

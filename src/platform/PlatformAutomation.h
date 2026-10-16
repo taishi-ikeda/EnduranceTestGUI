@@ -493,4 +493,31 @@ private:
 AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
                                              const QString &name, int occurrenceIndex);
 
+// SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」: one matched
+// editable widget's current on-screen bounds -- deliberately lighter-weight
+// than AccessibleObjectHandle (no live OS-level reference kept around) since
+// ActionKind::FuzzAllFieldsInRegion only needs each match's bounding box
+// once, to click its center and start typing/pasting into it; there is no
+// later re-resolution to cache against the way a reused ObjectTarget region
+// has (see AccessibleObjectHandle's own comment).
+struct EditableFieldInfo
+{
+    QRect bounds;   // screen coordinates
+    QString role;   // backend-native role string, included for logging only
+};
+
+// Searches expectedOwnerPid's accessibility tree for every widget that
+// accepts typed text input (Linux: ATSPI_STATE_EDITABLE; macOS: a settable
+// kAXValueAttribute -- both toolkit-agnostic signals, so this works across
+// a plain text field, a password field, a spin box, or an editable combo
+// box without hardcoding role names per toolkit) whose current on-screen
+// bounds intersect `regionBounds`, for ActionKind::FuzzAllFieldsInRegion to
+// fuzz each one in turn. Bounded traversal and result count, same rationale
+// as every other accessibility search in this section. Returns an empty
+// list (not an error) if none match, accessibility is disabled
+// (setAccessibilityFeaturesDisabled(true)), or this platform/environment
+// cannot use its accessibility backend at all -- the caller treats an empty
+// result as "nothing to fuzz this tick", not a failure.
+QList<EditableFieldInfo> findEditableObjectsInRegion(qint64 expectedOwnerPid, const QRect &regionBounds);
+
 }  // namespace PlatformAutomation

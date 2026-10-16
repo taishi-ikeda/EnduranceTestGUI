@@ -30,7 +30,8 @@ public:
     // Same parameter meaning as StepGroupEditorDialog's constructor.
     TaskEditorDialog(const RegionStep &initialTask, RegionEditContext *regionCtx,
                       const ActionParams &defaultActionParams,
-                      const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr);
+                      const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr,
+                      const QStringList &fuzzStringCorpus = QStringList());
 
     // isTask=true, taskMembers from this dialog's edits; all other
     // RegionStep fields default-constructed (unused for a task container).

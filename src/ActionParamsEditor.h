@@ -10,6 +10,7 @@ class QLineEdit;
 class QCheckBox;
 class QRadioButton;
 class QListWidget;
+class QListWidgetItem;
 class QPushButton;
 
 // Editor widget for one ActionParams value: drag distance/direction, key
@@ -28,6 +29,16 @@ public:
     void setParams(const ActionParams &params);
     ActionParams params() const;
 
+    // The app-wide fuzz-string corpus (MainWindow's QSettings-backed master
+    // list -- see TestConfig::fuzzStringCorpus's own comment), used to
+    // populate the "選択した文字列のみを使う" checklist below. Must be
+    // called (by whichever dialog owns this editor) before setParams(), or
+    // whenever the corpus may have changed (e.g. after the user edits it via
+    // "表示" menu while this dialog happens to be open), so the checklist
+    // reflects the current corpus; setParams()'s own fuzzStringSelectedEntries
+    // are preserved across a later call even for entries no longer present.
+    void setAvailableFuzzStrings(const QStringList &corpus);
+
 private slots:
     void onAddShortcut();
     void onRemoveSelectedShortcut();
@@ -38,12 +49,15 @@ private slots:
     void onContextMenuModeChanged();
     void onAddDialogButton();
     void onRemoveSelectedDialogButton();
+    void onFuzzStringUseModeChanged();
+    void onFuzzStringSelectionItemChanged(QListWidgetItem *item);
 
 private:
     void refreshShortcutList();
     void refreshContextMenuList();
     void refreshContextMenuIndexList();
     void refreshDialogButtonList();
+    void refreshFuzzStringSelectionList();
 
     QSpinBox *m_dragMinSpin = nullptr;
     QSpinBox *m_dragMaxSpin = nullptr;
@@ -55,6 +69,13 @@ private:
     QSpinBox *m_typingBurstDurationMaxSpin = nullptr;
     QSpinBox *m_typingBurstIntervalMinSpin = nullptr;
     QSpinBox *m_typingBurstIntervalMaxSpin = nullptr;
+
+    QComboBox *m_fuzzStringDeliveryModeCombo = nullptr;
+    QRadioButton *m_fuzzStringUseAllRadio = nullptr;
+    QRadioButton *m_fuzzStringUseSelectedRadio = nullptr;
+    QListWidget *m_fuzzStringSelectionListWidget = nullptr;
+    QStringList m_fuzzStringCorpus;            // last corpus passed to setAvailableFuzzStrings()
+    QStringList m_fuzzStringSelectedEntries;    // which of it (by exact value) are checked
 
     QSpinBox *m_scrollUpMinSpin = nullptr;
     QSpinBox *m_scrollUpMaxSpin = nullptr;

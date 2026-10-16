@@ -1206,6 +1206,56 @@ AtspiAccessible *findRoleNamedRecursive(AtspiAccessible *node, const QString &ro
     }
     return nullptr;
 }
+
+// SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」: bounded
+// recursive search of `node`'s subtree for every descendant that (a) has
+// ATSPI_STATE_EDITABLE (the toolkit-agnostic "this accepts typed text"
+// signal -- true for a plain text field, a password field, a spin box's
+// embedded entry, or an editable combo box, regardless of which toolkit or
+// exact role name it uses), (b) is currently visible/showing/enabled (no
+// point fuzzing a hidden or disabled field), and (c) has on-screen bounds
+// that intersect `regionBounds`. Appends a match for each one found, in
+// document order, stopping early once `out` reaches maxResults. Same
+// bounded-traversal rationale (depth/budget) as findRoleNamedRecursive()
+// above, just collecting every match instead of returning the first/Nth
+// one.
+void collectEditableObjectsRecursive(AtspiAccessible *node, const QRect &regionBounds, int depth,
+                                      int &budget, QList<EditableFieldInfo> &out, int maxResults)
+{
+    if (!node || depth > 20 || budget <= 0 || out.size() >= maxResults)
+        return;
+    --budget;
+
+    AtspiStateSet *states = atspi_accessible_get_state_set(node);
+    if (states) {
+        const bool editable = atspi_state_set_contains(states, ATSPI_STATE_EDITABLE);
+        const bool usable = editable && atspi_state_set_contains(states, ATSPI_STATE_VISIBLE) &&
+                            atspi_state_set_contains(states, ATSPI_STATE_SHOWING) &&
+                            atspi_state_set_contains(states, ATSPI_STATE_ENABLED);
+        g_object_unref(states);
+        if (usable) {
+            QRect bounds;
+            if (getExtents(node, bounds) && regionBounds.intersects(bounds)) {
+                gchar *roleName = atspi_accessible_get_role_name(node, nullptr);
+                EditableFieldInfo info;
+                info.bounds = bounds;
+                info.role = roleName ? QString::fromUtf8(roleName) : QString();
+                if (roleName)
+                    g_free(roleName);
+                out.append(info);
+            }
+        }
+    }
+
+    const gint childCount = atspi_accessible_get_child_count(node, nullptr);
+    for (gint i = 0; i < childCount && budget > 0 && out.size() < maxResults; ++i) {
+        AtspiAccessible *child = atspi_accessible_get_child_at_index(node, i, nullptr);
+        if (!child)
+            continue;
+        collectEditableObjectsRecursive(child, regionBounds, depth + 1, budget, out, maxResults);
+        g_object_unref(child);
+    }
+}
 }  // namespace
 
 struct AccessibleObjectHandle::Impl
@@ -1310,6 +1360,37 @@ AccessibleObjectHandle findAccessibleObject(qint64 /*expectedOwnerPid*/, const Q
     handle.m_impl->node = node;  // adopts the reference findRoleNamedRecursive returned
     handle.m_impl->valid = true;
     return handle;
+}
+
+QList<EditableFieldInfo> findEditableObjectsInRegion(qint64 expectedOwnerPid, const QRect &regionBounds)
+{
+    QList<EditableFieldInfo> result;
+    AtspiAccessible *desktop = getUsableDesktop();
+    if (!desktop)
+        return result;
+
+    // Bounded result count -- a form with hundreds of fields is not a
+    // realistic target, and this keeps one occurrence's worth of work
+    // (and the click+type/paste cost paid per match) predictably small.
+    constexpr int kMaxResults = 200;
+    const gint appCount = atspi_accessible_get_child_count(desktop, nullptr);
+    for (gint i = 0; i < appCount && result.size() < kMaxResults; ++i) {
+        AtspiAccessible *app = atspi_accessible_get_child_at_index(desktop, i, nullptr);
+        if (!app)
+            continue;
+        if (expectedOwnerPid > 0) {
+            const guint pid = atspi_accessible_get_process_id(app, nullptr);
+            if (static_cast<qint64>(pid) != expectedOwnerPid) {
+                g_object_unref(app);
+                continue;
+            }
+        }
+        int budget = 4000;
+        collectEditableObjectsRecursive(app, regionBounds, 0, budget, result, kMaxResults);
+        g_object_unref(app);
+    }
+    g_object_unref(desktop);
+    return result;
 }
 
 QStringList listOpenContextMenuItems(qint64 /*expectedOwnerPid*/)

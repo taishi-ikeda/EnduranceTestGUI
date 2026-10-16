@@ -53,11 +53,15 @@ public:
     // `defaultActionParams` is only read when `includeActionParams` is true
     // (to display what "デフォルトを使う" resolves to, and to seed the
     // custom-params editor the first time the user switches to "このステップ
-    // 専用の設定を使う"); ignored otherwise.
+    // 専用の設定を使う"); ignored otherwise. `fuzzStringCorpus` (same
+    // condition) is MainWindow's current app-wide fuzz-string corpus,
+    // forwarded to the embedded ActionParamsEditor's own
+    // setAvailableFuzzStrings() -- see its comment.
     StepEditorDialog(const RegionStep &initial, RegionEditContext *regionCtx,
                       QWidget *parent = nullptr, bool allowPopupDialogTarget = false,
                       bool includeActionParams = false,
-                      const ActionParams &defaultActionParams = ActionParams());
+                      const ActionParams &defaultActionParams = ActionParams(),
+                      const QStringList &fuzzStringCorpus = QStringList());
 
     bool useWholeWindow() const;
     QString regionName() const;

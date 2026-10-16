@@ -28,7 +28,7 @@ const ActionParams &effectiveParamsOf(const RegionStep &member, const ActionPara
 StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup, RegionEditContext *regionCtx,
                                               const ActionParams &defaultActionParams,
                                               const RegionStep &defaultActionKindsTemplate,
-                                              QWidget *parent)
+                                              QWidget *parent, const QStringList &fuzzStringCorpus)
     : QDialog(parent),
       m_regionCtx(regionCtx ? *regionCtx : RegionEditContext()),
       m_defaultActionParams(defaultActionParams),
@@ -151,6 +151,7 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup, Reg
     rightCol->addWidget(defaultsNoteLabel);
 
     m_paramsEditor = new ActionParamsEditor(scrollContent);
+    m_paramsEditor->setAvailableFuzzStrings(fuzzStringCorpus);
     rightCol->addWidget(m_paramsEditor, 1);
 
     mainRow->addWidget(scroll, 2);

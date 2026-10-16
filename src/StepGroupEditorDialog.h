@@ -35,9 +35,13 @@ public:
     // effective params from the live default at run time regardless of
     // what was shown here), and `defaultActionKindsTemplate` seeds a
     // newly-added member's kinds/weights (its actionCount is ignored).
+    // `fuzzStringCorpus` is MainWindow's current app-wide fuzz-string
+    // corpus, forwarded to the embedded ActionParamsEditor's own
+    // setAvailableFuzzStrings() -- see its comment.
     StepGroupEditorDialog(const RegionStep &initialGroup, RegionEditContext *regionCtx,
                            const ActionParams &defaultActionParams,
-                           const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr);
+                           const RegionStep &defaultActionKindsTemplate, QWidget *parent = nullptr,
+                           const QStringList &fuzzStringCorpus = QStringList());
 
     // isGroup=true, groupMembers/groupTotalCallCount from this dialog's
     // edits; all other RegionStep fields default-constructed (unused for a

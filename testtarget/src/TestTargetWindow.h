@@ -12,6 +12,7 @@ class QPlainTextEdit;
 class QScrollArea;
 class QMenu;
 class QPushButton;
+class QSpinBox;
 class CounterButton;
 
 // Minimal target application for exercising EnduranceTestGUI against:
@@ -47,6 +48,9 @@ private slots:
     void onResetCounters();
     void onQuitButtonClicked();
     void updateStatsLabel();
+    void onMultiFieldLineEditChanged(int index, const QString &text);
+    void onMultiFieldSpinChanged(int value);
+    void onMultiFieldPlainTextChanged();
 
 private:
     void appendLog(const QString &message);
@@ -55,6 +59,7 @@ private:
     void moveEvent(QMoveEvent *event) override;
     void changeEvent(QEvent *event) override;
     void updateGeometryLabel();
+    void updateMultiFieldStatsLabel();
 
     QVector<CounterButton *> m_buttons;
     QVector<int> m_leftCounts;
@@ -102,6 +107,21 @@ private:
     int m_maximizeCount = 0;
     bool m_wasMinimized = false;
     bool m_wasMaximized = false;
+
+    // SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」:
+    // several differently-typed editable widgets grouped into one
+    // QGroupBox, so a single drawn operation region can cover all of them
+    // at once -- for verifying ActionKind::FuzzAllFieldsInRegion actually
+    // reaches every kind of field (plain text fields, a spin box's
+    // embedded entry, a multi-line text area), not just whichever single
+    // widget happened to have focus already. Indices 0-2 are
+    // m_multiFieldEdits, 3 is the spin box, 4 is the plain text edit.
+    QVector<QLineEdit *> m_multiFieldEdits;
+    QSpinBox *m_multiFieldSpin = nullptr;
+    QPlainTextEdit *m_multiFieldTextEdit = nullptr;
+    QVector<bool> m_multiFieldTouched;  // size 5, see the indices above
+    int m_multiFieldChangeCount = 0;
+    QLabel *m_multiFieldStatsLabel = nullptr;
 
     QLabel *m_statsLabel = nullptr;
     QPlainTextEdit *m_logView = nullptr;

@@ -948,6 +948,53 @@ static AXUIElementRef findRoleNamedElementRecursive(AXUIElementRef node, const Q
     return nullptr;
 }
 
+// SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」: bounded
+// recursive search of `node`'s subtree for every descendant whose
+// kAXValueAttribute is settable -- the toolkit-agnostic "this accepts typed
+// text" signal on macOS, true for a text field, secure text field, text
+// area, or editable combo box regardless of its exact kAXRoleAttribute --
+// and whose on-screen bounds intersect `regionBounds`. Appends a match for
+// each one found, in document order, stopping early once `out` reaches
+// maxResults. Same bounded-traversal rationale (depth/budget) as
+// findRoleNamedElementRecursive() above, just collecting every match
+// instead of returning the first/Nth one.
+static void collectEditableElementsRecursive(AXUIElementRef node, const QRect &regionBounds, int depth,
+                                              int &budget, QList<EditableFieldInfo> &out, int maxResults)
+{
+    if (!node || depth > 20 || budget <= 0 || out.size() >= maxResults)
+        return;
+    --budget;
+
+    Boolean settable = false;
+    if (AXUIElementIsAttributeSettable(node, kAXValueAttribute, &settable) == kAXErrorSuccess && settable) {
+        QRect bounds;
+        if (getElementBounds(node, bounds) && regionBounds.intersects(bounds)) {
+            EditableFieldInfo info;
+            info.bounds = bounds;
+            CFStringRef nodeRole = nullptr;
+            if (AXUIElementCopyAttributeValue(node, kAXRoleAttribute, (CFTypeRef *)&nodeRole) ==
+                    kAXErrorSuccess &&
+                nodeRole) {
+                info.role = QString::fromCFString(nodeRole);
+                CFRelease(nodeRole);
+            }
+            out.append(info);
+        }
+    }
+
+    CFArrayRef children = nullptr;
+    if (AXUIElementCopyAttributeValue(node, kAXChildrenAttribute, (CFTypeRef *)&children) ==
+            kAXErrorSuccess &&
+        children) {
+        const CFIndex count = CFArrayGetCount(children);
+        for (CFIndex i = 0; i < count && budget > 0 && out.size() < maxResults; ++i) {
+            AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+            collectEditableElementsRecursive(child, regionBounds, depth + 1, budget, out, maxResults);
+        }
+        CFRelease(children);
+    }
+}
+
 struct AccessibleObjectHandle::Impl
 {
     AXUIElementRef element = nullptr;  // owned reference; released in ~Impl()
@@ -1092,6 +1139,34 @@ AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QStri
     handle.m_impl->element = found;  // adopts the reference findRoleNamedElementRecursive returned
     handle.m_impl->valid = true;
     return handle;
+}
+
+QList<EditableFieldInfo> findEditableObjectsInRegion(qint64 expectedOwnerPid, const QRect &regionBounds)
+{
+    QList<EditableFieldInfo> result;
+    if (accessibilityFeaturesDisabled())
+        return result;
+
+    AXUIElementRef app = AXUIElementCreateApplication((pid_t)expectedOwnerPid);
+    if (!app)
+        return result;
+
+    // Bounded result count -- see the Linux implementation's identical
+    // comment.
+    constexpr int kMaxResults = 200;
+    CFArrayRef windows = nullptr;
+    if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&windows) == kAXErrorSuccess &&
+        windows) {
+        const CFIndex count = CFArrayGetCount(windows);
+        for (CFIndex i = 0; i < count && result.size() < kMaxResults; ++i) {
+            AXUIElementRef win = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
+            int budget = 4000;
+            collectEditableElementsRecursive(win, regionBounds, 0, budget, result, kMaxResults);
+        }
+        CFRelease(windows);
+    }
+    CFRelease(app);
+    return result;
 }
 
 QString findRecentCrashReport(qint64 /*pid*/, const QString &appName)

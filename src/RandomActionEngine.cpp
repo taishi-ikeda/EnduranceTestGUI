@@ -1,5 +1,6 @@
 #include "RandomActionEngine.h"
 
+#include <QClipboard>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
@@ -8,6 +9,7 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QKeySequence>
+#include <QMimeData>
 #include <QPainter>
 #include <QPixmap>
 #include <QScreen>
@@ -39,6 +41,22 @@ bool parseShortcut(const QString &text, Qt::Key &outKey, Qt::KeyboardModifiers &
     outKey = Qt::Key(combined & ~Qt::KeyboardModifierMask);
 #endif
     return outKey != 0;
+}
+
+// QMimeData has no copy constructor (it's QObject-derived), so a Paste-mode
+// ActionKind::FuzzString action that wants to restore the clipboard's
+// original content afterward (per the design decision to auto-restore,
+// SPEC.md 10 "ファジングテスト対応") has to clone it field-by-field like
+// this instead. Returns nullptr only if `src` itself is null (an empty
+// clipboard still has an empty, non-null QMimeData).
+QMimeData *cloneMimeData(const QMimeData *src)
+{
+    if (!src)
+        return nullptr;
+    auto *copy = new QMimeData();
+    for (const QString &format : src->formats())
+        copy->setData(format, src->data(format));
+    return copy;
 }
 }  // namespace
 
@@ -157,6 +175,16 @@ constexpr int kAutoSlowdownIntervalMultiplier = 5;
 // catching a target that is genuinely frozen (not just paused by the
 // debugger), rather than disabling the hang-stop outright.
 constexpr int kDebuggerModeHangConfirmThreshold = 15;
+// SPEC.md 10 "ファジングテスト対応": fixed tick interval for KeyByKey-mode
+// ActionKind::FuzzString's per-character dispatch (continueFuzzStringKeyByKey()/
+// sendOneFuzzStringChar()) -- deliberately NOT user-configurable, unlike
+// TypingBurst's randomized interval range, since the actual per-character
+// pacing is already bounded below by PlatformAutomation::keyTap()'s own
+// ~10ms internal sleep; this just needs to be short enough that a long
+// corpus entry (up to 65536 characters, see FuzzStringDefaults.cpp) doesn't
+// take unreasonably long to send, while still yielding back to the Qt event
+// loop between every character so Stop/Pause stay responsive.
+constexpr int kFuzzStringKeyIntervalMs = 1;
 }  // namespace
 
 void RandomActionEngine::recordRecentAction(const QString &desc)
@@ -214,6 +242,18 @@ void RandomActionEngine::start(const TestConfig &config)
     m_typingBurstElapsedMs = 0;
     m_typingBurstKeyCount = 0;
     m_typingBurstInactiveStrikes = 0;
+    m_fuzzStringInProgress = false;
+    m_fuzzStringText.clear();
+    m_fuzzStringCharIndex = 0;
+    m_fuzzStringInactiveStrikes = 0;
+    m_fuzzAllFieldsInProgress = false;
+    m_fuzzAllFieldsTargets.clear();
+    m_fuzzAllFieldsFieldIndex = 0;
+    m_fuzzAllFieldsCandidates.clear();
+    m_fuzzAllFieldsCurrentText.clear();
+    m_fuzzAllFieldsCharIndex = 0;
+    m_fuzzAllFieldsFieldsFuzzed = 0;
+    m_fuzzAllFieldsInactiveStrikes = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
@@ -363,6 +403,23 @@ void RandomActionEngine::resume()
         const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
         const int remaining = qMax(0, m_typingBurstDurationMs - int(m_typingBurstElapsedMs));
         m_timer.start(qMax(1, qMin(interval, remaining)));
+    } else if (m_fuzzStringInProgress) {
+        // Same focus-reclaim rationale as the TypingBurst branch just above
+        // -- clicking this application's own "‖ 一時停止"/"▶ 再開" control
+        // necessarily gives THIS window OS-level input focus first, which
+        // would otherwise burn through continueFuzzStringKeyByKey()'s own
+        // bounded retry tolerance (kMaxFuzzStringInactiveStrikes) for no
+        // real reason. Unlike a TypingBurst, there's no remaining-duration
+        // budget to compute: m_fuzzStringCharIndex alone already says
+        // exactly where to continue from.
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        m_timer.start(kFuzzStringKeyIntervalMs);
+    } else if (m_fuzzAllFieldsInProgress) {
+        // Same focus-reclaim rationale as the FuzzString branch just above.
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        m_timer.start(kFuzzStringKeyIntervalMs);
     } else {
         scheduleNext();
     }
@@ -378,6 +435,8 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
     case ActionKind::Drag: return I18n::t(QStringLiteral("ドラッグ"));
     case ActionKind::Key: return I18n::t(QStringLiteral("キー入力"));
     case ActionKind::TypingBurst: return I18n::t(QStringLiteral("連続キー入力"));
+    case ActionKind::FuzzString: return I18n::t(QStringLiteral("ファズ文字列入力"));
+    case ActionKind::FuzzAllFieldsInRegion: return I18n::t(QStringLiteral("領域内の全入力項目にファズ入力"));
     case ActionKind::ScrollUp: return I18n::t(QStringLiteral("スクロール(上)"));
     case ActionKind::ScrollDown: return I18n::t(QStringLiteral("スクロール(下)"));
     case ActionKind::ScrollHorizontal: return I18n::t(QStringLiteral("スクロール(横)"));
@@ -1214,6 +1273,10 @@ RandomActionEngine::ActionKind RandomActionEngine::pickWeightedActionKind(const 
         entries << Entry{ActionKind::Key, qMax(1, step.keyWeight)};
     if (step.enableTypingBurst)
         entries << Entry{ActionKind::TypingBurst, qMax(1, step.typingBurstWeight)};
+    if (step.enableFuzzString)
+        entries << Entry{ActionKind::FuzzString, qMax(1, step.fuzzStringWeight)};
+    if (step.enableFuzzAllFields)
+        entries << Entry{ActionKind::FuzzAllFieldsInRegion, qMax(1, step.fuzzAllFieldsWeight)};
     if (step.enableScrollUp)
         entries << Entry{ActionKind::ScrollUp, qMax(1, step.scrollUpWeight)};
     if (step.enableScrollDown)
@@ -1385,6 +1448,12 @@ constexpr int kMaxMinimizedWindowWaitStrikes = 10;
 // still catching a genuine, sustained focus loss to some unrelated
 // application well within a second.
 constexpr int kMaxTypingBurstInactiveStrikes = 10;
+
+// Symmetric counterpart for an in-progress KeyByKey-delivery
+// ActionKind::FuzzString (see m_fuzzStringInProgress) -- same rationale as
+// kMaxTypingBurstInactiveStrikes just above, since continueFuzzStringKeyByKey()
+// runs the exact same per-tick active-process safety check.
+constexpr int kMaxFuzzStringInactiveStrikes = 10;
 }  // namespace
 
 bool RandomActionEngine::isTargetStillAlive() const
@@ -1511,6 +1580,22 @@ void RandomActionEngine::performRandomAction()
     // applies correctly to whichever step/group/task started it.
     if (m_typingBurstInProgress) {
         continueTypingBurst();
+        return;
+    }
+
+    // An ActionKind::FuzzString picked on an earlier tick with KeyByKey
+    // delivery is still sending its characters -- same rationale as the
+    // TypingBurst check just above (m_currentStepIndex/
+    // m_currentTaskMemberIndex cannot have changed while it's in progress).
+    if (m_fuzzStringInProgress) {
+        continueFuzzStringKeyByKey();
+        return;
+    }
+
+    // Same rationale as the FuzzString check just above, for an in-progress
+    // ActionKind::FuzzAllFieldsInRegion sweep.
+    if (m_fuzzAllFieldsInProgress) {
+        continueFuzzAllFieldsKeyByKey();
         return;
     }
 
@@ -1800,6 +1885,191 @@ void RandomActionEngine::finishTypingBurst()
     scheduleNext();
 }
 
+void RandomActionEngine::sendOneFuzzStringChar()
+{
+    if (m_fuzzStringCharIndex >= m_fuzzStringText.size())
+        return;
+    PlatformAutomation::keyTap(m_fuzzStringText[m_fuzzStringCharIndex]);
+    ++m_fuzzStringCharIndex;
+}
+
+void RandomActionEngine::continueFuzzStringKeyByKey()
+{
+    if (m_fuzzStringCharIndex >= m_fuzzStringText.size()) {
+        finishFuzzString();
+        return;
+    }
+
+    // Same rationale as continueTypingBurst()'s own per-tick safety check:
+    // keystrokes go to whatever window currently has OS input focus, so if
+    // the target stopped being the active process, don't risk leaking input
+    // to some other application. Given a small bounded tolerance
+    // (kMaxFuzzStringInactiveStrikes) before actually stopping, for the same
+    // reason TypingBurst's check is (most notably: pressing "■ 停止"/
+    // "‖ 一時停止" on this application's own window necessarily activates it
+    // first).
+    if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+        ++m_fuzzStringInactiveStrikes;
+        if (m_fuzzStringInactiveStrikes >= kMaxFuzzStringInactiveStrikes) {
+            m_fuzzStringInProgress = false;
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
+                       "安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return;
+        }
+        // Retry shortly without sending a character this tick.
+        m_timer.start(kFuzzStringKeyIntervalMs);
+        return;
+    }
+    m_fuzzStringInactiveStrikes = 0;
+
+    sendOneFuzzStringChar();
+    m_timer.start(kFuzzStringKeyIntervalMs);
+}
+
+void RandomActionEngine::finishFuzzString()
+{
+    m_fuzzStringInProgress = false;
+
+    const QString desc =
+        I18n::t(QStringLiteral("ファズ文字列入力（キー入力、%1文字）")).arg(m_fuzzStringText.size());
+    ++m_actionKindCounts[ActionKind::FuzzString];
+    recordRecentAction(desc);
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+
+    // Same "current top-level step cannot have changed while in progress"
+    // reasoning as finishTypingBurst() -- see its own comment.
+    const RegionStep &step = m_config.steps[m_currentStepIndex];
+    switch (m_fuzzStringContext) {
+    case StepContext::Step:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.actionCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Group:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.groupTotalCallCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Task:
+        ++m_currentTaskMemberIndex;
+        if (m_currentTaskMemberIndex >= step.taskMembers.size()) {
+            ++m_iterationCount;
+            emit iterationCountChanged(m_iterationCount);
+            advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
+        }
+        break;
+    }
+
+    scheduleNext();
+}
+
+bool RandomActionEngine::beginNextFuzzAllFieldsField()
+{
+    while (m_fuzzAllFieldsFieldIndex < m_fuzzAllFieldsTargets.size()) {
+        const QRect bounds = m_fuzzAllFieldsTargets[m_fuzzAllFieldsFieldIndex];
+        ++m_fuzzAllFieldsFieldIndex;
+        const QPoint center = bounds.center();
+        // The accessibility-tree snapshot (findEditableObjectsInRegion())
+        // and this click can be milliseconds apart -- re-verify the point
+        // still belongs to the target before clicking it, same safety net
+        // as any other point-based action, but skip just this one field
+        // (not fatal to the whole sweep) rather than stopping the run.
+        if (PlatformAutomation::windowPidAtPoint(center) != m_config.targetPid)
+            continue;
+        PlatformAutomation::mouseClick(center, Qt::LeftButton);
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        m_fuzzAllFieldsCurrentText =
+            m_fuzzAllFieldsCandidates[int(m_rng.bounded(quint32(m_fuzzAllFieldsCandidates.size())))];
+        m_fuzzAllFieldsCharIndex = 0;
+        m_fuzzAllFieldsInactiveStrikes = 0;
+        ++m_fuzzAllFieldsFieldsFuzzed;
+        return true;
+    }
+    return false;
+}
+
+void RandomActionEngine::continueFuzzAllFieldsKeyByKey()
+{
+    if (m_fuzzAllFieldsCharIndex >= m_fuzzAllFieldsCurrentText.size()) {
+        if (!beginNextFuzzAllFieldsField()) {
+            finishFuzzAllFields();
+            return;
+        }
+        m_timer.start(kFuzzStringKeyIntervalMs);
+        return;
+    }
+
+    // Same per-tick active-process safety check as continueFuzzStringKeyByKey()
+    // -- see its own comment.
+    if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+        ++m_fuzzAllFieldsInactiveStrikes;
+        if (m_fuzzAllFieldsInactiveStrikes >= kMaxFuzzStringInactiveStrikes) {
+            m_fuzzAllFieldsInProgress = false;
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
+                       "安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return;
+        }
+        m_timer.start(kFuzzStringKeyIntervalMs);
+        return;
+    }
+    m_fuzzAllFieldsInactiveStrikes = 0;
+
+    PlatformAutomation::keyTap(m_fuzzAllFieldsCurrentText[m_fuzzAllFieldsCharIndex]);
+    ++m_fuzzAllFieldsCharIndex;
+    m_timer.start(kFuzzStringKeyIntervalMs);
+}
+
+void RandomActionEngine::finishFuzzAllFields()
+{
+    m_fuzzAllFieldsInProgress = false;
+
+    const QString desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（キー入力、%1件）"))
+                              .arg(m_fuzzAllFieldsFieldsFuzzed);
+    ++m_actionKindCounts[ActionKind::FuzzAllFieldsInRegion];
+    recordRecentAction(desc);
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+
+    // Same "current top-level step cannot have changed while in progress"
+    // reasoning as finishFuzzString()/finishTypingBurst() -- see their own
+    // comments.
+    const RegionStep &step = m_config.steps[m_currentStepIndex];
+    switch (m_fuzzAllFieldsContext) {
+    case StepContext::Step:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.actionCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Group:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.groupTotalCallCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Task:
+        ++m_currentTaskMemberIndex;
+        if (m_currentTaskMemberIndex >= step.taskMembers.size()) {
+            ++m_iterationCount;
+            emit iterationCountChanged(m_iterationCount);
+            advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
+        }
+        break;
+    }
+
+    scheduleNext();
+}
+
 int RandomActionEngine::pickWeightedGroupMemberIndex(const RegionStep &group)
 {
     int total = 0;
@@ -1933,7 +2203,8 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
-    } else if (kind == ActionKind::Key || kind == ActionKind::TypingBurst || kind == ActionKind::Shortcut) {
+    } else if (kind == ActionKind::Key || kind == ActionKind::TypingBurst || kind == ActionKind::Shortcut ||
+               kind == ActionKind::FuzzString || kind == ActionKind::FuzzAllFieldsInRegion) {
         if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
             doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
                        "安全のためテストを停止しました")),
@@ -2148,6 +2419,204 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const int hi = m_typingBurstIntervalMaxMs;
         const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
         m_timer.start(qMax(1, qMin(interval, duration)));
+        return ActionOutcome::InProgress;
+    }
+    case ActionKind::FuzzString: {
+        // SPEC.md 10 "ファジングテスト対応": picks one entry from either the
+        // app-wide corpus (TestConfig::fuzzStringCorpus) or this step's own
+        // user-selected subset of it (params.fuzzStringSelectedEntries),
+        // depending on params.fuzzStringUseAllEntries, then sends it via
+        // whichever of the two delivery mechanisms
+        // params.fuzzStringDeliveryMode resolves to.
+        const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
+        const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
+        if (candidates.isEmpty()) {
+            emit logMessage(I18n::t(QStringLiteral(
+                "ファズ文字列の候補がありません（コーパスが空、または選択された候補がありません）")));
+            return ActionOutcome::SkippedNoCount;
+        }
+        const QString fuzzText = candidates[int(m_rng.bounded(quint32(candidates.size())))];
+
+        FuzzStringDeliveryMode mode = params.fuzzStringDeliveryMode;
+        if (mode == FuzzStringDeliveryMode::Random) {
+            mode = (m_rng.bounded(2u) == 0) ? FuzzStringDeliveryMode::KeyByKey
+                                             : FuzzStringDeliveryMode::Paste;
+        }
+
+        if (mode == FuzzStringDeliveryMode::Paste) {
+            // Single synchronous clipboard-set/Ctrl+V/restore cycle -- fast
+            // regardless of string length, so (unlike KeyByKey below) this
+            // doesn't need the multi-tick ActionOutcome::InProgress pattern.
+            // Auto-restores the clipboard's original content immediately
+            // afterward, per the confirmed design decision (this engine
+            // must not leave the user's own clipboard contents clobbered
+            // after a test run).
+            QClipboard *clipboard = QGuiApplication::clipboard();
+            QMimeData *originalClipboardData = cloneMimeData(clipboard->mimeData());
+            clipboard->setText(fuzzText);
+            if (m_config.keepTargetActive)
+                PlatformAutomation::activateProcess(m_config.targetPid);
+            Qt::Key pasteKey = Qt::Key(0);
+            Qt::KeyboardModifiers pasteMods;
+            parseShortcut(QStringLiteral("Ctrl+V"), pasteKey, pasteMods);
+            PlatformAutomation::keyShortcut(pasteKey, pasteMods);
+            // Pump the event loop instead of blocking it (QThread::msleep()
+            // would freeze this process's own event loop): under X11, the
+            // clipboard's actual content is never transmitted up front --
+            // the owning process (this one) must be alive in its event loop
+            // to answer the target's SelectionRequest when it reads the
+            // clipboard just after the Ctrl+V above. A blocking sleep here
+            // would silently turn Paste delivery into a no-op (the target
+            // would see stale or no data at all) instead of actually
+            // delivering the fuzz string.
+            QElapsedTimer pasteWaitTimer;
+            pasteWaitTimer.start();
+            while (pasteWaitTimer.elapsed() < 150)
+                QGuiApplication::processEvents(QEventLoop::AllEvents, 150 - int(pasteWaitTimer.elapsed()));
+            if (originalClipboardData)
+                clipboard->setMimeData(originalClipboardData);  // clipboard takes ownership
+            else
+                clipboard->clear();
+            desc = I18n::t(QStringLiteral("ファズ文字列入力（貼り付け、%1文字）")).arg(fuzzText.size());
+            break;
+        }
+
+        // KeyByKey: dispatched non-blocking, one character per tick (see
+        // m_fuzzStringInProgress's own comment) -- a corpus entry can be up
+        // to 65536 characters and PlatformAutomation::keyTap() blocks for
+        // ~10ms per call, so sending it synchronously here would freeze the
+        // UI/Stop/Pause for potentially minutes. Returns
+        // ActionOutcome::InProgress immediately below, same convention as
+        // ActionKind::TypingBurst just above.
+        m_fuzzStringInProgress = true;
+        m_fuzzStringContext = context;
+        m_fuzzStringText = fuzzText;
+        m_fuzzStringCharIndex = 0;
+        m_fuzzStringInactiveStrikes = 0;
+
+        emit logMessage(I18n::t(QStringLiteral("%1: ファズ文字列入力（キー入力、%2文字）を開始します"))
+                             .arg(stepLabel)
+                             .arg(fuzzText.size()));
+
+        sendOneFuzzStringChar();
+        m_timer.start(kFuzzStringKeyIntervalMs);
+        return ActionOutcome::InProgress;
+    }
+    case ActionKind::FuzzAllFieldsInRegion: {
+        // SPEC.md 10 "ファジングテスト: 領域内の全入力項目": unlike
+        // ActionKind::FuzzString above (one fuzz string to whatever
+        // currently has keyboard focus), this searches the accessibility
+        // tree for every editable widget within this step's resolved
+        // region and fuzzes each one -- see PlatformAutomation::
+        // findEditableObjectsInRegion()'s own comment for the toolkit-
+        // agnostic "editable" signal it looks for. Checked against each
+        // includeRegions rectangle individually (not just their combined
+        // bounding box) and against excludeRegions, same as any other
+        // region-aware action here.
+        QRect combinedBounds = includeRegions.first();
+        for (const QRect &r : includeRegions)
+            combinedBounds = combinedBounds.united(r);
+        const QList<PlatformAutomation::EditableFieldInfo> allFields =
+            PlatformAutomation::findEditableObjectsInRegion(m_config.targetPid, combinedBounds);
+        QList<QRect> matchedFields;
+        for (const PlatformAutomation::EditableFieldInfo &field : allFields) {
+            bool inInclude = false;
+            for (const QRect &r : includeRegions) {
+                if (r.intersects(field.bounds)) {
+                    inInclude = true;
+                    break;
+                }
+            }
+            if (!inInclude || pointExcluded(field.bounds.center(), excludeRegions))
+                continue;
+            matchedFields << field.bounds;
+        }
+        if (matchedFields.isEmpty()) {
+            emit logMessage(I18n::t(QStringLiteral(
+                "この操作領域内に入力可能な項目が見つかりませんでした（アクセシビリティ機能が無効/"
+                "未対応か、対象アプリがこのツールキットのアクセシビリティ情報を公開していない可能性があります）")));
+            return ActionOutcome::SkippedNoCount;
+        }
+
+        const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
+        const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
+        if (candidates.isEmpty()) {
+            emit logMessage(I18n::t(QStringLiteral(
+                "ファズ文字列の候補がありません（コーパスが空、または選択された候補がありません）")));
+            return ActionOutcome::SkippedNoCount;
+        }
+
+        FuzzStringDeliveryMode mode = params.fuzzStringDeliveryMode;
+        if (mode == FuzzStringDeliveryMode::Random) {
+            mode = (m_rng.bounded(2u) == 0) ? FuzzStringDeliveryMode::KeyByKey
+                                             : FuzzStringDeliveryMode::Paste;
+        }
+
+        if (mode == FuzzStringDeliveryMode::Paste) {
+            // Whole sweep dispatched synchronously -- same "fast regardless
+            // of content, no multi-tick needed" rationale as Paste-mode
+            // FuzzString, just repeated once per matched field. A field
+            // that no longer resolves to the target (moved/closed since the
+            // accessibility-tree snapshot above) is skipped, not treated as
+            // a failure of the whole sweep.
+            int fuzzed = 0;
+            QClipboard *clipboard = QGuiApplication::clipboard();
+            for (const QRect &bounds : matchedFields) {
+                const QPoint center = bounds.center();
+                if (PlatformAutomation::windowPidAtPoint(center) != m_config.targetPid)
+                    continue;
+                PlatformAutomation::mouseClick(center, Qt::LeftButton);
+                if (m_config.keepTargetActive)
+                    PlatformAutomation::activateProcess(m_config.targetPid);
+                const QString fuzzText = candidates[int(m_rng.bounded(quint32(candidates.size())))];
+                QMimeData *originalClipboardData = cloneMimeData(clipboard->mimeData());
+                clipboard->setText(fuzzText);
+                Qt::Key pasteKey = Qt::Key(0);
+                Qt::KeyboardModifiers pasteMods;
+                parseShortcut(QStringLiteral("Ctrl+V"), pasteKey, pasteMods);
+                PlatformAutomation::keyShortcut(pasteKey, pasteMods);
+                QElapsedTimer pasteWaitTimer;
+                pasteWaitTimer.start();
+                while (pasteWaitTimer.elapsed() < 150) {
+                    QGuiApplication::processEvents(QEventLoop::AllEvents,
+                                                    150 - int(pasteWaitTimer.elapsed()));
+                }
+                if (originalClipboardData)
+                    clipboard->setMimeData(originalClipboardData);
+                else
+                    clipboard->clear();
+                ++fuzzed;
+            }
+            desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（貼り付け、%1件）")).arg(fuzzed);
+            break;
+        }
+
+        // KeyByKey: dispatched non-blocking across both fields and
+        // characters (see m_fuzzAllFieldsInProgress's own comment) -- same
+        // "don't freeze the UI/Stop/Pause" rationale as KeyByKey FuzzString,
+        // just with an outer loop over every matched field.
+        m_fuzzAllFieldsInProgress = true;
+        m_fuzzAllFieldsContext = context;
+        m_fuzzAllFieldsTargets = matchedFields;
+        m_fuzzAllFieldsCandidates = candidates;
+        m_fuzzAllFieldsFieldIndex = 0;
+        m_fuzzAllFieldsFieldsFuzzed = 0;
+
+        if (!beginNextFuzzAllFieldsField()) {
+            // Every match turned out stale right away (rare -- would need
+            // every field to have moved/closed between the snapshot above
+            // and just now).
+            m_fuzzAllFieldsInProgress = false;
+            emit logMessage(I18n::t(QStringLiteral(
+                "この操作領域内の入力項目は対象ウィンドウ外へ移動していたため、ファズ入力をスキップしました")));
+            return ActionOutcome::SkippedNoCount;
+        }
+
+        emit logMessage(I18n::t(QStringLiteral("%1: 領域内の入力項目へのファズ入力（キー入力、%2件）を開始します"))
+                             .arg(stepLabel)
+                             .arg(matchedFields.size()));
+
+        m_timer.start(kFuzzStringKeyIntervalMs);
         return ActionOutcome::InProgress;
     }
     case ActionKind::ScrollUp: {

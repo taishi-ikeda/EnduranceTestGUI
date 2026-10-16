@@ -68,6 +68,23 @@ ContextMenuSelectionMode contextMenuModeFromString(const QString &s)
                                            : ContextMenuSelectionMode::ByName;
 }
 
+QString fuzzStringDeliveryModeToString(FuzzStringDeliveryMode mode)
+{
+    switch (mode) {
+    case FuzzStringDeliveryMode::KeyByKey: return QStringLiteral("keyByKey");
+    case FuzzStringDeliveryMode::Paste: return QStringLiteral("paste");
+    case FuzzStringDeliveryMode::Random:
+    default: return QStringLiteral("random");
+    }
+}
+
+FuzzStringDeliveryMode fuzzStringDeliveryModeFromString(const QString &s)
+{
+    if (s == QStringLiteral("keyByKey")) return FuzzStringDeliveryMode::KeyByKey;
+    if (s == QStringLiteral("paste")) return FuzzStringDeliveryMode::Paste;
+    return FuzzStringDeliveryMode::Random;
+}
+
 QJsonArray rectListToJson(const QList<QRect> &rects)
 {
     QJsonArray arr;
@@ -185,6 +202,9 @@ QJsonObject actionParamsToJson(const ActionParams &p)
     o["contextMenuItemNames"] = stringListToJson(p.contextMenuItemNames);
     o["contextMenuIndices"] = intListToJson(p.contextMenuIndices);
     o["dialogButtonNames"] = stringListToJson(p.dialogButtonNames);
+    o["fuzzStringUseAllEntries"] = p.fuzzStringUseAllEntries;
+    o["fuzzStringSelectedEntries"] = stringListToJson(p.fuzzStringSelectedEntries);
+    o["fuzzStringDeliveryMode"] = fuzzStringDeliveryModeToString(p.fuzzStringDeliveryMode);
     return o;
 }
 
@@ -225,6 +245,10 @@ ActionParams actionParamsFromJson(const QJsonObject &o)
         p.contextMenuIndices = intListFromJson(o["contextMenuIndices"].toArray());
     if (o.contains("dialogButtonNames"))
         p.dialogButtonNames = stringListFromJson(o["dialogButtonNames"].toArray());
+    p.fuzzStringUseAllEntries = o["fuzzStringUseAllEntries"].toBool(p.fuzzStringUseAllEntries);
+    if (o.contains("fuzzStringSelectedEntries"))
+        p.fuzzStringSelectedEntries = stringListFromJson(o["fuzzStringSelectedEntries"].toArray());
+    p.fuzzStringDeliveryMode = fuzzStringDeliveryModeFromString(o["fuzzStringDeliveryMode"].toString());
     return p;
 }
 
@@ -313,6 +337,8 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["enableDrag"] = s.enableDrag;
     o["enableKey"] = s.enableKey;
     o["enableTypingBurst"] = s.enableTypingBurst;
+    o["enableFuzzString"] = s.enableFuzzString;
+    o["enableFuzzAllFields"] = s.enableFuzzAllFields;
     o["enableScrollUp"] = s.enableScrollUp;
     o["enableScrollDown"] = s.enableScrollDown;
     o["enableScrollHorizontal"] = s.enableScrollHorizontal;
@@ -324,6 +350,8 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["dragWeight"] = s.dragWeight;
     o["keyWeight"] = s.keyWeight;
     o["typingBurstWeight"] = s.typingBurstWeight;
+    o["fuzzStringWeight"] = s.fuzzStringWeight;
+    o["fuzzAllFieldsWeight"] = s.fuzzAllFieldsWeight;
     o["scrollUpWeight"] = s.scrollUpWeight;
     o["scrollDownWeight"] = s.scrollDownWeight;
     o["scrollHorizontalWeight"] = s.scrollHorizontalWeight;
@@ -364,6 +392,8 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.enableDrag = o["enableDrag"].toBool(s.enableDrag);
     s.enableKey = o["enableKey"].toBool(s.enableKey);
     s.enableTypingBurst = o["enableTypingBurst"].toBool(s.enableTypingBurst);
+    s.enableFuzzString = o["enableFuzzString"].toBool(s.enableFuzzString);
+    s.enableFuzzAllFields = o["enableFuzzAllFields"].toBool(s.enableFuzzAllFields);
     s.enableScrollUp = o["enableScrollUp"].toBool(s.enableScrollUp);
     s.enableScrollDown = o["enableScrollDown"].toBool(s.enableScrollDown);
     s.enableScrollHorizontal = o["enableScrollHorizontal"].toBool(s.enableScrollHorizontal);
@@ -375,6 +405,8 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.dragWeight = o["dragWeight"].toInt(s.dragWeight);
     s.keyWeight = o["keyWeight"].toInt(s.keyWeight);
     s.typingBurstWeight = o["typingBurstWeight"].toInt(s.typingBurstWeight);
+    s.fuzzStringWeight = o["fuzzStringWeight"].toInt(s.fuzzStringWeight);
+    s.fuzzAllFieldsWeight = o["fuzzAllFieldsWeight"].toInt(s.fuzzAllFieldsWeight);
     s.scrollUpWeight = o["scrollUpWeight"].toInt(s.scrollUpWeight);
     s.scrollDownWeight = o["scrollDownWeight"].toInt(s.scrollDownWeight);
     s.scrollHorizontalWeight = o["scrollHorizontalWeight"].toInt(s.scrollHorizontalWeight);

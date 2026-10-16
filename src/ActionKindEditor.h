@@ -59,6 +59,10 @@ private:
     QSpinBox *m_keyWeightSpin = nullptr;
     QCheckBox *m_typingBurstCheck = nullptr;
     QSpinBox *m_typingBurstWeightSpin = nullptr;
+    QCheckBox *m_fuzzStringCheck = nullptr;
+    QSpinBox *m_fuzzStringWeightSpin = nullptr;
+    QCheckBox *m_fuzzAllFieldsCheck = nullptr;
+    QSpinBox *m_fuzzAllFieldsWeightSpin = nullptr;
     QCheckBox *m_scrollUpCheck = nullptr;
     QSpinBox *m_scrollUpWeightSpin = nullptr;
     QCheckBox *m_scrollDownCheck = nullptr;

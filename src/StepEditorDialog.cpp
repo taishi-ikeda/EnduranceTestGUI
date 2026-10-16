@@ -18,7 +18,8 @@
 
 StepEditorDialog::StepEditorDialog(const RegionStep &initial, RegionEditContext *regionCtx, QWidget *parent,
                                     bool allowPopupDialogTarget, bool includeActionParams,
-                                    const ActionParams &defaultActionParams)
+                                    const ActionParams &defaultActionParams,
+                                    const QStringList &fuzzStringCorpus)
     : QDialog(parent), m_defaultActionParams(defaultActionParams),
       m_initialCustomActionParams(initial.customActionParams), m_regionCtx(regionCtx),
       m_initialSweepRegionUseRandomPoint(initial.sweepRegionUseRandomPoint)
@@ -143,6 +144,7 @@ StepEditorDialog::StepEditorDialog(const RegionStep &initial, RegionEditContext 
         defaultsNoteLabel->setWordWrap(true);
         paramsLayout->addWidget(defaultsNoteLabel);
         m_paramsEditor = new ActionParamsEditor(paramsGroup);
+        m_paramsEditor->setAvailableFuzzStrings(fuzzStringCorpus);
         paramsLayout->addWidget(m_paramsEditor, 1);
         scrollLayout->addWidget(paramsGroup, 1);
 

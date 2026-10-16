@@ -46,6 +46,8 @@
 
 #include "AnimationExportDialog.h"
 #include "DefaultActionParamsDialog.h"
+#include "FuzzStringCorpusDialog.h"
+#include "FuzzStringDefaults.h"
 #include "LoadInjector.h"
 #include "LoadMonitor.h"
 #include "LoadMonitorChartWidget.h"
@@ -214,6 +216,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             });
 
     m_stats.reload();
+    loadFuzzStringCorpus();
 
     buildUi();
     onRefreshTargets();
@@ -468,6 +471,8 @@ void MainWindow::buildMenuBar()
     auto *viewMenu = menuBar()->addMenu(I18n::t(QStringLiteral("表示")));
     m_showLoadMonitorAction = viewMenu->addAction(I18n::t(QStringLiteral("負荷モニター...")));
     connect(m_showLoadMonitorAction, &QAction::triggered, this, &MainWindow::onShowLoadMonitorWindow);
+    m_editFuzzStringCorpusAction = viewMenu->addAction(I18n::t(QStringLiteral("ファズ文字列リストを編集...")));
+    connect(m_editFuzzStringCorpusAction, &QAction::triggered, this, &MainWindow::onEditFuzzStringCorpus);
 
     // SPEC.md "多言語対応": language takes effect on next launch (I18n.h
     // explains why a live retranslate isn't done), so the handlers below
@@ -1390,6 +1395,10 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
         actions << I18n::t(QStringLiteral("キー入力"));
     if (step.enableTypingBurst)
         actions << I18n::t(QStringLiteral("連続キー入力"));
+    if (step.enableFuzzString)
+        actions << I18n::t(QStringLiteral("ファズ文字列入力"));
+    if (step.enableFuzzAllFields)
+        actions << I18n::t(QStringLiteral("領域内の全入力項目にファズ入力"));
     if (step.enableScrollUp)
         actions << I18n::t(QStringLiteral("スクロール(上)"));
     if (step.enableScrollDown)
@@ -2063,11 +2072,35 @@ void MainWindow::onRecordingFinished(bool escapePressed)
 
 void MainWindow::onEditDefaultParams()
 {
-    DefaultActionParamsDialog dialog(m_defaultActionKinds, m_defaultActionParams, this);
+    DefaultActionParamsDialog dialog(m_defaultActionKinds, m_defaultActionParams, this, m_fuzzStringCorpus);
     if (dialog.exec() != QDialog::Accepted)
         return;
     m_defaultActionKinds = dialog.resultKinds();
     m_defaultActionParams = dialog.resultParams();
+}
+
+void MainWindow::loadFuzzStringCorpus()
+{
+    QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+    if (settings.contains(QStringLiteral("fuzzStringCorpus")))
+        m_fuzzStringCorpus = settings.value(QStringLiteral("fuzzStringCorpus")).toStringList();
+    else
+        m_fuzzStringCorpus = FuzzStringDefaults::builtInCorpus();  // first run on this machine
+}
+
+void MainWindow::saveFuzzStringCorpus()
+{
+    QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+    settings.setValue(QStringLiteral("fuzzStringCorpus"), m_fuzzStringCorpus);
+}
+
+void MainWindow::onEditFuzzStringCorpus()
+{
+    FuzzStringCorpusDialog dialog(m_fuzzStringCorpus, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_fuzzStringCorpus = dialog.result();
+    saveFuzzStringCorpus();
 }
 
 void MainWindow::onAddStep()
@@ -2087,7 +2120,7 @@ void MainWindow::onAddStep()
     // point rather than an entirely blank RegionStep().
     RegionEditContext ctx = buildRegionEditContext();
     StepEditorDialog dialog(m_defaultActionKinds, &ctx, this, /*allowPopupDialogTarget=*/false,
-                            /*includeActionParams=*/true, m_defaultActionParams);
+                            /*includeActionParams=*/true, m_defaultActionParams, m_fuzzStringCorpus);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -2150,7 +2183,8 @@ void MainWindow::onEditSelectedStep()
     RegionEditContext ctx = buildRegionEditContext();
 
     if (m_steps[row].isGroup) {
-        StepGroupEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this);
+        StepGroupEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this,
+                                     m_fuzzStringCorpus);
         if (dialog.exec() != QDialog::Accepted)
             return;
         m_steps[row] = dialog.result();
@@ -2160,7 +2194,8 @@ void MainWindow::onEditSelectedStep()
     }
 
     if (m_steps[row].isTask) {
-        TaskEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this);
+        TaskEditorDialog dialog(m_steps[row], &ctx, m_defaultActionParams, m_defaultActionKinds, this,
+                                 m_fuzzStringCorpus);
         if (dialog.exec() != QDialog::Accepted)
             return;
         m_steps[row] = dialog.result();
@@ -2170,7 +2205,7 @@ void MainWindow::onEditSelectedStep()
     }
 
     StepEditorDialog dialog(m_steps[row], &ctx, this, /*allowPopupDialogTarget=*/false,
-                            /*includeActionParams=*/true, m_defaultActionParams);
+                            /*includeActionParams=*/true, m_defaultActionParams, m_fuzzStringCorpus);
     if (dialog.exec() != QDialog::Accepted)
         return;
     if (!dialog.useWholeWindow() && dialog.regionName().isEmpty()) {
@@ -2310,7 +2345,7 @@ void MainWindow::onAddTask()
 
     RegionStep task;
     task.isTask = true;
-    TaskEditorDialog dialog(task, &ctx, m_defaultActionParams, m_defaultActionKinds, this);
+    TaskEditorDialog dialog(task, &ctx, m_defaultActionParams, m_defaultActionKinds, this, m_fuzzStringCorpus);
     if (dialog.exec() != QDialog::Accepted)
         return;
     m_steps.append(dialog.result());
@@ -2516,6 +2551,7 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.namedRegions = m_namedRegions;
     config.setupActions = m_setupActions;
     config.defaultActionParams = m_defaultActionParams;
+    config.fuzzStringCorpus = m_fuzzStringCorpus;
 
     for (int i = 0; i < m_steps.size(); ++i) {
         const RegionStep &step = m_steps[i];

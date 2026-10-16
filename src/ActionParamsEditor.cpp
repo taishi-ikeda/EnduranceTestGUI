@@ -7,8 +7,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -113,6 +115,44 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     typingBurstIntervalRow->addWidget(new QLabel(QStringLiteral("ms"), this));
     typingBurstIntervalRow->addStretch();
     layout->addLayout(typingBurstIntervalRow);
+
+    // 異常入力ファジング (ActionKind::FuzzString): how a chosen corpus entry
+    // is delivered, then which entries this step may actually choose from.
+    auto *fuzzStringDeliveryRow = new QHBoxLayout;
+    fuzzStringDeliveryRow->addWidget(new QLabel(I18n::t(QStringLiteral("ファズ文字列の送信方法:"))));
+    m_fuzzStringDeliveryModeCombo = new QComboBox(this);
+    m_fuzzStringDeliveryModeCombo->addItem(I18n::t(QStringLiteral("ランダム（キー入力/貼り付けを毎回選択）")),
+                                            int(FuzzStringDeliveryMode::Random));
+    m_fuzzStringDeliveryModeCombo->addItem(I18n::t(QStringLiteral("キー入力（1文字ずつ送信）")),
+                                            int(FuzzStringDeliveryMode::KeyByKey));
+    m_fuzzStringDeliveryModeCombo->addItem(I18n::t(QStringLiteral("クリップボード貼り付け（Ctrl+V）")),
+                                            int(FuzzStringDeliveryMode::Paste));
+    fuzzStringDeliveryRow->addWidget(m_fuzzStringDeliveryModeCombo);
+    fuzzStringDeliveryRow->addStretch();
+    layout->addLayout(fuzzStringDeliveryRow);
+
+    auto *fuzzStringUseModeRow = new QHBoxLayout;
+    m_fuzzStringUseAllRadio = new QRadioButton(I18n::t(QStringLiteral("すべてのファズ文字列を使う")), this);
+    m_fuzzStringUseSelectedRadio = new QRadioButton(I18n::t(QStringLiteral("選択した文字列のみを使う")), this);
+    m_fuzzStringUseAllRadio->setChecked(true);
+    fuzzStringUseModeRow->addWidget(m_fuzzStringUseAllRadio);
+    fuzzStringUseModeRow->addWidget(m_fuzzStringUseSelectedRadio);
+    fuzzStringUseModeRow->addStretch();
+    layout->addLayout(fuzzStringUseModeRow);
+    connect(m_fuzzStringUseAllRadio, &QRadioButton::toggled, this,
+            &ActionParamsEditor::onFuzzStringUseModeChanged);
+
+    auto *fuzzStringListLabel = new QLabel(
+        I18n::t(QStringLiteral("候補（チェックした文字列だけが「選択した文字列のみを使う」の対象になります。"
+                                "一覧自体は「表示」メニューの「ファズ文字列リストを編集...」で追加・変更できます）:")),
+        this);
+    fuzzStringListLabel->setWordWrap(true);
+    layout->addWidget(fuzzStringListLabel);
+    m_fuzzStringSelectionListWidget = new QListWidget(this);
+    m_fuzzStringSelectionListWidget->setMaximumHeight(100);
+    layout->addWidget(m_fuzzStringSelectionListWidget);
+    connect(m_fuzzStringSelectionListWidget, &QListWidget::itemChanged, this,
+            &ActionParamsEditor::onFuzzStringSelectionItemChanged);
 
     auto *scrollUpRow = new QHBoxLayout;
     scrollUpRow->addWidget(new QLabel(I18n::t(QStringLiteral("スクロール量(上):"))));
@@ -290,6 +330,7 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     layout->addStretch();
 
     onContextMenuModeChanged();
+    onFuzzStringUseModeChanged();
 }
 
 void ActionParamsEditor::setParams(const ActionParams &p)
@@ -311,6 +352,16 @@ void ActionParamsEditor::setParams(const ActionParams &p)
     m_typingBurstDurationMaxSpin->setValue(p.typingBurstMaxDurationMs);
     m_typingBurstIntervalMinSpin->setValue(p.typingBurstKeyIntervalMinMs);
     m_typingBurstIntervalMaxSpin->setValue(p.typingBurstKeyIntervalMaxMs);
+
+    const int deliveryIndex = m_fuzzStringDeliveryModeCombo->findData(int(p.fuzzStringDeliveryMode));
+    m_fuzzStringDeliveryModeCombo->setCurrentIndex(deliveryIndex >= 0 ? deliveryIndex : 0);
+    if (p.fuzzStringUseAllEntries)
+        m_fuzzStringUseAllRadio->setChecked(true);
+    else
+        m_fuzzStringUseSelectedRadio->setChecked(true);
+    m_fuzzStringSelectedEntries = p.fuzzStringSelectedEntries;
+    refreshFuzzStringSelectionList();
+    onFuzzStringUseModeChanged();
 
     m_scrollUpMinSpin->setValue(p.scrollUpMinAmount);
     m_scrollUpMaxSpin->setValue(p.scrollUpMaxAmount);
@@ -359,6 +410,9 @@ ActionParams ActionParamsEditor::params() const
     p.typingBurstMaxDurationMs = m_typingBurstDurationMaxSpin->value();
     p.typingBurstKeyIntervalMinMs = m_typingBurstIntervalMinSpin->value();
     p.typingBurstKeyIntervalMaxMs = m_typingBurstIntervalMaxSpin->value();
+    p.fuzzStringDeliveryMode = FuzzStringDeliveryMode(m_fuzzStringDeliveryModeCombo->currentData().toInt());
+    p.fuzzStringUseAllEntries = m_fuzzStringUseAllRadio->isChecked();
+    p.fuzzStringSelectedEntries = m_fuzzStringSelectedEntries;
     p.scrollUpMinAmount = m_scrollUpMinSpin->value();
     p.scrollUpMaxAmount = m_scrollUpMaxSpin->value();
     p.scrollDownMinAmount = m_scrollDownMinSpin->value();
@@ -499,4 +553,58 @@ void ActionParamsEditor::refreshDialogButtonList()
     m_dialogButtonListWidget->clear();
     for (const QString &s : m_dialogButtonNames)
         m_dialogButtonListWidget->addItem(s);
+}
+
+void ActionParamsEditor::setAvailableFuzzStrings(const QStringList &corpus)
+{
+    m_fuzzStringCorpus = corpus;
+    refreshFuzzStringSelectionList();
+}
+
+void ActionParamsEditor::refreshFuzzStringSelectionList()
+{
+    // Rebuilding from scratch fires itemChanged for every row as its check
+    // state is (re)established -- onFuzzStringSelectionItemChanged() would
+    // otherwise read back a half-built m_fuzzStringSelectedEntries while
+    // this runs, so block signals for the rebuild and only reconnect once
+    // every row reflects the real selection.
+    const QSignalBlocker blocker(m_fuzzStringSelectionListWidget);
+    m_fuzzStringSelectionListWidget->clear();
+    for (const QString &entry : m_fuzzStringCorpus) {
+        // Elide the same way FuzzStringCorpusDialog's own list does, so a
+        // very long corpus entry (e.g. the built-in 64KB stress string)
+        // doesn't make this row unreasonably wide -- the full text is still
+        // what's actually stored in m_fuzzStringSelectedEntries/compared
+        // against below, only the displayed label is shortened.
+        constexpr int kMaxDisplayChars = 80;
+        const QString label = entry.size() <= kMaxDisplayChars
+                                   ? entry
+                                   : I18n::t(QStringLiteral("%1...(全%2文字)"))
+                                         .arg(entry.left(kMaxDisplayChars))
+                                         .arg(entry.size());
+        auto *item = new QListWidgetItem(label, m_fuzzStringSelectionListWidget);
+        item->setData(Qt::UserRole, entry);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(m_fuzzStringSelectedEntries.contains(entry) ? Qt::Checked : Qt::Unchecked);
+    }
+}
+
+void ActionParamsEditor::onFuzzStringSelectionItemChanged(QListWidgetItem *item)
+{
+    const QString entry = item->data(Qt::UserRole).toString();
+    const bool checked = item->checkState() == Qt::Checked;
+    if (checked && !m_fuzzStringSelectedEntries.contains(entry))
+        m_fuzzStringSelectedEntries.append(entry);
+    else if (!checked)
+        m_fuzzStringSelectedEntries.removeAll(entry);
+}
+
+void ActionParamsEditor::onFuzzStringUseModeChanged()
+{
+    // The checklist only matters once "選択した文字列のみを使う" is picked
+    // (SPEC.md 追加実装依頼「異常入力ファジング」) -- greyed out, not
+    // hidden, while "すべてのファズ文字列を使う" is selected, so the
+    // checked state a user already set up is still visible (just inert)
+    // if they switch back and forth.
+    m_fuzzStringSelectionListWidget->setEnabled(m_fuzzStringUseSelectedRadio->isChecked());
 }

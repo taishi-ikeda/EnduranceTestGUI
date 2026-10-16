@@ -26,8 +26,12 @@ class DefaultActionParamsDialog : public QDialog
     Q_OBJECT
 
 public:
+    // `fuzzStringCorpus` is MainWindow's current app-wide fuzz-string
+    // corpus, forwarded to the embedded ActionParamsEditor's own
+    // setAvailableFuzzStrings() -- see its comment.
     DefaultActionParamsDialog(const RegionStep &initialKinds, const ActionParams &initialParams,
-                               QWidget *parent = nullptr);
+                               QWidget *parent = nullptr,
+                               const QStringList &fuzzStringCorpus = QStringList());
 
     RegionStep resultKinds() const;
     ActionParams resultParams() const;

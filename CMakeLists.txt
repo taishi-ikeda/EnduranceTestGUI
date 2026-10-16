@@ -80,6 +80,8 @@ set(SOURCES
     src/LoadMonitorChartWidget.cpp
     src/LoadMonitorWindow.cpp
     src/ScrollWheelFocusGuard.cpp
+    src/FuzzStringDefaults.cpp
+    src/FuzzStringCorpusDialog.cpp
     src/platform/InputRecorder.cpp
 )
 
@@ -116,6 +118,8 @@ set(HEADERS
     src/LoadMonitorChartWidget.h
     src/LoadMonitorWindow.h
     src/ScrollWheelFocusGuard.h
+    src/FuzzStringDefaults.h
+    src/FuzzStringCorpusDialog.h
 )
 
 list(APPEND HEADERS src/platform/PlatformAutomation.h src/platform/GlobalHotkey.h src/platform/InputRecorder.h)

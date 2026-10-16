@@ -151,6 +151,7 @@ private slots:
     // the group it just created.
     void onPasteSteps();
     void onEditDefaultParams();
+    void onEditFuzzStringCorpus();
 
     void onStart();
     void onContinuousRun();
@@ -694,6 +695,22 @@ private:
     // In ②'s header row: opens DefaultActionParamsDialog to edit the two
     // fields above together, without disturbing the current step selection.
     QPushButton *m_editDefaultParamsButton = nullptr;
+
+    // SPEC.md 追加実装依頼「異常入力ファジング」: the app-wide fuzz-string
+    // corpus ActionKind::FuzzString draws from -- a single shared resource
+    // across every test config/preset on this machine (NOT part of a saved
+    // preset -- see TestConfig::fuzzStringCorpus's own comment), edited via
+    // "表示" menu's "ファズ文字列リストを編集..." (FuzzStringCorpusDialog)
+    // and persisted via QSettings (loadFuzzStringCorpus()/
+    // saveFuzzStringCorpus()), seeded with FuzzStringDefaults::
+    // builtInCorpus() the first time the app runs with no saved value.
+    // Forwarded into every dialog that embeds an ActionParamsEditor (its own
+    // setAvailableFuzzStrings()) and into TestConfig::fuzzStringCorpus
+    // whenever a run actually starts.
+    QStringList m_fuzzStringCorpus;
+    QAction *m_editFuzzStringCorpusAction = nullptr;
+    void loadFuzzStringCorpus();
+    void saveFuzzStringCorpus();
 
     // Timing & limits
     // Operation interval can be specified either directly in ms, or as a

@@ -12,7 +12,8 @@
 #include "I18n.h"
 
 DefaultActionParamsDialog::DefaultActionParamsDialog(const RegionStep &initialKinds,
-                                                       const ActionParams &initialParams, QWidget *parent)
+                                                       const ActionParams &initialParams, QWidget *parent,
+                                                       const QStringList &fuzzStringCorpus)
     : QDialog(parent)
 {
     setWindowTitle(I18n::t(QStringLiteral("デフォルトの操作設定")));
@@ -46,6 +47,7 @@ DefaultActionParamsDialog::DefaultActionParamsDialog(const RegionStep &initialKi
     paramsHintLabel->setWordWrap(true);
     paramsLayout->addWidget(paramsHintLabel);
     m_paramsEditor = new ActionParamsEditor(paramsGroup);
+    m_paramsEditor->setAvailableFuzzStrings(fuzzStringCorpus);
     paramsLayout->addWidget(m_paramsEditor);
     scrollLayout->addWidget(paramsGroup, 1);
 

@@ -69,6 +69,32 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     typingBurstRow->addWidget(m_typingBurstWeightSpin);
     layout->addLayout(typingBurstRow);
 
+    auto *fuzzStringRow = new QHBoxLayout;
+    m_fuzzStringCheck = new QCheckBox(I18n::t(QStringLiteral("ファズ文字列入力")), this);
+    m_fuzzStringCheck->setToolTip(
+        I18n::t(QStringLiteral("「表示」メニューの「ファズ文字列リストを編集...」で管理する文字列一覧から"
+                                "1つ選んで対象へ送信します（キー入力・クリップボード貼り付け・候補の絞り込み"
+                                "は③操作パラメータで設定）。")));
+    fuzzStringRow->addWidget(m_fuzzStringCheck);
+    fuzzStringRow->addStretch();
+    m_fuzzStringWeightSpin = new QSpinBox(this);
+    m_fuzzStringWeightSpin->setRange(1, 100);
+    fuzzStringRow->addWidget(m_fuzzStringWeightSpin);
+    layout->addLayout(fuzzStringRow);
+
+    auto *fuzzAllFieldsRow = new QHBoxLayout;
+    m_fuzzAllFieldsCheck = new QCheckBox(I18n::t(QStringLiteral("領域内の全入力項目にファズ入力")), this);
+    m_fuzzAllFieldsCheck->setToolTip(
+        I18n::t(QStringLiteral("この操作領域内にある入力可能な項目（テキスト欄・スピンボックス等）を"
+                                "すべて探し、1つずつファズ文字列を送信します（アクセシビリティ機能が必要。"
+                                "候補・送信方法は「ファズ文字列入力」と共通の③操作パラメータ設定を使用）。")));
+    fuzzAllFieldsRow->addWidget(m_fuzzAllFieldsCheck);
+    fuzzAllFieldsRow->addStretch();
+    m_fuzzAllFieldsWeightSpin = new QSpinBox(this);
+    m_fuzzAllFieldsWeightSpin->setRange(1, 100);
+    fuzzAllFieldsRow->addWidget(m_fuzzAllFieldsWeightSpin);
+    layout->addLayout(fuzzAllFieldsRow);
+
     auto *scrollUpRow = new QHBoxLayout;
     m_scrollUpCheck = new QCheckBox(I18n::t(QStringLiteral("スクロール（上）")), this);
     scrollUpRow->addWidget(m_scrollUpCheck);
@@ -139,18 +165,21 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
 
     const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
                                         m_doubleClickCheck, m_dragCheck,        m_keyCheck,
-                                        m_typingBurstCheck, m_scrollUpCheck,    m_scrollDownCheck,
-                                        m_scrollHorizontalCheck, m_shortcutCheck, m_windowOpCheck,
-                                        m_dialogButtonPressCheck};
+                                        m_typingBurstCheck, m_fuzzStringCheck,  m_fuzzAllFieldsCheck,
+                                        m_scrollUpCheck,
+                                        m_scrollDownCheck, m_scrollHorizontalCheck, m_shortcutCheck,
+                                        m_windowOpCheck,   m_dialogButtonPressCheck};
     for (QCheckBox *check : checks)
         connect(check, &QCheckBox::toggled, this, &ActionKindEditor::changed);
 
     const QList<QSpinBox *> spins = {m_clickWeightSpin,       m_doubleClickWeightSpin,
                                       m_dragWeightSpin,        m_keyWeightSpin,
-                                      m_typingBurstWeightSpin, m_scrollUpWeightSpin,
-                                      m_scrollDownWeightSpin,  m_scrollHorizontalWeightSpin,
-                                      m_shortcutWeightSpin,    m_windowOpWeightSpin,
-                                      m_dialogButtonPressWeightSpin, m_actionCountSpin};
+                                      m_typingBurstWeightSpin, m_fuzzStringWeightSpin,
+                                      m_fuzzAllFieldsWeightSpin,
+                                      m_scrollUpWeightSpin,    m_scrollDownWeightSpin,
+                                      m_scrollHorizontalWeightSpin, m_shortcutWeightSpin,
+                                      m_windowOpWeightSpin,    m_dialogButtonPressWeightSpin,
+                                      m_actionCountSpin};
     for (QSpinBox *spin : spins)
         connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ActionKindEditor::changed);
 }
@@ -169,6 +198,10 @@ void ActionKindEditor::setKinds(const RegionStep &step)
     m_keyWeightSpin->setValue(step.keyWeight);
     m_typingBurstCheck->setChecked(step.enableTypingBurst);
     m_typingBurstWeightSpin->setValue(step.typingBurstWeight);
+    m_fuzzStringCheck->setChecked(step.enableFuzzString);
+    m_fuzzStringWeightSpin->setValue(step.fuzzStringWeight);
+    m_fuzzAllFieldsCheck->setChecked(step.enableFuzzAllFields);
+    m_fuzzAllFieldsWeightSpin->setValue(step.fuzzAllFieldsWeight);
     m_scrollUpCheck->setChecked(step.enableScrollUp);
     m_scrollUpWeightSpin->setValue(step.scrollUpWeight);
     m_scrollDownCheck->setChecked(step.enableScrollDown);
@@ -198,6 +231,10 @@ void ActionKindEditor::applyKindsTo(RegionStep &step) const
     step.keyWeight = m_keyWeightSpin->value();
     step.enableTypingBurst = m_typingBurstCheck->isChecked();
     step.typingBurstWeight = m_typingBurstWeightSpin->value();
+    step.enableFuzzString = m_fuzzStringCheck->isChecked();
+    step.fuzzStringWeight = m_fuzzStringWeightSpin->value();
+    step.enableFuzzAllFields = m_fuzzAllFieldsCheck->isChecked();
+    step.fuzzAllFieldsWeight = m_fuzzAllFieldsWeightSpin->value();
     step.enableScrollUp = m_scrollUpCheck->isChecked();
     step.scrollUpWeight = m_scrollUpWeightSpin->value();
     step.enableScrollDown = m_scrollDownCheck->isChecked();

@@ -26,7 +26,8 @@ const ActionParams &effectiveParamsOf(const RegionStep &member, const ActionPara
 
 TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, RegionEditContext *regionCtx,
                                     const ActionParams &defaultActionParams,
-                                    const RegionStep &defaultActionKindsTemplate, QWidget *parent)
+                                    const RegionStep &defaultActionKindsTemplate, QWidget *parent,
+                                    const QStringList &fuzzStringCorpus)
     : QDialog(parent),
       m_regionCtx(regionCtx ? *regionCtx : RegionEditContext()),
       m_defaultActionParams(defaultActionParams),
@@ -133,6 +134,7 @@ TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, RegionEditCont
     rightCol->addWidget(defaultsNoteLabel);
 
     m_paramsEditor = new ActionParamsEditor(scrollContent);
+    m_paramsEditor->setAvailableFuzzStrings(fuzzStringCorpus);
     rightCol->addWidget(m_paramsEditor, 1);
 
     mainRow->addWidget(scroll, 2);

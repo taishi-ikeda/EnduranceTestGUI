@@ -76,6 +76,44 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     namedKeyRow2->addStretch();
     layout->addLayout(namedKeyRow2);
 
+    // 一定時間キーボード入力 (ActionKind::TypingBurst): shares the character/
+    // named-key settings just above, so only its own time range (total
+    // duration) and keystroke interval need their own row here.
+    auto *typingBurstLabel =
+        new QLabel(I18n::t(QStringLiteral("連続キー入力（一定時間）の時間・間隔（上記の使用文字・名前付き"
+                                           "キーを使用）:")),
+                    this);
+    typingBurstLabel->setWordWrap(true);
+    layout->addWidget(typingBurstLabel);
+    auto *typingBurstDurationRow = new QHBoxLayout;
+    typingBurstDurationRow->addWidget(new QLabel(I18n::t(QStringLiteral("時間:"))));
+    m_typingBurstDurationMinSpin = new QSpinBox(this);
+    m_typingBurstDurationMinSpin->setRange(1, 600000);
+    m_typingBurstDurationMinSpin->setValue(2000);
+    m_typingBurstDurationMaxSpin = new QSpinBox(this);
+    m_typingBurstDurationMaxSpin->setRange(1, 600000);
+    m_typingBurstDurationMaxSpin->setValue(5000);
+    typingBurstDurationRow->addWidget(m_typingBurstDurationMinSpin);
+    typingBurstDurationRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    typingBurstDurationRow->addWidget(m_typingBurstDurationMaxSpin);
+    typingBurstDurationRow->addWidget(new QLabel(QStringLiteral("ms")));
+    typingBurstDurationRow->addStretch();
+    layout->addLayout(typingBurstDurationRow);
+    auto *typingBurstIntervalRow = new QHBoxLayout;
+    typingBurstIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("キー間隔:"))));
+    m_typingBurstIntervalMinSpin = new QSpinBox(this);
+    m_typingBurstIntervalMinSpin->setRange(1, 60000);
+    m_typingBurstIntervalMinSpin->setValue(50);
+    m_typingBurstIntervalMaxSpin = new QSpinBox(this);
+    m_typingBurstIntervalMaxSpin->setRange(1, 60000);
+    m_typingBurstIntervalMaxSpin->setValue(200);
+    typingBurstIntervalRow->addWidget(m_typingBurstIntervalMinSpin);
+    typingBurstIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    typingBurstIntervalRow->addWidget(m_typingBurstIntervalMaxSpin);
+    typingBurstIntervalRow->addWidget(new QLabel(QStringLiteral("ms"), this));
+    typingBurstIntervalRow->addStretch();
+    layout->addLayout(typingBurstIntervalRow);
+
     auto *scrollUpRow = new QHBoxLayout;
     scrollUpRow->addWidget(new QLabel(I18n::t(QStringLiteral("スクロール量(上):"))));
     m_scrollUpMinSpin = new QSpinBox(this);
@@ -269,6 +307,11 @@ void ActionParamsEditor::setParams(const ActionParams &p)
     m_keyDeleteCheck->setChecked(p.keyIncludeDelete);
     m_keyArrowsCheck->setChecked(p.keyIncludeArrowKeys);
 
+    m_typingBurstDurationMinSpin->setValue(p.typingBurstMinDurationMs);
+    m_typingBurstDurationMaxSpin->setValue(p.typingBurstMaxDurationMs);
+    m_typingBurstIntervalMinSpin->setValue(p.typingBurstKeyIntervalMinMs);
+    m_typingBurstIntervalMaxSpin->setValue(p.typingBurstKeyIntervalMaxMs);
+
     m_scrollUpMinSpin->setValue(p.scrollUpMinAmount);
     m_scrollUpMaxSpin->setValue(p.scrollUpMaxAmount);
     m_scrollDownMinSpin->setValue(p.scrollDownMinAmount);
@@ -312,6 +355,10 @@ ActionParams ActionParamsEditor::params() const
     p.keyIncludeBackspace = m_keyBackspaceCheck->isChecked();
     p.keyIncludeDelete = m_keyDeleteCheck->isChecked();
     p.keyIncludeArrowKeys = m_keyArrowsCheck->isChecked();
+    p.typingBurstMinDurationMs = m_typingBurstDurationMinSpin->value();
+    p.typingBurstMaxDurationMs = m_typingBurstDurationMaxSpin->value();
+    p.typingBurstKeyIntervalMinMs = m_typingBurstIntervalMinSpin->value();
+    p.typingBurstKeyIntervalMaxMs = m_typingBurstIntervalMaxSpin->value();
     p.scrollUpMinAmount = m_scrollUpMinSpin->value();
     p.scrollUpMaxAmount = m_scrollUpMaxSpin->value();
     p.scrollDownMinAmount = m_scrollDownMinSpin->value();

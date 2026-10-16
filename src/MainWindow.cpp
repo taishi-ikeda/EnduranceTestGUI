@@ -1388,6 +1388,8 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
         actions << I18n::t(QStringLiteral("ドラッグ"));
     if (step.enableKey)
         actions << I18n::t(QStringLiteral("キー入力"));
+    if (step.enableTypingBurst)
+        actions << I18n::t(QStringLiteral("連続キー入力"));
     if (step.enableScrollUp)
         actions << I18n::t(QStringLiteral("スクロール(上)"));
     if (step.enableScrollDown)

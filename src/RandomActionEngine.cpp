@@ -209,6 +209,11 @@ void RandomActionEngine::start(const TestConfig &config)
     m_waitStepInProgress = false;
     m_waitStepDurationMs = 0;
     m_waitStepElapsedMs = 0;
+    m_typingBurstInProgress = false;
+    m_typingBurstDurationMs = 0;
+    m_typingBurstElapsedMs = 0;
+    m_typingBurstKeyCount = 0;
+    m_typingBurstInactiveStrikes = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
@@ -299,6 +304,11 @@ void RandomActionEngine::pause()
     // would otherwise have to either drop the rest of the wait or guess.
     if (m_waitStepInProgress)
         m_waitStepElapsedMs += m_waitStepElapsed.elapsed();
+    // Same rationale, for an in-progress ActionKind::TypingBurst (see
+    // m_typingBurstInProgress's own comment) -- without this, resuming
+    // mid-burst would otherwise cut it short by however long was left.
+    if (m_typingBurstInProgress)
+        m_typingBurstElapsedMs += m_typingBurstElapsed.elapsed();
     m_timer.stop();
     m_resourceTimer.stop();
     m_hangCheckTimer.stop();
@@ -321,6 +331,38 @@ void RandomActionEngine::resume()
         // short by however long was left when paused.
         m_waitStepElapsed.start();
         m_timer.start(qMax(1, m_waitStepDurationMs - int(m_waitStepElapsedMs)));
+    } else if (m_typingBurstInProgress) {
+        // Continue the SAME typing burst for whatever time is left, picking
+        // a fresh keystroke interval rather than abandoning it for an
+        // ordinary short randomized interval (scheduleNext()) -- that would
+        // silently cut the burst short by however long was left when paused.
+        //
+        // Pausing/resuming a burst is itself commonly done by clicking this
+        // application's own "‖ 一時停止"/"▶ 再開" control (the main window's
+        // or the always-on-top StopPanel's), and clicking anywhere -- even a
+        // panel with Qt::WA_ShowWithoutActivating -- typically still gives
+        // that window OS-level input focus under a click-to-focus window
+        // manager. Left alone, the very next tick's active-process safety
+        // check (continueTypingBurst()) would then see THIS application as
+        // active instead of the target and start burning through its
+        // bounded retry tolerance (kMaxTypingBurstInactiveStrikes) for no
+        // real reason. Proactively reclaiming the target's focus here --
+        // same call start()/runOneAction() already make for exactly this
+        // "keep clicks/keys landing on the target" purpose -- fixes the
+        // actual cause instead of just buying more retries, while that
+        // tolerance still absorbs the WM's brief async round-trip before
+        // the reclaim visibly takes effect. Gated on keepTargetActive, same
+        // as every other activateProcess() call site, so a user who turned
+        // it off doesn't have focus silently wrestled away from wherever
+        // they left it.
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        m_typingBurstElapsed.start();
+        const int lo = m_typingBurstIntervalMinMs;
+        const int hi = m_typingBurstIntervalMaxMs;
+        const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+        const int remaining = qMax(0, m_typingBurstDurationMs - int(m_typingBurstElapsedMs));
+        m_timer.start(qMax(1, qMin(interval, remaining)));
     } else {
         scheduleNext();
     }
@@ -335,6 +377,7 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
     case ActionKind::DoubleClick: return I18n::t(QStringLiteral("ダブルクリック"));
     case ActionKind::Drag: return I18n::t(QStringLiteral("ドラッグ"));
     case ActionKind::Key: return I18n::t(QStringLiteral("キー入力"));
+    case ActionKind::TypingBurst: return I18n::t(QStringLiteral("連続キー入力"));
     case ActionKind::ScrollUp: return I18n::t(QStringLiteral("スクロール(上)"));
     case ActionKind::ScrollDown: return I18n::t(QStringLiteral("スクロール(下)"));
     case ActionKind::ScrollHorizontal: return I18n::t(QStringLiteral("スクロール(横)"));
@@ -1169,6 +1212,8 @@ RandomActionEngine::ActionKind RandomActionEngine::pickWeightedActionKind(const 
         entries << Entry{ActionKind::Drag, qMax(1, step.dragWeight)};
     if (step.enableKey)
         entries << Entry{ActionKind::Key, qMax(1, step.keyWeight)};
+    if (step.enableTypingBurst)
+        entries << Entry{ActionKind::TypingBurst, qMax(1, step.typingBurstWeight)};
     if (step.enableScrollUp)
         entries << Entry{ActionKind::ScrollUp, qMax(1, step.scrollUpWeight)};
     if (step.enableScrollDown)
@@ -1321,6 +1366,25 @@ constexpr int kMaxPopupDialogWaitStrikes = 50;
 // dialog that has yet to even open) -- this is purely a small safety margin
 // for the window manager to process the restore request, not a genuine wait.
 constexpr int kMaxMinimizedWindowWaitStrikes = 10;
+
+// After this many consecutive ticks of an in-progress ActionKind::
+// TypingBurst (see m_typingBurstInProgress) finding some OTHER process
+// active instead of the target, give up and treat it as an anomaly --
+// mirrors kMaxMinimizedWindowWaitStrikes's own "small bounded tolerance for
+// a transient condition, not a genuine wait" rationale. Without this
+// tolerance, continueTypingBurst()'s per-tick safety check (otherwise
+// identical to the one-shot check runOneAction() already does for a plain
+// Key/Shortcut action) would self-trigger the instant the user does
+// anything that activates this application's OWN window during a burst --
+// most notably pressing "■ 停止"/"‖ 一時停止" itself, since bringing a
+// window to the front to click a button in it necessarily activates that
+// window first, and the burst's short per-keystroke interval means its very
+// next tick can easily land before pause()/stop() has actually run yet. A
+// few strikes' worth of retry absorbs exactly that race (pause() stops
+// m_timer outright, so no further ticks happen once it wins the race) while
+// still catching a genuine, sustained focus loss to some unrelated
+// application well within a second.
+constexpr int kMaxTypingBurstInactiveStrikes = 10;
 }  // namespace
 
 bool RandomActionEngine::isTargetStillAlive() const
@@ -1436,6 +1500,20 @@ void RandomActionEngine::performRandomAction()
     if (!currentActionTargetsPopupDialog() && handleUnexpectedWindows())
         return;
 
+    // An ActionKind::TypingBurst picked on an earlier tick is still
+    // running -- continue sending its keystrokes rather than falling
+    // through to the normal step/group/task dispatch below, which would
+    // otherwise pick a brand new action on top of the one still in
+    // progress. m_currentStepIndex/m_currentTaskMemberIndex cannot have
+    // changed while a burst is in progress (nothing advances them until
+    // finishTypingBurst() runs), so every check above this point (stop
+    // conditions, hang/crash detection, unexpected-window handling) still
+    // applies correctly to whichever step/group/task started it.
+    if (m_typingBurstInProgress) {
+        continueTypingBurst();
+        return;
+    }
+
     if (m_inSetupPhase) {
         performSetupAction();
         return;
@@ -1499,14 +1577,16 @@ void RandomActionEngine::performRandomAction()
 
     QString desc;
     ActionKind kind;
-    const ActionOutcome outcome =
-        runOneAction(step, I18n::t(QStringLiteral("ステップ %1")).arg(m_currentStepIndex + 1), desc, kind);
+    const ActionOutcome outcome = runOneAction(
+        step, I18n::t(QStringLiteral("ステップ %1")).arg(m_currentStepIndex + 1), desc, kind, StepContext::Step);
     if (outcome == ActionOutcome::StoppedEngine)
         return;
     if (outcome == ActionOutcome::SkippedNoCount) {
         scheduleNext();
         return;
     }
+    if (outcome == ActionOutcome::InProgress)
+        return;  // ActionKind::TypingBurst just started; its own m_timer governs the next tick
 
     ++m_iterationCount;
     ++m_currentStepActionsDone;
@@ -1537,13 +1617,15 @@ void RandomActionEngine::performGroupAction(const RegionStep &group)
 
     QString desc;
     ActionKind kind;
-    const ActionOutcome outcome = runOneAction(member, label, desc, kind);
+    const ActionOutcome outcome = runOneAction(member, label, desc, kind, StepContext::Group);
     if (outcome == ActionOutcome::StoppedEngine)
         return;
     if (outcome == ActionOutcome::SkippedNoCount) {
         scheduleNext();
         return;
     }
+    if (outcome == ActionOutcome::InProgress)
+        return;  // ActionKind::TypingBurst just started; its own m_timer governs the next tick
 
     ++m_iterationCount;
     ++m_currentStepActionsDone;
@@ -1574,9 +1656,11 @@ void RandomActionEngine::performTaskAction(const RegionStep &task)
 
     QString desc;
     ActionKind kind;
-    const ActionOutcome outcome = runOneAction(member, label, desc, kind);
+    const ActionOutcome outcome = runOneAction(member, label, desc, kind, StepContext::Task);
     if (outcome == ActionOutcome::StoppedEngine)
         return;
+    if (outcome == ActionOutcome::InProgress)
+        return;  // ActionKind::TypingBurst just started; its own m_timer governs the next tick
     if (outcome == ActionOutcome::SkippedNoCount) {
         // Retry the same member next tick rather than skipping ahead --
         // matches a normal step's own behavior when an action is skipped
@@ -1607,6 +1691,115 @@ void RandomActionEngine::performTaskAction(const RegionStep &task)
     scheduleNext();
 }
 
+void RandomActionEngine::sendOneTypingBurstKey()
+{
+    const int totalPool = m_typingBurstChars.size() + m_typingBurstNamedKeys.size();
+    if (totalPool == 0)
+        return;
+    const int index = int(m_rng.bounded(quint32(totalPool)));
+    if (index < m_typingBurstChars.size())
+        PlatformAutomation::keyTap(m_typingBurstChars[index]);
+    else
+        PlatformAutomation::keyTapNamed(m_typingBurstNamedKeys[index - m_typingBurstChars.size()]);
+    ++m_typingBurstKeyCount;
+}
+
+void RandomActionEngine::continueTypingBurst()
+{
+    const qint64 elapsed = m_typingBurstElapsedMs + m_typingBurstElapsed.elapsed();
+    if (elapsed >= m_typingBurstDurationMs) {
+        finishTypingBurst();
+        return;
+    }
+
+    // Same rationale as runOneAction()'s own Key/Shortcut/TypingBurst-start
+    // safety check: keystrokes go to whatever window currently has OS input
+    // focus, so if the target stopped being the active process, don't risk
+    // leaking input to some other application. Unlike that one-shot check,
+    // this one recurs every tick for as long as the burst runs, so it's
+    // given a small bounded tolerance (kMaxTypingBurstInactiveStrikes)
+    // before actually stopping -- see that constant's own comment for why
+    // (most notably: pressing "■ 停止"/"‖ 一時停止" on this application's
+    // own window necessarily activates it first, and this burst's short
+    // interval means a tick can easily land before pause()/stop() has
+    // actually taken effect yet).
+    if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+        ++m_typingBurstInactiveStrikes;
+        if (m_typingBurstInactiveStrikes >= kMaxTypingBurstInactiveStrikes) {
+            m_typingBurstInProgress = false;
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
+                       "安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return;
+        }
+        // Retry shortly without sending a keystroke this tick, still
+        // counting the elapsed time toward the burst's own duration (a
+        // paused-focus stretch isn't "free" extra typing time).
+        const int remainingRetry = int(m_typingBurstDurationMs - elapsed);
+        m_timer.start(qMax(1, qMin(m_typingBurstIntervalMinMs, remainingRetry)));
+        return;
+    }
+    m_typingBurstInactiveStrikes = 0;
+
+    sendOneTypingBurstKey();
+
+    const int lo = m_typingBurstIntervalMinMs;
+    const int hi = m_typingBurstIntervalMaxMs;
+    const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+    // Never schedule a tick past the burst's own remaining duration -- the
+    // very last tick would otherwise overshoot and finish noticeably later
+    // than m_typingBurstDurationMs actually calls for.
+    const int remaining = int(m_typingBurstDurationMs - elapsed);
+    m_timer.start(qMax(1, qMin(interval, remaining)));
+}
+
+void RandomActionEngine::finishTypingBurst()
+{
+    m_typingBurstInProgress = false;
+
+    const QString desc = I18n::t(QStringLiteral("連続キー入力（%1 ms、%2回）"))
+                              .arg(m_typingBurstDurationMs)
+                              .arg(m_typingBurstKeyCount);
+    ++m_actionKindCounts[ActionKind::TypingBurst];
+    recordRecentAction(desc);
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+
+    // The current top-level step cannot have changed while the burst was
+    // in progress (nothing advances m_currentStepIndex until this function
+    // runs), so re-reading it here is equivalent to the `step`/`group`/
+    // `task` reference whichever of performRandomAction()/
+    // performGroupAction()/performTaskAction() originally dispatched this
+    // burst from was already holding.
+    const RegionStep &step = m_config.steps[m_currentStepIndex];
+    switch (m_typingBurstContext) {
+    case StepContext::Step:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.actionCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Group:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.groupTotalCallCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Task:
+        ++m_currentTaskMemberIndex;
+        if (m_currentTaskMemberIndex >= step.taskMembers.size()) {
+            ++m_iterationCount;
+            emit iterationCountChanged(m_iterationCount);
+            advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
+        }
+        break;
+    }
+
+    scheduleNext();
+}
+
 int RandomActionEngine::pickWeightedGroupMemberIndex(const RegionStep &group)
 {
     int total = 0;
@@ -1624,7 +1817,8 @@ int RandomActionEngine::pickWeightedGroupMemberIndex(const RegionStep &group)
 
 RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionStep &step,
                                                                     const QString &stepLabel,
-                                                                    QString &outDesc, ActionKind &outKind)
+                                                                    QString &outDesc, ActionKind &outKind,
+                                                                    StepContext context)
 {
     const ActionParams &params = effectiveParams(step);
 
@@ -1739,7 +1933,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                    /*isAnomaly=*/true);
             return ActionOutcome::StoppedEngine;
         }
-    } else if (kind == ActionKind::Key || kind == ActionKind::Shortcut) {
+    } else if (kind == ActionKind::Key || kind == ActionKind::TypingBurst || kind == ActionKind::Shortcut) {
         if (PlatformAutomation::activeProcessPid() != m_config.targetPid) {
             doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
                        "安全のためテストを停止しました")),
@@ -1893,6 +2087,68 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             desc = I18n::t(QStringLiteral("キー入力 [%1]")).arg(QKeySequence(namedKey).toString());
         }
         break;
+    }
+    case ActionKind::TypingBurst: {
+        // Builds the exact same character/named-key candidate pool as
+        // ActionKind::Key just above, but instead of sending exactly one
+        // keystroke and finishing, keeps sending them at randomized short
+        // intervals for a randomized total duration before this occurrence
+        // counts as done -- see m_typingBurstInProgress's own comment.
+        // Dispatch returns ActionOutcome::InProgress immediately below
+        // rather than falling through to this function's normal "fill in
+        // outDesc/outKind and return Performed" ending, since the caller
+        // (performRandomAction()/performGroupAction()/performTaskAction())
+        // must not count/log/reschedule anything itself for an action that
+        // has only just started -- finishTypingBurst() does all of that
+        // once the burst's duration has actually elapsed.
+        QList<Qt::Key> namedKeys;
+        if (params.keyIncludeTab)
+            namedKeys << Qt::Key_Tab;
+        if (params.keyIncludeReturn)
+            namedKeys << Qt::Key_Return;
+        if (params.keyIncludeEscape)
+            namedKeys << Qt::Key_Escape;
+        if (params.keyIncludeBackspace)
+            namedKeys << Qt::Key_Backspace;
+        if (params.keyIncludeDelete)
+            namedKeys << Qt::Key_Delete;
+        if (params.keyIncludeArrowKeys)
+            namedKeys << Qt::Key_Left << Qt::Key_Right << Qt::Key_Up << Qt::Key_Down;
+
+        if (params.allowedKeyChars.isEmpty() && namedKeys.isEmpty()) {
+            emit logMessage(
+                I18n::t(QStringLiteral("キー入力の候補がありません（使用文字・名前付きキーのいずれも未設定）")));
+            return ActionOutcome::SkippedNoCount;
+        }
+
+        const int durLo = qMin(params.typingBurstMinDurationMs, params.typingBurstMaxDurationMs);
+        const int durHi = qMax(params.typingBurstMinDurationMs, params.typingBurstMaxDurationMs);
+        const int duration =
+            qMax(1, durLo + (durHi > durLo ? int(m_rng.bounded(quint32(durHi - durLo + 1))) : 0));
+
+        m_typingBurstInProgress = true;
+        m_typingBurstContext = context;
+        m_typingBurstDurationMs = duration;
+        m_typingBurstElapsedMs = 0;
+        m_typingBurstElapsed.start();
+        m_typingBurstKeyCount = 0;
+        m_typingBurstInactiveStrikes = 0;
+        m_typingBurstChars = params.allowedKeyChars;
+        m_typingBurstNamedKeys = namedKeys;
+        m_typingBurstIntervalMinMs =
+            qMax(1, qMin(params.typingBurstKeyIntervalMinMs, params.typingBurstKeyIntervalMaxMs));
+        m_typingBurstIntervalMaxMs =
+            qMax(m_typingBurstIntervalMinMs,
+                 qMax(params.typingBurstKeyIntervalMinMs, params.typingBurstKeyIntervalMaxMs));
+
+        emit logMessage(I18n::t(QStringLiteral("%1: %2 ms間の連続キー入力を開始します")).arg(stepLabel).arg(duration));
+
+        sendOneTypingBurstKey();
+        const int lo = m_typingBurstIntervalMinMs;
+        const int hi = m_typingBurstIntervalMaxMs;
+        const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+        m_timer.start(qMax(1, qMin(interval, duration)));
+        return ActionOutcome::InProgress;
     }
     case ActionKind::ScrollUp: {
         const int lo = qMin(params.scrollUpMinAmount, params.scrollUpMaxAmount);

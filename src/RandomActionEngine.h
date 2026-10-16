@@ -193,6 +193,7 @@ private:
         DoubleClick,
         Drag,
         Key,
+        TypingBurst,
         ScrollUp,
         ScrollDown,
         ScrollHorizontal,
@@ -206,7 +207,25 @@ private:
         Performed,      // outDesc/outKind filled in; caller counts/logs/checks its threshold
         SkippedNoCount, // nothing dispatched (e.g. no valid point/candidates this tick); caller just reschedules
         StoppedEngine,  // doStop() was already called; caller must return immediately
+        // ActionKind::TypingBurst was just started: its first keystroke was
+        // sent and m_timer already (re)scheduled for its next tick (see
+        // m_typingBurstInProgress) -- caller must return immediately without
+        // counting/logging/rescheduling anything itself; the burst's own
+        // completion (finishTypingBurst()) performs that bookkeeping once
+        // the whole configured duration has actually elapsed.
+        InProgress,
     };
+
+    // Which of this engine's three action-dispatch call sites
+    // (performRandomAction/performGroupAction/performTaskAction) is
+    // currently running runOneAction() -- threaded through to
+    // finishTypingBurst() so it can perform exactly the completion
+    // bookkeeping (m_iterationCount/m_currentStepActionsDone/
+    // advanceToNextStep() threshold, or the task's own per-member advance)
+    // that call site would have performed itself for an ordinary one-tick
+    // action, even though a TypingBurst action spans many ticks and control
+    // has long since returned up through all three by the time it finishes.
+    enum class StepContext { Step, Group, Task };
 
     // Runs TestConfig::setupActions in order, one per tick, before the
     // randomized `steps` loop begins (SPEC.md 6.x "起動時セットアップ") --
@@ -240,7 +259,7 @@ private:
     // "ステップ3（グループ内メンバー2）") is used in any stop/log message
     // this produces so it reads correctly either way.
     ActionOutcome runOneAction(const RegionStep &step, const QString &stepLabel, QString &outDesc,
-                                ActionKind &outKind);
+                                ActionKind &outKind, StepContext context);
     // Weighted-random pick of one index into group.groupMembers, by each
     // member's own groupWeight (<= 0 treated as 1, same convention as
     // pickWeightedActionKind). group.groupMembers must not be empty.
@@ -261,6 +280,28 @@ private:
     // engine advances to the next top-level step -- see the field comment
     // on RegionStep::isTask for why this differs from a group's counting.
     void performTaskAction(const RegionStep &task);
+    // Continues an in-progress ActionKind::TypingBurst (see
+    // m_typingBurstInProgress): called instead of the normal step/group/
+    // task dispatch at the top of performRandomAction() on every tick while
+    // a burst is running. Sends one more keystroke and reschedules m_timer
+    // for the next one, or -- once the burst's configured duration has
+    // actually elapsed -- calls finishTypingBurst() instead.
+    void continueTypingBurst();
+    // Sends exactly one randomly-chosen keystroke from the character/named-
+    // key pool captured at the burst's start (m_typingBurstChars/
+    // m_typingBurstNamedKeys) and increments m_typingBurstKeyCount. Shared
+    // by the burst's first keystroke (sent synchronously from
+    // runOneAction() the moment ActionKind::TypingBurst is picked) and
+    // every subsequent one (continueTypingBurst()).
+    void sendOneTypingBurstKey();
+    // Finishes an in-progress typing burst once its configured duration has
+    // elapsed: logs/counts it as exactly one action (the same way any other
+    // ActionKind does), then performs whichever of performRandomAction()/
+    // performGroupAction()/performTaskAction()'s own completion bookkeeping
+    // m_typingBurstContext says it was dispatched from, re-reading
+    // m_config.steps[m_currentStepIndex] for the relevant threshold since
+    // that index cannot have changed while the burst was in progress.
+    void finishTypingBurst();
     // Resolves a step's region: the live target-window bounds, the
     // NamedRegion it references by name (see TestConfig::namedRegions), or
     // -- when step.targetsPopupDialog is set -- the current bounds of
@@ -516,6 +557,41 @@ private:
     int m_waitStepDurationMs = 0;
     qint64 m_waitStepElapsedMs = 0;
     QElapsedTimer m_waitStepElapsed;
+    // State for an in-progress ActionKind::TypingBurst (一定時間キーボード
+    //入力) -- mirrors m_waitStepInProgress/m_waitStepDurationMs/
+    // m_waitStepElapsedMs/m_waitStepElapsed's identical "don't count this as
+    // done until the configured time has actually elapsed, and let pause()/
+    // resume() preserve however much of it is left" pattern, just scoped to
+    // a single weighted-pick action kind (continuable from a step, a group
+    // member, or a task member -- see StepContext) instead of a whole step.
+    bool m_typingBurstInProgress = false;
+    StepContext m_typingBurstContext = StepContext::Step;
+    int m_typingBurstDurationMs = 0;
+    qint64 m_typingBurstElapsedMs = 0;
+    QElapsedTimer m_typingBurstElapsed;
+    // How many keystrokes the current (or just-finished) burst has actually
+    // sent so far -- included in its completion log message so a developer
+    // can tell how much typing actually happened in however long it ran.
+    qint64 m_typingBurstKeyCount = 0;
+    // The character/named-key candidate pool (ActionParams::allowedKeyChars
+    // + keyInclude*, the same pool ActionKind::Key itself draws from)
+    // captured at the moment the burst started -- continueTypingBurst()'s
+    // later ticks have no access to the ActionParams the burst was picked
+    // under (that was a local variable in runOneAction(), already
+    // returned from by the time the next tick fires), so the pool and the
+    // randomized per-keystroke interval range below are copied out instead.
+    QString m_typingBurstChars;
+    QList<Qt::Key> m_typingBurstNamedKeys;
+    int m_typingBurstIntervalMinMs = 50;
+    int m_typingBurstIntervalMaxMs = 200;
+    // Consecutive ticks in a row continueTypingBurst() has found some other
+    // process active instead of the target -- see kMaxTypingBurstInactiveStrikes
+    // in RandomActionEngine.cpp for why this bounded tolerance exists (most
+    // notably: the user pressing "■ 停止"/"‖ 一時停止" on this application's
+    // own window necessarily activates it first). Reset to 0 whenever the
+    // target is confirmed active again, in the TypingBurst case of
+    // runOneAction() (a fresh burst starting), and in start().
+    int m_typingBurstInactiveStrikes = 0;
     // Index into the current top-level task step's taskMembers, i.e. how
     // many of its members have run so far in the pass currently in
     // progress. Reset to 0 by advanceToNextStep() (both when a task step

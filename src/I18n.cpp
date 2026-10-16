@@ -84,8 +84,24 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("キー入力の使用文字:"), QStringLiteral("Characters used for key input:")},
         {QStringLiteral("キー入力の候補がありません（使用文字・名前付きキーのいずれも未設定）"),
          QStringLiteral("No key input candidates (neither characters nor named keys are configured)")},
+        {QStringLiteral("キー間隔:"), QStringLiteral("Key interval:")},
+        {QStringLiteral("時間:"), QStringLiteral("Duration:")},
         {QStringLiteral("クリック"), QStringLiteral("Click")},
         {QStringLiteral("クリック(%1) at (%2, %3)"), QStringLiteral("Click(%1) at (%2, %3)")},
+        {QStringLiteral("連続キー入力"), QStringLiteral("Continuous Typing")},
+        {QStringLiteral("連続キー入力（一定時間）"), QStringLiteral("Continuous Typing (fixed duration)")},
+        {QStringLiteral("一定時間、ランダムな間隔でキー入力を送り続けます（「キー入力」と同じ"
+                        "使用文字・名前付きキーの設定を使用。時間・間隔は③操作パラメータで設定）。"),
+         QStringLiteral("Keeps sending keystrokes at randomized intervals for a fixed duration "
+                        "(uses the same character/named-key settings as \"Key Input\"; the duration "
+                        "and interval are set in ③ Action Parameters).")},
+        {QStringLiteral("連続キー入力（一定時間）の時間・間隔（上記の使用文字・名前付き"
+                        "キーを使用）:"),
+         QStringLiteral("Continuous Typing (fixed duration) time/interval (uses the characters/"
+                        "named keys above):")},
+        {QStringLiteral("%1: %2 ms間の連続キー入力を開始します"),
+         QStringLiteral("%1: Starting continuous typing for %2 ms")},
+        {QStringLiteral("連続キー入力（%1 ms、%2回）"), QStringLiteral("Continuous typing (%1 ms, %2 presses)")},
         {QStringLiteral("グループにステップを最低1つ追加してください。"), QStringLiteral("Please add at least one step to the group.")},
         {QStringLiteral("グループの編集"), QStringLiteral("Edit Group")},
         {QStringLiteral("グループ内での重み（大きいほど選ばれやすい）:"),

@@ -57,6 +57,18 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     keyRow->addWidget(m_keyWeightSpin);
     layout->addLayout(keyRow);
 
+    auto *typingBurstRow = new QHBoxLayout;
+    m_typingBurstCheck = new QCheckBox(I18n::t(QStringLiteral("連続キー入力（一定時間）")), this);
+    m_typingBurstCheck->setToolTip(
+        I18n::t(QStringLiteral("一定時間、ランダムな間隔でキー入力を送り続けます（「キー入力」と同じ"
+                                "使用文字・名前付きキーの設定を使用。時間・間隔は③操作パラメータで設定）。")));
+    typingBurstRow->addWidget(m_typingBurstCheck);
+    typingBurstRow->addStretch();
+    m_typingBurstWeightSpin = new QSpinBox(this);
+    m_typingBurstWeightSpin->setRange(1, 100);
+    typingBurstRow->addWidget(m_typingBurstWeightSpin);
+    layout->addLayout(typingBurstRow);
+
     auto *scrollUpRow = new QHBoxLayout;
     m_scrollUpCheck = new QCheckBox(I18n::t(QStringLiteral("スクロール（上）")), this);
     scrollUpRow->addWidget(m_scrollUpCheck);
@@ -127,17 +139,18 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
 
     const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
                                         m_doubleClickCheck, m_dragCheck,        m_keyCheck,
-                                        m_scrollUpCheck,    m_scrollDownCheck,  m_scrollHorizontalCheck,
-                                        m_shortcutCheck,    m_windowOpCheck,    m_dialogButtonPressCheck};
+                                        m_typingBurstCheck, m_scrollUpCheck,    m_scrollDownCheck,
+                                        m_scrollHorizontalCheck, m_shortcutCheck, m_windowOpCheck,
+                                        m_dialogButtonPressCheck};
     for (QCheckBox *check : checks)
         connect(check, &QCheckBox::toggled, this, &ActionKindEditor::changed);
 
     const QList<QSpinBox *> spins = {m_clickWeightSpin,       m_doubleClickWeightSpin,
                                       m_dragWeightSpin,        m_keyWeightSpin,
-                                      m_scrollUpWeightSpin,    m_scrollDownWeightSpin,
-                                      m_scrollHorizontalWeightSpin, m_shortcutWeightSpin,
-                                      m_windowOpWeightSpin,    m_dialogButtonPressWeightSpin,
-                                      m_actionCountSpin};
+                                      m_typingBurstWeightSpin, m_scrollUpWeightSpin,
+                                      m_scrollDownWeightSpin,  m_scrollHorizontalWeightSpin,
+                                      m_shortcutWeightSpin,    m_windowOpWeightSpin,
+                                      m_dialogButtonPressWeightSpin, m_actionCountSpin};
     for (QSpinBox *spin : spins)
         connect(spin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ActionKindEditor::changed);
 }
@@ -154,6 +167,8 @@ void ActionKindEditor::setKinds(const RegionStep &step)
     m_dragWeightSpin->setValue(step.dragWeight);
     m_keyCheck->setChecked(step.enableKey);
     m_keyWeightSpin->setValue(step.keyWeight);
+    m_typingBurstCheck->setChecked(step.enableTypingBurst);
+    m_typingBurstWeightSpin->setValue(step.typingBurstWeight);
     m_scrollUpCheck->setChecked(step.enableScrollUp);
     m_scrollUpWeightSpin->setValue(step.scrollUpWeight);
     m_scrollDownCheck->setChecked(step.enableScrollDown);
@@ -181,6 +196,8 @@ void ActionKindEditor::applyKindsTo(RegionStep &step) const
     step.dragWeight = m_dragWeightSpin->value();
     step.enableKey = m_keyCheck->isChecked();
     step.keyWeight = m_keyWeightSpin->value();
+    step.enableTypingBurst = m_typingBurstCheck->isChecked();
+    step.typingBurstWeight = m_typingBurstWeightSpin->value();
     step.enableScrollUp = m_scrollUpCheck->isChecked();
     step.scrollUpWeight = m_scrollUpWeightSpin->value();
     step.enableScrollDown = m_scrollDownCheck->isChecked();

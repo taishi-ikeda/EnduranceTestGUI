@@ -43,6 +43,18 @@ struct ActionParams
     bool keyIncludeDelete = false;
     bool keyIncludeArrowKeys = false;  // Up/Down/Left/Right, picked individually at random
 
+    // 一定時間キーボード入力 (RegionStep::enableTypingBurst, ActionKind::
+    // TypingBurst): unlike a plain Key action (exactly one keystroke per
+    // occurrence), this keeps sending keystrokes at randomized short
+    // intervals for a randomized total duration before counting as the one
+    // action its weight picked. Draws from the exact same character/named-
+    // key candidate pool as Key above (allowedKeyChars + keyInclude*) --
+    // there is no separate charset for it.
+    int typingBurstMinDurationMs = 2000;
+    int typingBurstMaxDurationMs = 5000;
+    int typingBurstKeyIntervalMinMs = 50;
+    int typingBurstKeyIntervalMaxMs = 200;
+
     // Shortcut key combinations, as QKeySequence-parseable text (e.g.
     // "Ctrl+C", "Ctrl+Shift+Z"). "Ctrl" follows Qt's portable convention
     // (maps to Cmd on macOS).
@@ -302,6 +314,15 @@ struct RegionStep
     bool enableDoubleClick = false;
     bool enableDrag = false;
     bool enableKey = false;
+    // 一定時間キーボード入力 (ActionKind::TypingBurst in RandomActionEngine):
+    // like enableKey, but one occurrence keeps sending keystrokes for a
+    // randomized duration (ActionParams::typingBurstMinDurationMs/
+    // typingBurstMaxDurationMs) instead of exactly one keystroke, counting
+    // as this step's one action only once that duration has elapsed --
+    // the same "don't advance until the configured time is up" contract
+    // isWaitStep's own wait uses, just scoped to a single weighted-pick
+    // action kind instead of a whole step.
+    bool enableTypingBurst = false;
     bool enableScrollUp = false;
     bool enableScrollDown = false;
     bool enableScrollHorizontal = false;
@@ -330,6 +351,7 @@ struct RegionStep
     int doubleClickWeight = 1;
     int dragWeight = 1;
     int keyWeight = 1;
+    int typingBurstWeight = 1;
     int scrollUpWeight = 1;
     int scrollDownWeight = 1;
     int scrollHorizontalWeight = 1;
@@ -427,8 +449,8 @@ struct RegionStep
     {
         if (isWaitStep || isGroup || isTask)
             return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
-        return enableClick || enableDoubleClick || enableDrag || enableKey || enableScrollUp ||
-               enableScrollDown || enableScrollHorizontal || enableShortcut ||
+        return enableClick || enableDoubleClick || enableDrag || enableKey || enableTypingBurst ||
+               enableScrollUp || enableScrollDown || enableScrollHorizontal || enableShortcut ||
                (enableWindowOp && !targetsPopupDialog) ||
                (enableDialogButtonPress && targetsPopupDialog);
     }

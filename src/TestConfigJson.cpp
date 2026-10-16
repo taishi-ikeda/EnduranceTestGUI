@@ -165,6 +165,10 @@ QJsonObject actionParamsToJson(const ActionParams &p)
     o["keyIncludeBackspace"] = p.keyIncludeBackspace;
     o["keyIncludeDelete"] = p.keyIncludeDelete;
     o["keyIncludeArrowKeys"] = p.keyIncludeArrowKeys;
+    o["typingBurstMinDurationMs"] = p.typingBurstMinDurationMs;
+    o["typingBurstMaxDurationMs"] = p.typingBurstMaxDurationMs;
+    o["typingBurstKeyIntervalMinMs"] = p.typingBurstKeyIntervalMinMs;
+    o["typingBurstKeyIntervalMaxMs"] = p.typingBurstKeyIntervalMaxMs;
     o["shortcutSequences"] = stringListToJson(p.shortcutSequences);
     o["scrollUpMinAmount"] = p.scrollUpMinAmount;
     o["scrollUpMaxAmount"] = p.scrollUpMaxAmount;
@@ -197,6 +201,10 @@ ActionParams actionParamsFromJson(const QJsonObject &o)
     p.keyIncludeBackspace = o["keyIncludeBackspace"].toBool(p.keyIncludeBackspace);
     p.keyIncludeDelete = o["keyIncludeDelete"].toBool(p.keyIncludeDelete);
     p.keyIncludeArrowKeys = o["keyIncludeArrowKeys"].toBool(p.keyIncludeArrowKeys);
+    p.typingBurstMinDurationMs = o["typingBurstMinDurationMs"].toInt(p.typingBurstMinDurationMs);
+    p.typingBurstMaxDurationMs = o["typingBurstMaxDurationMs"].toInt(p.typingBurstMaxDurationMs);
+    p.typingBurstKeyIntervalMinMs = o["typingBurstKeyIntervalMinMs"].toInt(p.typingBurstKeyIntervalMinMs);
+    p.typingBurstKeyIntervalMaxMs = o["typingBurstKeyIntervalMaxMs"].toInt(p.typingBurstKeyIntervalMaxMs);
     if (o.contains("shortcutSequences"))
         p.shortcutSequences = stringListFromJson(o["shortcutSequences"].toArray());
     p.scrollUpMinAmount = o["scrollUpMinAmount"].toInt(p.scrollUpMinAmount);
@@ -304,6 +312,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["enableDoubleClick"] = s.enableDoubleClick;
     o["enableDrag"] = s.enableDrag;
     o["enableKey"] = s.enableKey;
+    o["enableTypingBurst"] = s.enableTypingBurst;
     o["enableScrollUp"] = s.enableScrollUp;
     o["enableScrollDown"] = s.enableScrollDown;
     o["enableScrollHorizontal"] = s.enableScrollHorizontal;
@@ -314,6 +323,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["doubleClickWeight"] = s.doubleClickWeight;
     o["dragWeight"] = s.dragWeight;
     o["keyWeight"] = s.keyWeight;
+    o["typingBurstWeight"] = s.typingBurstWeight;
     o["scrollUpWeight"] = s.scrollUpWeight;
     o["scrollDownWeight"] = s.scrollDownWeight;
     o["scrollHorizontalWeight"] = s.scrollHorizontalWeight;
@@ -353,6 +363,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.enableDoubleClick = o["enableDoubleClick"].toBool(s.enableDoubleClick);
     s.enableDrag = o["enableDrag"].toBool(s.enableDrag);
     s.enableKey = o["enableKey"].toBool(s.enableKey);
+    s.enableTypingBurst = o["enableTypingBurst"].toBool(s.enableTypingBurst);
     s.enableScrollUp = o["enableScrollUp"].toBool(s.enableScrollUp);
     s.enableScrollDown = o["enableScrollDown"].toBool(s.enableScrollDown);
     s.enableScrollHorizontal = o["enableScrollHorizontal"].toBool(s.enableScrollHorizontal);
@@ -363,6 +374,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.doubleClickWeight = o["doubleClickWeight"].toInt(s.doubleClickWeight);
     s.dragWeight = o["dragWeight"].toInt(s.dragWeight);
     s.keyWeight = o["keyWeight"].toInt(s.keyWeight);
+    s.typingBurstWeight = o["typingBurstWeight"].toInt(s.typingBurstWeight);
     s.scrollUpWeight = o["scrollUpWeight"].toInt(s.scrollUpWeight);
     s.scrollDownWeight = o["scrollDownWeight"].toInt(s.scrollDownWeight);
     s.scrollHorizontalWeight = o["scrollHorizontalWeight"].toInt(s.scrollHorizontalWeight);

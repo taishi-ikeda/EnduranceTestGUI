@@ -51,6 +51,11 @@ private:
 
     QLineEdit *m_allowedKeysEdit = nullptr;
 
+    QSpinBox *m_typingBurstDurationMinSpin = nullptr;
+    QSpinBox *m_typingBurstDurationMaxSpin = nullptr;
+    QSpinBox *m_typingBurstIntervalMinSpin = nullptr;
+    QSpinBox *m_typingBurstIntervalMaxSpin = nullptr;
+
     QSpinBox *m_scrollUpMinSpin = nullptr;
     QSpinBox *m_scrollUpMaxSpin = nullptr;
     QSpinBox *m_scrollDownMinSpin = nullptr;

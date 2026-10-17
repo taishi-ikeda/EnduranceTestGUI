@@ -6423,6 +6423,142 @@ checkWindowResponsive()`、`_NET_WM_PING`、8秒間隔・2回連続失敗で確�
 
   20件とも-Wall -Wextra -Wpedantic付きのクリーンビルドで警告0件を維持。
 
+- v1.27: Xvfb+openbox（コンポジタ無し）・実のD-Busセッションバス＋at-spi-
+  bus-launcher/at-spi2-registryd・`QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`で
+  ETG自身も含めて複数アプリをAT-SPIバスに載せた検証環境（Qt 6.4.2/
+  atspi-2 2.52、通常ビルドで警告0件・ASan+UBSanビルドでエラー0件を確認
+  済み）からの不具合報告11件（AT-SPI関連6件、その他5件）を、それぞれ
+  調査・修正した。
+
+  **2.1（重大）「ETGが自分自身へのAT-SPI問い合わせで約17秒固まり、緊急
+  停止すら効かない」**: `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`が立っている
+  実環境では、ETG自身のプロセスも対象アプリと同じAT-SPIバスに登録される。
+  `findAccessibleObject()`/`clickButtonByName()`/`hitTestDesktop()`の
+  いずれもがデスクトップ全体を同期的に走査しており、ETG自身のアプリ
+  ケーションオブジェクトを辿ってしまうと、ETGのメインスレッドが自分
+  自身への問い合わせの応答待ちで固まる（D-Busタイムアウトの約17秒間、
+  緊急停止ホットキーも「■停止」ボタンも無反応になる）。新設の
+  `scopedApplications()`（`Automation_linux.cpp`）で、デスクトップの
+  直下の子（＝各登録アプリケーション）を列挙する箇所を一本化し、
+  `getpid()`と一致する自プロセスを`expectedOwnerPid`の値に関わらず常に
+  除外するようにした。
+  **2.2（重大）「ダイアログのボタンを押す」操作が、無関係な別アプリの
+  同名ボタンを押してしまう**: `clickButtonByName()`が`expectedOwnerPid`
+  を受け取りながら使っておらず、デスクトップ全体から最初に見つかった
+  同名の操作可能部品を押していた。`scopedApplications()`で
+  `expectedOwnerPid`が指定されている場合はそのアプリケーションのみに
+  絞り込むようにした。
+  **2.3（重大）「名前付きオブジェクトの解決が、別アプリの同名部品に
+  誤って解決する」**: `findAccessibleObject()`も同様に`expectedOwnerPid`
+  を無視しており、対象の裏に隠れた無関係アプリの同名部品を解決して
+  しまう（見えている場合は誤った近接ミスの安全停止になる）ことがあった。
+  `scopedApplications()`で同様に修正。`NamedRegionEditorDialog::
+  onPickObject()`の`occurrenceIndex`計算も内部で`findAccessibleObject()`
+  を呼んでいるため、この修正だけで同じ問題が解消される。
+  **2.4（高）「右クリックメニュー項目の選択が、名前指定・番号指定の
+  どちらも常に失敗する」**: このQt/at-spi2の組み合わせでは、QtのQMenu
+  ポップアップがAT-SPIツリー上でアプリケーションの子として全く公開され
+  ない（メニュー表示中に全ツリーをダンプして確認済み）ため、
+  `findOpenMenu()`は探索の深さ・予算をいくら調整しても見つけられない
+  構造的な制約だった。`clickContextMenuItem()`/`clickContextMenuItemAt()`
+  に、AT-SPIで見つからない場合のキーボード操作フォールバックを追加
+  した：番号指定はDown矢印を(index+1)回送ってからReturn、名前指定は
+  Qtの標準機能である先頭文字の打鍵ジャンプ（同じ文字で始まる項目へ
+  移動）を利用して先頭文字＋Returnを送る。ただし何もメニューが開いて
+  いない状況でDown/Returnを送るのは別アプリに意図しない操作をしてしまう
+  危険があるため、新設の`hasLikelyOpenPopup()`（override-redirectかつ
+  現在マップ済みのウィンドウが存在するかを見る、AT-SPIに依存しない
+  X11レベルの判定）で「何らかのポップアップが実際に開いていそう」な
+  ときにしか発動しないようゲートした。あわせて`RandomActionEngine::
+  handlePossibleContextMenu()`側の候補選定も、`listOpenContextMenuItems()`
+  が常に空（＝Qt対象では常にそうなる）になる前提で、設定済みの項目名・
+  番号を直接試すように変更（この新しいフォールバック自体が安全かどうか
+  の判定を担うため、ここでの事前フィルタは不要になった）。
+  **2.5（中）「クリックログに部品名`[部品名]`が一切付与されない」**:
+  `accessibleNameAtPoint()`が、デスクトップの擬似アクセシブル自身の
+  Componentインターフェースに対して`atspi_component_get_accessible_at_
+  point()`を直接呼んでおり、この呼び出しは同ファイルの`hitTestDesktop()`
+  自身のコメントが既に「このat-spi2バージョンでは常にnullを返す」と
+  明記している手法そのものだった。`hitTestDesktop()`の実装（アプリ→
+  ウィンドウの順にフォールバックするファンアウト方式）を再利用するよう
+  書き換え、`expectedOwnerPid`引数を追加して対象アプリへのスコープも
+  同時に付けた（macOS版`accessibleNameAtPoint()`にも同じ引数を追加し、
+  `AXUIElementGetPid()`でヒットした要素の所属プロセスを確認するように
+  した）。
+  **2.6（中、1.1のスクリーンクランプ修正の副作用）「操作領域が画面外に
+  あると、誤ったメッセージのまま無限にスピンする」**: v1.26の1.1修正
+  （`pickRandomPoint()`が候補矩形を`allScreensRegion()`で画面範囲に
+  クランプする）の結果、操作領域が完全に画面外にある場合は候補面積が
+  0になり、既存の「除外領域が広すぎる可能性があります」という、別の
+  原因を前提にしたメッセージが誤って表示され、かつ`SkippedNoCount`の
+  まま際限なく繰り返されていた。`pickRandomPoint()`に`outRegionOffScreen`
+  出力引数を追加し、2つの原因（除外領域の問題／画面外）を呼び出し側で
+  区別できるようにした上で、画面外が原因と分かった場合専用の文言に
+  差し替え、新設の`m_noValidPointOffScreenStrikes`
+  （`kMaxNoValidPointOffScreenStrikes`=5）で、
+  `kMaxFuzzNoCandidatesStrikes`と同じ「静的な設定不備は待っても解決し
+  ない」という考え方に基づき、連続5回で異常停止に切り替えるようにした。
+  **3.1（中、v1.26の2.5修正の回帰）「未保存警告が、何も設定していない
+  まっさらな状態でも出る」**: `buildPresetJson()`の`targetAppNameHint`
+  は対象アプリの自動選択結果を反映するフィールド（「参考情報のみ、再起動
+  間でpidが安定しない」ことが既存コメントにも明記されている）であり、
+  ユーザーが実際に編集した設定を表すものではないにもかかわらず、v1.26の
+  dirtyチェック（`buildPresetJson()`の直列化結果をバイト単位で比較）の
+  対象に含まれていた。そのため、何も設定を変えていなくても対象アプリが
+  自動選択されるだけで差分扱いになり、警告が誤発火していた。新設の
+  `buildPresetJsonForDirtyCheck()`（`buildPresetJson()`の結果から
+  `targetAppNameHint`を取り除くだけ）を`m_lastSavedPresetJson`の
+  スナップショット／比較の4箇所（コンストラクタ末尾・`closeEvent()`・
+  `onSavePreset()`・`loadPresetFromPath()`）全てで使うようにした。
+  ファイルへの保存内容・統計フィングプリントは従来どおり
+  `targetAppNameHint`を含む`buildPresetJson()`のままとした（人間が
+  ファイルを読んだときの参考情報としては有用なため）。
+  **3.2（中、v1.26の2.3修正の回帰）「ファジングで送った文字列がログに
+  生の制御文字のまま記録され、ログ行の構造が壊れる」**: v1.26で追加した
+  `fuzzStringLogPreview()`は文字数での切り詰めのみ行っており、ファズ
+  コーパスが意図的に含みうるCR/LF・ESC（ANSIエスケープシーケンスの開始
+  文字）等の制御文字をそのままログ・ログファイルに書き込んでいた。
+  C0制御文字（0x00-0x1F）とDEL（0x7F）を`\xHH`形式にエスケープしてから
+  切り詰めるように変更した。
+  **3.3（重大）「安全チェックが、重なったウィンドウのタイトルバー部分
+  への誤クリックを見逃す」**: `windowScreenBounds()`は`XGetWindowAttributes`
+  が返すクライアントウィンドウ自身の矩形のみを見ており、リペアレント
+  方式のウィンドウマネージャが追加するタイトルバー・枠（WM自身の
+  デコレーション）を含んでいなかった。そのため、クリック予定座標が
+  無関係ウィンドウのタイトルバー上に乗っていても、`windowPidAtPoint()`
+  の安全チェックはそれを「どのウィンドウでもない」と見なしてすり抜けて
+  いた。EWMH標準のプロパティ`_NET_FRAME_EXTENTS`（WM自身が設定する
+  left/right/top/bottom、対応していないWMや装飾無しウィンドウでは単に
+  存在しない）を読み、存在すればクライアント矩形をその分だけ広げる
+  ように修正した（`collectWindows()`/`windowPidAtPoint()`/
+  `maximizeWindow()`いずれもこの共通関数を経由するため、1箇所の修正で
+  3箇所すべてに適用される）。
+  **3.4（低）「10px未満の細いウィンドウが、安全チェックを完全にすり
+  抜ける」**: `windowScreenBounds()`内にあった`width<10||height<10`の
+  除外は、元々はシステムトレイ/クリップボードマネージャのヘルパー
+  ウィンドウ等、①の対象選択一覧に出すべきでない極小ウィンドウを弾く
+  ためのものと考えられるが、安全チェック（`windowPidAtPoint()`）を含む
+  この関数の全呼び出し元に等しく適用されてしまっており、実在する細い/
+  帯状のウィンドウへのクリックが安全チェックから完全に見えなくなる
+  副作用があった。この除外を`windowScreenBounds()`自体から削除し、
+  本来の目的に合う`collectWindows()`（①の一覧構築）側にのみ移設した。
+  **3.5（低、既存バグ）「ウィンドウリサイズ・移動が実際には失敗して
+  いても、常に成功ログが出る」**: `applySavedWindowGeometryIfEnabled()`
+  は`resizeWindow()`/`moveWindow()`の戻り値（リクエストを送れたか否か
+  のみを意味する）だけで成否を判定しており、対象アプリ自身が最小
+  サイズ制約等でリクエストを無視・縮小した場合でも無条件に成功ログを
+  出していた。リクエスト送信後に`queryWindowBounds()`（`onSaveWindowSize()`
+  /`onSaveWindowPosition()`自身が保存時の値を取得するのと同じ関数、
+  比較の基準を両側で揃えるため）で実際の結果を再取得し、要求値と一致
+  した場合のみ成功ログ、一致しなければ要求値・実際の値を併記した失敗
+  ログに変更した（サイズ・位置の両方に同様の検証を追加）。
+
+  この検証環境（at-spi2-registryd等を含むD-Busアクセシビリティスタック
+  一式）はこのセッションの実行コンテナには無く、2.1〜2.5のAT-SPI関連の
+  修正は実機での再現・再検証ではなくコードレビューと、Xvfb+openboxでの
+  起動・基本操作のスモークテストのみで確認した。11件とも-Wall -Wextra
+  -Wpedantic付きのクリーンビルドで警告0件を維持。
+
 ## 10. 追加提案（耐久テストツールとしての機能拡張案）
 
 v0.40での実機確認（9章）を踏まえた追加提案。**以下の6件はv0.41で全て実装済み**

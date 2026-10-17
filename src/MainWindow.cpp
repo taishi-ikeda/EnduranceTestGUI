@@ -240,7 +240,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // 不具合報告2.5: a brand-new, never-touched session also has nothing
     // to lose -- see m_lastSavedPresetJson's own comment. Captured last,
     // after buildUi() above has given every widget its default value.
-    m_lastSavedPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
+    // 不具合報告3.1: via buildPresetJsonForDirtyCheck() -- see its own
+    // comment -- not the raw buildPresetJson().
+    m_lastSavedPresetJson = QJsonDocument(buildPresetJsonForDirtyCheck()).toJson(QJsonDocument::Compact);
 }
 
 void MainWindow::buildUi()
@@ -1327,7 +1329,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // what was last saved/loaded -- see m_lastSavedPresetJson's own
     // comment for why this compares a full serialization rather than
     // tracking a dirty flag through every individual mutation site.
-    const QByteArray currentPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
+    // 不具合報告3.1: via buildPresetJsonForDirtyCheck() -- see its own
+    // comment -- not the raw buildPresetJson().
+    const QByteArray currentPresetJson =
+        QJsonDocument(buildPresetJsonForDirtyCheck()).toJson(QJsonDocument::Compact);
     if (m_headlessMode || currentPresetJson == m_lastSavedPresetJson) {
         event->accept();
         return;
@@ -3863,18 +3868,58 @@ void MainWindow::applySavedWindowGeometryIfEnabled()
     if (idx < 0 || idx >= m_windows.size())
         return;
     const WindowInfo &target = m_windows[idx];
+    // 不具合報告3.5(低、既存バグ): resizeWindow()/moveWindow() returning true
+    // only means the request itself could be sent (verifyWindowOwner()
+    // passed on the platform backend) -- it says nothing about whether the
+    // window manager or the target app actually honored it (e.g. the
+    // target enforces its own minimum size smaller than what was
+    // requested, or a tiling WM ignores move/resize requests outright).
+    // Re-querying the window's actual bounds afterward -- the same
+    // queryWindowBounds() call onSaveWindowSize()/onSaveWindowPosition()
+    // themselves used to capture m_savedWindowSize/m_savedWindowPos in the
+    // first place, so both sides are measured consistently regardless of
+    // what a given platform's bounds happen to include -- and comparing is
+    // the only way to tell a genuine success from a silently-ignored/
+    // clamped request. A short wait first gives the window manager a
+    // moment to actually process the request (same rationale as the 150ms
+    // wait RandomActionEngine uses before introspecting a just-opened
+    // context menu).
     if (m_hasSavedWindowSize) {
         if (PlatformAutomation::resizeWindow(target.pid, target.windowId, m_savedWindowSize)) {
-            appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
-                          .arg(m_savedWindowSize.width())
-                          .arg(m_savedWindowSize.height()));
+            QThread::msleep(150);
+            QRect actualBounds;
+            if (PlatformAutomation::queryWindowBounds(target.windowId, target.pid, actualBounds) &&
+                actualBounds.size() == m_savedWindowSize) {
+                appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
+                              .arg(m_savedWindowSize.width())
+                              .arg(m_savedWindowSize.height()));
+            } else {
+                appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズへの変更に失敗しました"
+                                                  "（要求: 幅%1 高さ%2、実際: 幅%3 高さ%4）"))
+                              .arg(m_savedWindowSize.width())
+                              .arg(m_savedWindowSize.height())
+                              .arg(actualBounds.width())
+                              .arg(actualBounds.height()));
+            }
         }
     }
     if (m_hasSavedWindowPos) {
         if (PlatformAutomation::moveWindow(target.pid, target.windowId, m_savedWindowPos)) {
-            appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
-                          .arg(m_savedWindowPos.x())
-                          .arg(m_savedWindowPos.y()));
+            QThread::msleep(150);
+            QRect actualBounds;
+            if (PlatformAutomation::queryWindowBounds(target.windowId, target.pid, actualBounds) &&
+                actualBounds.topLeft() == m_savedWindowPos) {
+                appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
+                              .arg(m_savedWindowPos.x())
+                              .arg(m_savedWindowPos.y()));
+            } else {
+                appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置への変更に失敗しました"
+                                                  "（要求: x%1 y%2、実際: x%3 y%4）"))
+                              .arg(m_savedWindowPos.x())
+                              .arg(m_savedWindowPos.y())
+                              .arg(actualBounds.topLeft().x())
+                              .arg(actualBounds.topLeft().y()));
+            }
         }
     }
 }
@@ -4306,6 +4351,13 @@ void MainWindow::onOpenScreenRecordingSettings()
     PlatformAutomation::openScreenRecordingSettings();
 }
 
+QJsonObject MainWindow::buildPresetJsonForDirtyCheck() const
+{
+    QJsonObject obj = buildPresetJson();
+    obj.remove(QStringLiteral("targetAppNameHint"));
+    return obj;
+}
+
 QJsonObject MainWindow::buildPresetJson(bool redactSensitiveText) const
 {
     QJsonObject root;
@@ -4412,8 +4464,12 @@ void MainWindow::onSavePreset()
     const QJsonDocument doc(buildPresetJson());
     file.write(doc.toJson(QJsonDocument::Indented));
     // 不具合報告2.5: mark this exact state as "saved" -- see
-    // m_lastSavedPresetJson's own comment.
-    m_lastSavedPresetJson = doc.toJson(QJsonDocument::Compact);
+    // m_lastSavedPresetJson's own comment. 不具合報告3.1: via
+    // buildPresetJsonForDirtyCheck() -- see its own comment -- not `doc`
+    // itself, which (unlike the dirty-check snapshot) keeps
+    // targetAppNameHint for the file written to disk above.
+    m_lastSavedPresetJson =
+        QJsonDocument(buildPresetJsonForDirtyCheck()).toJson(QJsonDocument::Compact);
     appendLog(I18n::t(QStringLiteral("テスト設定を保存しました: %1")).arg(path));
 }
 
@@ -4578,8 +4634,11 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
     // byte-for-byte from the file -- e.g. targetAppNameHint only resolves
     // to a real selection if a matching window happens to be running right
     // now), not the raw file content, since that's what closeEvent() will
-    // actually compare against later.
-    m_lastSavedPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
+    // actually compare against later. 不具合報告3.1: via
+    // buildPresetJsonForDirtyCheck() -- see its own comment -- so a target
+    // app that gets auto-selected (or deselected) *after* this snapshot is
+    // taken, with nothing else changed, doesn't look like unsaved edits.
+    m_lastSavedPresetJson = QJsonDocument(buildPresetJsonForDirtyCheck()).toJson(QJsonDocument::Compact);
     return true;
 }
 

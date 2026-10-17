@@ -85,12 +85,33 @@ QRegion allScreensRegion()
 // very long entry, e.g. an 8192-character stress-test string, doesn't
 // blow up a single log line), but this exists specifically to record
 // *which* string a given action actually sent, not to browse the corpus.
+//
+// 不具合報告3.2(中、上記2.3修正の回帰): the fuzz corpus is adversarial by
+// design (SPEC.md「文字種」のランダム生成は制御文字域も含む) and this
+// preview used to pass it through to the log/log file verbatim once
+// truncated -- a raw CR/LF breaks a single log line into several, and a
+// raw ESC can inject an arbitrary terminal escape sequence into whatever
+// is displaying the log. Escaping every C0 control character (0x00-0x1F)
+// and DEL (0x7F) to a `\xHH`-style sequence before truncating keeps the
+// *visual* length budget still meaningful (escaped runs are rare in
+// practice -- most corpus entries are printable) while guaranteeing the
+// result is always a single, safe line.
 QString fuzzStringLogPreview(const QString &text)
 {
+    QString escaped;
+    escaped.reserve(text.size());
+    for (const QChar &ch : text) {
+        const ushort code = ch.unicode();
+        if (code <= 0x1F || code == 0x7F)
+            escaped += QStringLiteral("\\x%1").arg(code, 2, 16, QLatin1Char('0'));
+        else
+            escaped += ch;
+    }
+
     constexpr int kMaxPreviewChars = 80;
-    if (text.size() <= kMaxPreviewChars)
-        return text;
-    return I18n::t(QStringLiteral("%1...(全%2文字)")).arg(text.left(kMaxPreviewChars)).arg(text.size());
+    if (escaped.size() <= kMaxPreviewChars)
+        return escaped;
+    return I18n::t(QStringLiteral("%1...(全%2文字)")).arg(escaped.left(kMaxPreviewChars)).arg(text.size());
 }
 }  // namespace
 
@@ -294,6 +315,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
+    m_noValidPointOffScreenStrikes = 0;
     m_sequenceLoopCount = 0;
     m_pausedElapsedMs = 0;
     m_elapsed.restart();
@@ -1172,9 +1194,12 @@ bool RandomActionEngine::pointExcluded(const QPoint &pt, const QList<QRect> &exc
 }
 
 QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
-                                            const QList<QRect> &excludeRegions, bool &ok)
+                                            const QList<QRect> &excludeRegions, bool &ok,
+                                            bool *outRegionOffScreen)
 {
     ok = false;
+    if (outRegionOffScreen)
+        *outRegionOffScreen = false;
     // 不具合報告1.1(重大): includeRegions is the target window's (or named
     // region's) rectangle as-is, which can extend past every connected
     // screen's real pixel bounds -- e.g. a window taller than the display.
@@ -1194,8 +1219,18 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
     qint64 totalArea = 0;
     for (const QRect &r : clampedRegions)
         totalArea += qint64(qMax(1, r.width())) * qint64(qMax(1, r.height()));
-    if (totalArea <= 0)
+    if (totalArea <= 0) {
+        // 不具合報告2.6(中): distinct from "every candidate point landed in
+        // an exclude region" below -- this means includeRegions itself had
+        // no intersection with any real screen at all (the target
+        // window/named region is currently entirely off-screen), which the
+        // caller needs to tell apart to log an accurate reason instead of
+        // the misleading "除外領域が広すぎる" message this codepath used to
+        // share with that other case.
+        if (outRegionOffScreen)
+            *outRegionOffScreen = true;
         return {};
+    }
 
     constexpr int kMaxAttempts = 30;
     for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
@@ -1392,6 +1427,7 @@ void RandomActionEngine::advanceToNextStep()
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
+    m_noValidPointOffScreenStrikes = 0;
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
     if (m_currentStepIndex == 0) {
         ++m_sequenceLoopCount;
@@ -1428,15 +1464,32 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
     bool selected = false;
     if (params.enableContextMenuSelection) {
         const QStringList openItems = PlatformAutomation::listOpenContextMenuItems(m_config.targetPid);
+        // 不具合報告2.4(高): on a Qt target, openItems is always empty (see
+        // listOpenContextMenuItems()'s own comment -- AT-SPI can't see a Qt
+        // QMenu popup at all on this Qt/at-spi2 version), so gating
+        // candidate selection on it would mean a context-menu step
+        // configured against a Qt target could structurally never select
+        // anything, even though clickContextMenuItem()/
+        // clickContextMenuItemAt() themselves now have a keyboard-based
+        // fallback (gated on their own independent "is a popup actually
+        // showing" check) for exactly this case. When nothing could be
+        // introspected, fall back to the user's own configured names/
+        // indices directly instead of requiring them to first appear in
+        // openItems.
+        const bool menuIntrospected = !openItems.isEmpty();
 
         if (params.contextMenuSelectionMode == ContextMenuSelectionMode::ByName) {
-            QStringList matches;
-            for (const QString &name : openItems) {
-                if (params.contextMenuItemNames.contains(name))
-                    matches.append(name);
+            QStringList candidates;
+            if (menuIntrospected) {
+                for (const QString &name : openItems) {
+                    if (params.contextMenuItemNames.contains(name))
+                        candidates.append(name);
+                }
+            } else {
+                candidates = params.contextMenuItemNames;
             }
-            if (!matches.isEmpty()) {
-                const QString chosen = matches[int(m_rng.bounded(quint32(matches.size())))];
+            if (!candidates.isEmpty()) {
+                const QString chosen = candidates[int(m_rng.bounded(quint32(candidates.size())))];
                 selected = PlatformAutomation::clickContextMenuItem(chosen, m_config.targetPid);
                 if (selected)
                     desc += I18n::t(QStringLiteral(" → メニュー項目「%1」を選択")).arg(chosen);
@@ -1445,8 +1498,11 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
             QList<int> validIndices;
             for (int oneBased : params.contextMenuIndices) {
                 const int zeroBased = oneBased - 1;
-                if (zeroBased >= 0 && zeroBased < openItems.size())
-                    validIndices.append(zeroBased);
+                if (zeroBased < 0)
+                    continue;
+                if (menuIntrospected && zeroBased >= openItems.size())
+                    continue;
+                validIndices.append(zeroBased);
             }
             if (!validIndices.isEmpty()) {
                 const int chosen = validIndices[int(m_rng.bounded(quint32(validIndices.size())))];
@@ -1539,6 +1595,16 @@ constexpr int kMaxFuzzNoCandidatesStrikes = 5;
 // exposing accessibility information at all (e.g. AT-SPI not running in
 // this environment), which will not change between one tick and the next.
 constexpr int kMaxFuzzAllFieldsNoMatchStrikes = 5;
+
+// 不具合報告2.6(中): after this many consecutive ticks of pickRandomPoint()
+// finding its operation region entirely off-screen (not merely fully
+// covered by exclude regions), give up and treat it as an anomaly -- same
+// "static configuration mistake, not a transient condition" rationale as
+// kMaxFuzzNoCandidatesStrikes just above (the window would have to move
+// back on-screen for this to resolve itself, which the engine has no way
+// to wait for indefinitely without looking exactly like the silent
+// infinite-skip loop this fixes).
+constexpr int kMaxNoValidPointOffScreenStrikes = 5;
 }  // namespace
 
 bool RandomActionEngine::isTargetStillAlive() const
@@ -2262,6 +2328,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     const ActionKind kind = pickWeightedActionKind(step);
 
     bool ok = false;
+    bool regionOffScreen = false;
     // A sweep-type NamedRegion (m_currentRegionIsSweepTarget, set by
     // resolveStepRegion() just above) defines the only sequence of points
     // that makes sense for it (it has no rectangle a random point could be
@@ -2271,7 +2338,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
     // chooses which of the region's own two offered behaviors to use --
     // see RegionStep::sweepRegionUseRandomPoint's own comment.
     const QPoint pt = !m_currentRegionIsSweepTarget
-                           ? pickRandomPoint(includeRegions, excludeRegions, ok)
+                           ? pickRandomPoint(includeRegions, excludeRegions, ok, &regionOffScreen)
                        : step.sweepRegionUseRandomPoint
                            ? pickRandomPointOnSweepPath(m_currentRegionSweepWaypoints,
                                                          m_currentRegionSweepJitterPx, excludeRegions, ok)
@@ -2282,10 +2349,35 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                                  kind == ActionKind::Drag || kind == ActionKind::ScrollUp ||
                                  kind == ActionKind::ScrollDown || kind == ActionKind::ScrollHorizontal;
     if (!ok && kindNeedsPoint) {
-        emit logMessage(
-            I18n::t(QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）")));
+        // 不具合報告2.6(中): regionOffScreen (only ever set when
+        // !m_currentRegionIsSweepTarget -- see pickRandomPoint()'s own
+        // comment) means the operation region itself has no intersection
+        // with any real screen right now, a structurally different and far
+        // more informative cause than "every candidate landed in an
+        // exclude region". Escalate past kMaxNoValidPointOffScreenStrikes
+        // consecutive occurrences instead of retrying forever: unlike a
+        // transiently-over-broad exclude region, a region parked entirely
+        // off-screen will not resolve itself without the target window
+        // moving back on screen, which this engine has no way to wait for
+        // indefinitely.
+        if (regionOffScreen) {
+            ++m_noValidPointOffScreenStrikes;
+            if (m_noValidPointOffScreenStrikes >= kMaxNoValidPointOffScreenStrikes) {
+                doStop(I18n::t(QStringLiteral("%1の操作領域が画面外にあるため、安全のためテストを停止しました"))
+                           .arg(stepLabel),
+                       /*isAnomaly=*/true);
+                return ActionOutcome::StoppedEngine;
+            }
+            emit logMessage(
+                I18n::t(QStringLiteral("有効な座標が見つかりませんでした（操作領域が画面外にあります）")));
+        } else {
+            m_noValidPointOffScreenStrikes = 0;
+            emit logMessage(
+                I18n::t(QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）")));
+        }
         return ActionOutcome::SkippedNoCount;
     }
+    m_noValidPointOffScreenStrikes = 0;
 
     // Safety net: right before actually dispatching anything, confirm it
     // will land on the intended target and not some other window/app --
@@ -2911,7 +3003,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             const QPoint rel = pt - windowBounds.topLeft();
             desc += I18n::t(QStringLiteral(" [対象ウィンドウ相対: (%1, %2)]")).arg(rel.x()).arg(rel.y());
         }
-        const QString widgetName = PlatformAutomation::accessibleNameAtPoint(pt);
+        const QString widgetName = PlatformAutomation::accessibleNameAtPoint(pt, m_config.targetPid);
         if (!widgetName.isEmpty())
             desc += QStringLiteral(" [%1]").arg(widgetName);
     }

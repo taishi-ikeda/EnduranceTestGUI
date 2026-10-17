@@ -110,7 +110,11 @@ void InputRecorder::handlePossibleMenuSelectionClick(const QPoint &screenPos)
 {
     m_menuGraceTimer->stop();
     m_awaitingMenuSelection = false;
-    const QString itemName = PlatformAutomation::accessibleNameAtPoint(screenPos);
+    // No target pid is tracked here (this recorder observes system-wide
+    // input, including into whichever dialog happens to be focused, not
+    // just a single known target process) -- -1 preserves the previous
+    // unscoped lookup.
+    const QString itemName = PlatformAutomation::accessibleNameAtPoint(screenPos, -1);
     if (!itemName.isEmpty()) {
         // The whole right-click-then-select gesture becomes one MenuSelect
         // action, anchored at the right-click's own position (matching a

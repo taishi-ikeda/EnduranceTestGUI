@@ -345,6 +345,21 @@ private:
     // file; never shows any UI itself.
     bool loadPresetFromPath(const QString &path, QString &errorMessage);
 
+    // 不具合報告3.1(中、2.5修正の回帰): m_lastSavedPresetJson's dirty-check
+    // snapshot, built like buildPresetJson() but with "targetAppNameHint"
+    // removed -- that field is explicitly "reference only" (see
+    // buildPresetJson()'s own comment: pids/target selection aren't stable
+    // across runs) and can change by itself the instant a target app gets
+    // auto-selected (or deselected again) by refreshTargetList(), with
+    // nothing the user actually configured having changed at all. Comparing
+    // the raw buildPresetJson() output made that alone enough to make a
+    // pristine, never-touched setup look "unsaved". Used only for
+    // m_lastSavedPresetJson's own snapshot/comparison; the file
+    // onSavePreset() writes and the statistics fingerprint
+    // (updateStatisticsDisplay()) still go through the unmodified
+    // buildPresetJson(), where targetAppNameHint remains genuinely useful.
+    QJsonObject buildPresetJsonForDirtyCheck() const;
+
     // 不具合報告2.5「終了時の未保存警告が、保存した直後でも出る」:
     // closeEvent() used to decide whether to warn purely from whether
     // m_steps/m_setupActions/m_namedRegions were non-empty -- which is true

@@ -380,6 +380,10 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("最小化"), QStringLiteral("Minimize")},
         {QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）"),
          QStringLiteral("No valid coordinate could be found (the exclude region may be too large)")},
+        {QStringLiteral("有効な座標が見つかりませんでした（操作領域が画面外にあります）"),
+         QStringLiteral("No valid coordinate could be found (the operation region is off-screen)")},
+        {QStringLiteral("%1の操作領域が画面外にあるため、安全のためテストを停止しました"),
+         QStringLiteral("The test was stopped for safety because %1's operation region is off-screen")},
         {QStringLiteral("権限が必要です"), QStringLiteral("Permission Required")},
         {QStringLiteral("権限設定を開く"), QStringLiteral("Open Permission Settings")},
         {QStringLiteral("現在の起動時セットアップ・操作領域・ステップ構成は読み込んだ内容で上書きされます。よろしいですか？"),
@@ -971,6 +975,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ウィンドウサイズの変更に失敗しました。"), QStringLiteral("Failed to change the window size.")},
         {QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"),
          QStringLiteral("Changed to the saved window size: %1 x %2")},
+        {QStringLiteral("保存したウィンドウサイズへの変更に失敗しました（要求: 幅%1 高さ%2、実際: 幅%3 高さ%4）"),
+         QStringLiteral("Failed to change to the saved window size (requested: %1 x %2, actual: %3 x %4)")},
 
         // v0.73: 対象ツールのウィンドウ位置保存・復元機能
         {QStringLiteral("現在のウィンドウ位置を保存"), QStringLiteral("Save current window position")},
@@ -985,6 +991,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ウィンドウ位置の変更に失敗しました。"), QStringLiteral("Failed to change the window position.")},
         {QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"),
          QStringLiteral("Changed to the saved window position: (%1, %2)")},
+        {QStringLiteral("保存したウィンドウ位置への変更に失敗しました（要求: x%1 y%2、実際: x%3 y%4）"),
+         QStringLiteral("Failed to change to the saved window position (requested: (%1, %2), actual: (%3, %4))")},
 
         // v0.74: 連続実行時に保存済みのウィンドウ位置・サイズへ変更するオプション
         {QStringLiteral("連続実行時に保存済みのウィンドウ位置・サイズへ変更する"),

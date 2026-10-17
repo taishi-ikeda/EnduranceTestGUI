@@ -846,7 +846,7 @@ void dismissContextMenu()
     CFRelease(up);
 }
 
-QString accessibleNameAtPoint(const QPoint &pt)
+QString accessibleNameAtPoint(const QPoint &pt, qint64 expectedOwnerPid)
 {
     if (accessibilityFeaturesDisabled())
         return QString();
@@ -857,6 +857,18 @@ QString accessibleNameAtPoint(const QPoint &pt)
     CFRelease(systemWide);
     if (err != kAXErrorSuccess || !element)
         return QString();
+
+    // SPEC.md 不具合報告2.5相当(Linux版の修正に合わせたクロスプラットフォーム
+    // 対応): expectedOwnerPidが分かっている場合、ヒットした要素が別アプリに
+    // 属していないか確認する -- hitTestDesktop()のPIDスコープと同じ考え方。
+    if (expectedOwnerPid > 0) {
+        pid_t ownerPid = 0;
+        if (AXUIElementGetPid(element, &ownerPid) != kAXErrorSuccess ||
+            qint64(ownerPid) != expectedOwnerPid) {
+            CFRelease(element);
+            return QString();
+        }
+    }
 
     QString result;
     CFStringRef title = nullptr;

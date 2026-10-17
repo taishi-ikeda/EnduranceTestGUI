@@ -448,7 +448,7 @@ private:
     void recordMouseActionMarker(MouseActionMarker::Kind kind, const QPoint &from, const QPoint &to,
                                   Qt::MouseButton button);
     QPoint pickRandomPoint(const QList<QRect> &includeRegions, const QList<QRect> &excludeRegions,
-                           bool &ok);
+                           bool &ok, bool *outRegionOffScreen = nullptr);
     bool pointExcluded(const QPoint &pt, const QList<QRect> &excludeRegions) const;
     // Counterpart to pickRandomPoint() above (SPEC.md 10) for a sweep-type
     // NamedRegion (SPEC.md 追加実装依頼「操作領域を点列（スイープ）で指定」/
@@ -797,6 +797,19 @@ private:
     // successfully; mirrors m_popupDialogWaitStrikes's own retry-then-give-
     // up role.
     int m_minimizedWindowWaitStrikes = 0;
+
+    // 不具合報告2.6(中、1.1の画面外クランプ修正の副作用): consecutive ticks
+    // in a row pickRandomPoint() found its (clamped-to-the-real-screens)
+    // candidate area empty -- i.e. the step's operation region is currently
+    // entirely off-screen, not merely fully covered by exclude regions
+    // (runOneAction() tells the two apart via pickRandomPoint()'s
+    // outRegionOffScreen and logs/escalates accordingly). Same "static
+    // condition, not a transient one" rationale as m_fuzzNoCandidatesStrikes:
+    // left unbounded, a region that never comes back on-screen would log
+    // the same skip message and do nothing, tick after tick, for the rest
+    // of the run. Reset to 0 in start(), advanceToNextStep(), and the
+    // moment a point is found again.
+    int m_noValidPointOffScreenStrikes = 0;
 
     // SPEC.md 追加実装依頼「名前付きオブジェクト」: per-NamedRegion cache of
     // its last-resolved accessible object, keyed by NamedRegion::name, so a

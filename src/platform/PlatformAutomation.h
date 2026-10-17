@@ -353,10 +353,13 @@ bool maximizeWindow(qint64 pid, quint32 windowId);
 // verifies the topmost window it treats as "the menu" is actually owned
 // by that pid before introspecting/clicking it (returning as if no menu
 // were found otherwise), so a menu belonging to some other app that
-// happened to be topmost isn't mistaken for the target's. (On Linux, the
-// AT-SPI search is desktop-wide and not scoped to a pid; the caller's own
-// active-process focus check is the primary guard there -- see SPEC.md
-// "既知の制約".)
+// happened to be topmost isn't mistaken for the target's. On Linux,
+// findOpenMenu() itself is a desktop-wide, unscoped tree search (SPEC.md
+// 不具合報告2.4: a Qt QMenu popup is not reliably exposed as an AT-SPI
+// child of its owning application at all, so pid-scoping the search would
+// not even help there -- see Automation_linux.cpp's own comment on the
+// keyboard-navigation fallback these three functions fall back to when no
+// menu is found via AT-SPI).
 
 // Names of the items in the currently-open popup/context menu, if any.
 // Returns an empty list if no menu is open or it could not be introspected.
@@ -381,9 +384,14 @@ void dismissContextMenu();
 // context-menu functions above. On macOS the frontmost window owned by
 // `expectedOwnerPid` is searched (same "assume frontmost == the dialog
 // that just appeared" technique as findOpenMenuElement()); on Linux the
-// search is desktop-wide and not pid-scoped, same caveat as
-// listOpenContextMenuItems() above -- the caller's own active-process
-// check (RandomActionEngine, right before calling this) is the guard.
+// AT-SPI search is scoped to `expectedOwnerPid`'s own application node
+// (SPEC.md 不具合報告2.2: an unscoped desktop-wide search could press a
+// same-named button belonging to an unrelated, unrelated-to-the-test app
+// instead of the target's own dialog). Also unconditionally excludes this
+// process's own AT-SPI application node on Linux regardless of
+// `expectedOwnerPid` (不具合報告2.1 -- see Automation_linux.cpp's
+// scopedApplications() comment for why a self-query is actively dangerous,
+// not just incorrect).
 // Returns false if no matching, activatable widget could be found.
 bool clickButtonByName(const QString &buttonName, qint64 expectedOwnerPid);
 
@@ -401,9 +409,14 @@ bool clickButtonByName(const QString &buttonName, qint64 expectedOwnerPid);
 // coordinates that mean nothing without also knowing the window's on-screen
 // position at that exact moment. Uses the same accessibility backend as
 // listOpenContextMenuItems() above (macOS Accessibility API / Linux AT-SPI)
-// and is just as best-effort/unscoped -- not guaranteed to work with every
-// toolkit, and on Linux not scoped to a particular process.
-QString accessibleNameAtPoint(const QPoint &pt);
+// and is just as best-effort -- not guaranteed to work with every toolkit.
+// `expectedOwnerPid` scopes the hit-test to that application on both
+// platforms (SPEC.md 不具合報告2.5: on Linux this also fixed the underlying
+// bug that kept this function from ever returning anything for a Qt
+// target -- see Automation_linux.cpp's comment), the same way
+// accessibleObjectAtPoint() below already does; pass -1 if the owning
+// process isn't known yet.
+QString accessibleNameAtPoint(const QPoint &pt, qint64 expectedOwnerPid);
 
 // Searches for a native crash report or core dump generated recently for
 // `pid`/`appName` (macOS: ~/Library/Logs/DiagnosticReports; Linux:
@@ -512,12 +525,15 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-// Searches the target process's accessibility tree (desktop-wide on Linux,
-// same not-pid-scoped caveat as listOpenContextMenuItems(); the frontmost
-// window owned by expectedOwnerPid on macOS, same technique as
-// findFrontmostDialogElement()) for an object whose role and accessible
-// name both match exactly, returning the occurrenceIndex'th such match
-// (0-based) if more than one exists. Returns an invalid handle (see
+// Searches the target process's accessibility tree -- on Linux, scoped to
+// expectedOwnerPid's own AT-SPI application node (SPEC.md 不具合報告2.3: an
+// unscoped desktop-wide search could resolve to a same-named widget
+// belonging to a different, possibly hidden-behind-the-target app instead
+// of the intended one); the frontmost window owned by expectedOwnerPid on
+// macOS, same technique as findFrontmostDialogElement() -- for an object
+// whose role and accessible name both match exactly, returning the
+// occurrenceIndex'th such match (0-based) if more than one exists. Returns
+// an invalid handle (see
 // AccessibleObjectHandle::isValid()) if none match, if accessibility is
 // disabled (setAccessibilityFeaturesDisabled(true)), or if this platform/
 // environment cannot use its accessibility backend at all.

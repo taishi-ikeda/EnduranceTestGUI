@@ -254,6 +254,8 @@ void RandomActionEngine::start(const TestConfig &config)
     m_fuzzAllFieldsCharIndex = 0;
     m_fuzzAllFieldsFieldsFuzzed = 0;
     m_fuzzAllFieldsInactiveStrikes = 0;
+    m_fuzzNoCandidatesStrikes = 0;
+    m_fuzzAllFieldsNoMatchStrikes = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
@@ -1454,6 +1456,26 @@ constexpr int kMaxTypingBurstInactiveStrikes = 10;
 // kMaxTypingBurstInactiveStrikes just above, since continueFuzzStringKeyByKey()
 // runs the exact same per-tick active-process safety check.
 constexpr int kMaxFuzzStringInactiveStrikes = 10;
+
+// 不具合報告(無人実行・共有環境で静かに眠るもの) 1.4: after this many
+// consecutive ticks of ActionKind::FuzzString or ActionKind::
+// FuzzAllFieldsInRegion finding no fuzz string candidate to use at all
+// (empty corpus, or an empty selected-entries subset), give up and treat it
+// as a setup problem rather than retry forever -- unlike most other
+// SkippedNoCount causes in this file, an empty candidate list cannot
+// resolve itself on some later tick; it's a static configuration mistake,
+// not a transient condition. Low (vs. e.g. kMaxMinimizedWindowWaitStrikes)
+// since there is nothing here actually worth waiting out.
+constexpr int kMaxFuzzNoCandidatesStrikes = 5;
+
+// Symmetric counterpart for ActionKind::FuzzAllFieldsInRegion finding zero
+// editable widgets anywhere in its resolved region -- same "static
+// condition, not a transient one" rationale as
+// kMaxFuzzNoCandidatesStrikes just above. The common real cause (see
+// SPEC.md's own documented limitation) is the target app/toolkit not
+// exposing accessibility information at all (e.g. AT-SPI not running in
+// this environment), which will not change between one tick and the next.
+constexpr int kMaxFuzzAllFieldsNoMatchStrikes = 5;
 }  // namespace
 
 bool RandomActionEngine::isTargetStillAlive() const
@@ -2431,10 +2453,19 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
         const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
         if (candidates.isEmpty()) {
+            ++m_fuzzNoCandidatesStrikes;
+            if (m_fuzzNoCandidatesStrikes >= kMaxFuzzNoCandidatesStrikes) {
+                doStop(I18n::t(QStringLiteral("%1: ファズ文字列の候補がないため停止しました（コーパスが空、"
+                                      "または選択された候補がありません。設定を確認してください）"))
+                           .arg(stepLabel),
+                       /*isAnomaly=*/true);
+                return ActionOutcome::StoppedEngine;
+            }
             emit logMessage(I18n::t(QStringLiteral(
                 "ファズ文字列の候補がありません（コーパスが空、または選択された候補がありません）")));
             return ActionOutcome::SkippedNoCount;
         }
+        m_fuzzNoCandidatesStrikes = 0;
         const QString fuzzText = candidates[int(m_rng.bounded(quint32(candidates.size())))];
 
         FuzzStringDeliveryMode mode = params.fuzzStringDeliveryMode;
@@ -2532,19 +2563,39 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             matchedFields << field.bounds;
         }
         if (matchedFields.isEmpty()) {
+            ++m_fuzzAllFieldsNoMatchStrikes;
+            if (m_fuzzAllFieldsNoMatchStrikes >= kMaxFuzzAllFieldsNoMatchStrikes) {
+                doStop(I18n::t(QStringLiteral("%1: この操作領域内に入力可能な項目が一度も見つからないため"
+                                      "停止しました（アクセシビリティ機能が無効/未対応か、対象アプリが"
+                                      "このツールキットのアクセシビリティ情報を公開していない可能性が"
+                                      "あります。設定を確認してください）"))
+                           .arg(stepLabel),
+                       /*isAnomaly=*/true);
+                return ActionOutcome::StoppedEngine;
+            }
             emit logMessage(I18n::t(QStringLiteral(
                 "この操作領域内に入力可能な項目が見つかりませんでした（アクセシビリティ機能が無効/"
                 "未対応か、対象アプリがこのツールキットのアクセシビリティ情報を公開していない可能性があります）")));
             return ActionOutcome::SkippedNoCount;
         }
+        m_fuzzAllFieldsNoMatchStrikes = 0;
 
         const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
         const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
         if (candidates.isEmpty()) {
+            ++m_fuzzNoCandidatesStrikes;
+            if (m_fuzzNoCandidatesStrikes >= kMaxFuzzNoCandidatesStrikes) {
+                doStop(I18n::t(QStringLiteral("%1: ファズ文字列の候補がないため停止しました（コーパスが空、"
+                                      "または選択された候補がありません。設定を確認してください）"))
+                           .arg(stepLabel),
+                       /*isAnomaly=*/true);
+                return ActionOutcome::StoppedEngine;
+            }
             emit logMessage(I18n::t(QStringLiteral(
                 "ファズ文字列の候補がありません（コーパスが空、または選択された候補がありません）")));
             return ActionOutcome::SkippedNoCount;
         }
+        m_fuzzNoCandidatesStrikes = 0;
 
         FuzzStringDeliveryMode mode = params.fuzzStringDeliveryMode;
         if (mode == FuzzStringDeliveryMode::Random) {

@@ -718,6 +718,32 @@ private:
     // scoped to this sweep's own per-tick active-process safety check.
     int m_fuzzAllFieldsInactiveStrikes = 0;
 
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.4: both ActionKind::
+    // FuzzString and ActionKind::FuzzAllFieldsInRegion used to return
+    // ActionOutcome::SkippedNoCount, unconditionally and with no limit,
+    // whenever there was no fuzz string candidate to use (an empty corpus/
+    // selection) -- a condition that, unlike most other SkippedNoCount
+    // causes elsewhere in this file, cannot resolve itself on a later tick:
+    // the corpus/selection doesn't change mid-run. Left alone, a step with
+    // only this action kind enabled just logs the same skip message, tick
+    // after tick, for the step's entire run-up-to-the-limits duration,
+    // finishing with an action count of 0 and nothing to show for it.
+    // Counts consecutive hits of that specific condition (across both
+    // action kinds, since it's the exact same underlying problem either
+    // way) and escalates to doStop() past kMaxFuzzNoCandidatesStrikes,
+    // same shape as m_minimizedWindowWaitStrikes. Reset to 0 in start() and
+    // the moment either case finds a non-empty candidate list.
+    int m_fuzzNoCandidatesStrikes = 0;
+    // Same role as m_fuzzNoCandidatesStrikes just above, but specifically
+    // for ActionKind::FuzzAllFieldsInRegion finding zero editable widgets
+    // in its resolved region -- the common real-world cause (SPEC.md's own
+    // "known limitation" notes) is the target app/toolkit not exposing
+    // accessibility information at all (e.g. AT-SPI not running), which is
+    // just as static a condition as an empty corpus and just as unable to
+    // resolve itself on a later tick. Reset to 0 in start() and the moment
+    // this check finds at least one matching field.
+    int m_fuzzAllFieldsNoMatchStrikes = 0;
+
     // Index into the current top-level task step's taskMembers, i.e. how
     // many of its members have run so far in the pass currently in
     // progress. Reset to 0 by advanceToNextStep() (both when a task step

@@ -860,6 +860,22 @@ private:
     // whole invocation, and decides the process's final exit code.
     bool m_headlessMode = false;
     bool m_headlessAnomalyOccurred = false;
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.1: set by beginRun()
+    // on any of its own non-interactive failure paths (missing
+    // accessibility trust, a config error such as a step referencing a
+    // named operation region that no longer exists, a failed preflight
+    // safety self-test) -- a run that never actually started is not a
+    // clean/successful headless invocation, but m_headlessAnomalyOccurred
+    // alone can never reflect that, since it is only ever set from a real
+    // RunSummary::anomaly produced by a run that got far enough to finish
+    // one. OR'd in by checkHeadlessCompletion() alongside
+    // m_headlessAnomalyOccurred when deciding the process's exit code, so a
+    // caller/CI script can no longer mistake "nothing ran" for "it ran and
+    // passed" just because the exit code came back 0. Never cleared (same
+    // lifecycle as m_headlessAnomalyOccurred) -- one bad attempt within an
+    // invocation's --repeat loop is enough to make the whole invocation's
+    // exit code non-zero.
+    bool m_headlessSetupError = false;
     // Polls (via onBatchWaitTick()) for the target app to reappear between
     // batch runs when it isn't already back the instant one finishes --
     // whether the user relaunches it by hand or m_targetLaunchCommandEdit's

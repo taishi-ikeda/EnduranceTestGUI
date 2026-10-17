@@ -2728,6 +2728,23 @@ void MainWindow::updateGroupButtonsEnabled()
 
 bool MainWindow::beginRun(bool interactive)
 {
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.1: capture the
+    // currently selected target's pid *before* any of this function's own
+    // validation can fail, so checkHeadlessCompletion() below always has a
+    // pid to clean up -- even when this particular attempt never gets off
+    // the ground. By the time beginRun() is reached in headless/連続実行,
+    // killTargetThenRelaunchForContinuousRun()/onBatchWaitTick() have
+    // already launched and reselected the target app for this attempt, so
+    // it is already running; this used to only be set after a *successful*
+    // buildConfigFromUi() below, so a config error (an invalid named-region
+    // reference, for example) left that already-launched target orphaned,
+    // with no pid on record for anything to ever terminate.
+    {
+        const int idx = m_targetCombo->currentIndex();
+        if (idx >= 0 && idx < m_windows.size())
+            m_lastRunTargetPid = m_windows[idx].pid;
+    }
+
     if (!PlatformAutomation::isAccessibilityTrusted(true)) {
         if (interactive) {
             QMessageBox::warning(this, I18n::t(QStringLiteral("権限が必要です")),
@@ -2737,6 +2754,9 @@ bool MainWindow::beginRun(bool interactive)
         } else {
             appendLog(I18n::t(QStringLiteral("連続実行: 権限が確認できなかったため中断しました")));
             m_batchModeActive = false;
+            // 1.1: a run that never started is not success -- see
+            // checkHeadlessCompletion()'s own comment on m_headlessSetupError.
+            m_headlessSetupError = true;
             checkHeadlessCompletion();
         }
         return false;
@@ -2751,6 +2771,7 @@ bool MainWindow::beginRun(bool interactive)
         else {
             appendLog(I18n::t(QStringLiteral("連続実行: 設定エラーのため中断しました: %1")).arg(errorMessage));
             m_batchModeActive = false;
+            m_headlessSetupError = true;
             checkHeadlessCompletion();
         }
         return false;
@@ -2790,6 +2811,7 @@ bool MainWindow::beginRun(bool interactive)
             } else {
                 appendLog(I18n::t(QStringLiteral("連続実行: 安全確認に失敗したため中断しました")));
                 m_batchModeActive = false;
+                m_headlessSetupError = true;
                 checkHeadlessCompletion();
             }
             return false;
@@ -3381,7 +3403,16 @@ void MainWindow::checkHeadlessCompletion()
                        .arg(m_lastRunTargetPid));
         PlatformAutomation::terminateProcess(m_lastRunTargetPid);
     }
-    QCoreApplication::exit(m_headlessAnomalyOccurred ? 1 : 0);
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.1: m_headlessAnomalyOccurred
+    // alone used to decide this -- but it is only ever set by
+    // onRunSummaryReady() from an actual RunSummary::anomaly, i.e. only for
+    // a run that got far enough to produce one. beginRun() setting
+    // m_headlessSetupError on every one of its own non-interactive failure
+    // paths (missing accessibility trust, a config error, a failed safety
+    // self-test) means a run that never started at all is no longer
+    // indistinguishable, from the calling shell/CI's point of view, from a
+    // genuinely clean run that simply had nothing go wrong.
+    QCoreApplication::exit((m_headlessAnomalyOccurred || m_headlessSetupError) ? 1 : 0);
 }
 
 void MainWindow::waitForTargetThenContinueBatch()

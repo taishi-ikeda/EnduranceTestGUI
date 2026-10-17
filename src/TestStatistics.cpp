@@ -93,6 +93,7 @@ QString TestStatistics::historyFilePath()
 void TestStatistics::reload()
 {
     m_records.clear();
+    m_loadedByteSize = 0;
     QFile file(historyFilePath());
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return;
@@ -105,22 +106,64 @@ void TestStatistics::reload()
         if (doc.isObject())
             m_records.append(recordFromJson(doc.object()));
     }
+    m_loadedByteSize = file.size();
+}
+
+void TestStatistics::syncFromDisk() const
+{
+    QFile file(historyFilePath());
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+    const qint64 currentSize = file.size();
+    if (currentSize == m_loadedByteSize)
+        return;
+    if (currentSize < m_loadedByteSize) {
+        // The log is shorter than what we already parsed -- some process
+        // (this one or another) called resetFingerprint()/writeAll() and
+        // rewrote it from scratch, so resuming from m_loadedByteSize would
+        // skip content or read garbage. Only a full reload can make sense
+        // of it; const_cast is safe here, reload() only touches the
+        // `mutable` cache fields.
+        file.close();
+        const_cast<TestStatistics *>(this)->reload();
+        return;
+    }
+    if (!file.seek(m_loadedByteSize))
+        return;
+    QTextStream stream(&file);
+    while (!stream.atEnd()) {
+        const QString line = stream.readLine();
+        if (line.trimmed().isEmpty())
+            continue;
+        const QJsonDocument doc = QJsonDocument::fromJson(line.toUtf8());
+        if (doc.isObject())
+            m_records.append(recordFromJson(doc.object()));
+    }
+    m_loadedByteSize = currentSize;
 }
 
 void TestStatistics::addRun(const RunRecord &record)
 {
+    // Pick up anything another process appended first -- otherwise the
+    // file.size() captured below after our own write would silently include
+    // those unread bytes too, permanently hiding them from every future
+    // syncFromDisk() call (it would believe it had already read past them).
+    syncFromDisk();
     const QString path = historyFilePath();
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile file(path);
     if (file.open(QIODevice::Append | QIODevice::Text)) {
         QTextStream stream(&file);
         stream << QJsonDocument(recordToJson(record)).toJson(QJsonDocument::Compact) << '\n';
+        stream.flush();
+        m_loadedByteSize = file.size();
     }
     m_records.append(record);
 }
 
 TestStatistics::Aggregate TestStatistics::aggregate(const QString &fingerprint) const
 {
+    syncFromDisk();
     Aggregate agg;
     qint64 iterationsSum = 0;
     qint64 elapsedSum = 0;
@@ -148,6 +191,7 @@ TestStatistics::Aggregate TestStatistics::aggregate(const QString &fingerprint) 
 
 bool TestStatistics::hasAnyRuns(const QString &fingerprint) const
 {
+    syncFromDisk();
     for (const RunRecord &r : m_records) {
         if (r.configFingerprint == fingerprint)
             return true;
@@ -157,6 +201,7 @@ bool TestStatistics::hasAnyRuns(const QString &fingerprint) const
 
 bool TestStatistics::exportCsv(const QString &path) const
 {
+    syncFromDisk();
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
         return false;
@@ -175,6 +220,12 @@ bool TestStatistics::exportCsv(const QString &path) const
 
 void TestStatistics::resetFingerprint(const QString &fingerprint)
 {
+    // writeAll() below replaces the entire on-disk file with m_records --
+    // without syncing first, any run another process appended since our
+    // last sync would simply never make it into `kept` and be permanently
+    // lost the moment this overwrites the file, rather than just staying
+    // unreset like it should.
+    syncFromDisk();
     QVector<RunRecord> kept;
     kept.reserve(m_records.size());
     for (const RunRecord &r : m_records) {

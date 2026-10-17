@@ -3,6 +3,11 @@
 #include <csignal>
 #include <vector>
 
+#include <unistd.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
 namespace
 {
 std::atomic<bool> g_stop{false};
@@ -28,6 +33,32 @@ int main(int argc, char **argv)
 {
     std::signal(SIGTERM, handleSignal);
     std::signal(SIGINT, handleSignal);
+
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.2: this process used to
+    // have no mechanism at all for noticing its parent (EnduranceTestGUI)
+    // is gone -- a clean shutdown always sent SIGTERM via LoadInjector's own
+    // terminate() first, but a `kill -9`/crash/OOM-kill of the parent skips
+    // that entirely, leaving this process spinning a CPU core forever with
+    // nothing left able to stop it. Two layers: on Linux, ask the kernel to
+    // deliver SIGTERM itself the instant the parent dies, for any reason
+    // (PR_SET_PDEATHSIG is Linux-only -- no portable equivalent exists);
+    // everywhere (including the narrow race where the parent already died
+    // between fork/exec and this prctl() call, so no signal is ever coming),
+    // fall back to noticing that this process has been reparented -- an
+    // orphan is always handed to a new parent (traditionally PID 1) by the
+    // OS, so a getppid() that no longer matches the parent recorded at
+    // startup means the original parent is gone.
+    const pid_t originalParentPid = getppid();
+#if defined(__linux__)
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+    // If the parent already exited between fork/exec and the prctl() call
+    // above, no SIGTERM is ever coming (the kernel only arms the signal for
+    // deaths *after* this point) -- but a dead original parent means we've
+    // already been reparented, so catch that directly instead of waiting
+    // for the poll fallback below to notice on its next pass.
+    if (getppid() != originalParentPid)
+        g_stop.store(true);
+#endif
 
     long memoryMb = 64;
     if (argc > 1) {
@@ -66,6 +97,14 @@ int main(int argc, char **argv)
             if (touchCursor >= byteCount)
                 touchCursor = 0;
         }
+
+        // Portable orphan check, once per outer pass (so at worst a fraction
+        // of a second after the parent actually dies): covers macOS, where
+        // there is no PDEATHSIG equivalent at all, and backstops Linux in
+        // case the signal above is ever missed. See this function's top
+        // comment for why this matters on a shared machine.
+        if (getppid() != originalParentPid)
+            break;
     }
     return 0;
 }

@@ -72,9 +72,12 @@ public:
     static QString historyFilePath();
 
     // Loads every record from historyFilePath() into memory, replacing
-    // whatever was cached before -- called once at startup, and there is no
-    // need to call it again afterward since addRun() keeps the in-memory
-    // cache and the on-disk log in sync itself.
+    // whatever was cached before -- called once at startup. Every other
+    // accessor below (aggregate()/hasAnyRuns()/exportCsv()/addRun()) also
+    // calls syncFromDisk() itself first, so there is no need to call this
+    // again afterward just to pick up runs recorded by *this* process --
+    // reload() only remains useful for discarding this cache and starting
+    // over from whatever is on disk right now.
     void reload();
 
     // Appends one run's outcome to the persistent log (creating the file/
@@ -99,7 +102,35 @@ public:
     void resetFingerprint(const QString &fingerprint);
 
 private:
-    QVector<RunRecord> m_records;
+    // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.3: crash_stats.jsonl is
+    // a shared, append-only log that any number of separate process
+    // instances write to concurrently (the GUI itself, plus every headless
+    // `--run` invocation launched alongside it) -- m_records used to be
+    // populated once from disk at GUI startup and never refreshed, so runs
+    // recorded by any *other* process while the GUI stayed open were
+    // silently invisible to its statistics display and CSV export, even
+    // though they were correctly sitting on disk the whole time. Every
+    // reader below now calls syncFromDisk() first instead of trusting a
+    // cache that can go stale the moment a second process writes a line.
+    // mutable because the const read accessors (aggregate()/hasAnyRuns()/
+    // exportCsv()) need to trigger this resync too -- it only ever grows or
+    // replaces the cache, never changes the logical, externally-visible
+    // constness of "what this object currently reports".
+    mutable QVector<RunRecord> m_records;
+    // How many bytes of historyFilePath() are already reflected in
+    // m_records -- lets syncFromDisk() cheaply read just the bytes some
+    // process (this one or another) appended since the last sync, instead
+    // of re-parsing the whole file every time. Reset to 0 by reload() (full
+    // re-read) and to the post-write file size by addRun()/writeAll().
+    mutable qint64 m_loadedByteSize = 0;
+
+    // Appends any records written to disk since the last reload()/
+    // syncFromDisk()/addRun() -- by this process or (the common case this
+    // exists for) another one entirely -- onto m_records, without discarding
+    // anything already cached. Falls back to a full reload() if the file is
+    // now *smaller* than last seen (resetFingerprint() from this or another
+    // process), since byte-offset resumption can't make sense of that.
+    void syncFromDisk() const;
 
     bool writeAll() const;
 };

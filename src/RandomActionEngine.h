@@ -125,6 +125,18 @@ public:
     void resume();
     bool isRunning() const { return m_running; }
     bool isPaused() const { return m_paused; }
+    // 不具合報告2.6「一時停止中も画面の「経過」が進み、サマリーの経過時間と
+    // 食い違う」: wall-clock time actually spent running (excludes every
+    // paused interval), computed the same way doStop()'s own
+    // RunSummary::elapsedMs is -- m_pausedElapsedMs plus however long the
+    // current run segment has been going, except while actually paused,
+    // when m_elapsed itself is stale (pause() folds its value into
+    // m_pausedElapsedMs once and leaves m_elapsed running unused until
+    // resume() restarts it, so adding it again here would double-count the
+    // paused interval). MainWindow::updateElapsedLabel() calls this instead
+    // of keeping its own free-running QElapsedTimer, so the on-screen
+    // "経過" label and the eventual run summary always agree.
+    qint64 elapsedMs() const { return m_pausedElapsedMs + (m_paused ? 0 : m_elapsed.elapsed()); }
 
     // The most recently captured operation-region screenshot (SPEC.md
     // 6.2/10), if any -- persists across runs until a new capture overwrites
@@ -714,6 +726,15 @@ private:
     // into (as opposed to skipped for no longer resolving to the target) --
     // included in finishFuzzAllFields()'s completion log message.
     int m_fuzzAllFieldsFieldsFuzzed = 0;
+    // 不具合報告2.3「ファジングで送った文字列が記録に残らず…」: the actual
+    // text sent to each field this sweep, in the order fuzzed -- appended
+    // to by beginNextFuzzAllFieldsField() every time it picks a field's
+    // string, read back by finishFuzzAllFields() to put what was actually
+    // sent into the completion log message (previously only the character/
+    // field *count* was recorded, making it impossible to tell which fuzz
+    // strings a crash actually involved). Reset to empty in start() and at
+    // the start of each new KeyByKey sweep.
+    QStringList m_fuzzAllFieldsSentTexts;
     // Same bounded-tolerance role as m_fuzzStringInactiveStrikes, just
     // scoped to this sweep's own per-tick active-process safety check.
     int m_fuzzAllFieldsInactiveStrikes = 0;

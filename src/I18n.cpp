@@ -368,6 +368,14 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("更新"), QStringLiteral("Update")},
         {QStringLiteral("最大化"), QStringLiteral("Maximize")},
         {QStringLiteral("最大実行回数（全ステップ合計、必須）:"), QStringLiteral("Max action count (total across all steps, required):")},
+        {QStringLiteral("最大実行回数・最大実行時間・繰り返し回数の3つは常に同時に働きます。"
+                        "このうちいずれか1つでも先に達した時点でテストは停止します"
+                        "（例: 1シーケンスの操作回数が多いと、繰り返し回数に達する前に"
+                        "最大実行時間または最大実行回数で先に止まることがあります）。"),
+         QStringLiteral("Max action count, max duration, and repeat count are always active at the "
+                        "same time. The test stops the moment any one of the three is reached first "
+                        "(e.g. if one sequence has a lot of actions, the test may hit the max duration "
+                        "or max action count before ever reaching the repeat count).")},
         {QStringLiteral("最大実行時間（必須）:"), QStringLiteral("Max run time (required):")},
         {QStringLiteral("最小化"), QStringLiteral("Minimize")},
         {QStringLiteral("有効な座標が見つかりませんでした（除外領域が広すぎる可能性があります）"),
@@ -443,6 +451,9 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("矩形"), QStringLiteral("Rectangle")},
         {QStringLiteral("矩形を描画..."), QStringLiteral("Draw Rectangle...")},
         {QStringLiteral("矩形を画面上で描画してください（複数可）:"), QStringLiteral("Please draw rectangles on screen (multiple allowed):")},
+        {QStringLiteral("（以下の座標は画面上の絶対位置です）"), QStringLiteral("(The coordinates below are absolute screen positions)")},
+        {QStringLiteral("（以下の座標は対象ウィンドウ左上を基準にした相対位置です）"),
+         QStringLiteral("(The coordinates below are relative to the target window's top-left corner)")},
         {QStringLiteral("確認"), QStringLiteral("Confirm")},
         {QStringLiteral("移動"), QStringLiteral("Move")},
         {QStringLiteral("経過: %1秒"), QStringLiteral("Elapsed: %1 sec")},
@@ -526,8 +537,6 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ドラッグ先が対象アプリ以外のウィンドウになりそうなため、安全のためテストを停止しました"), QStringLiteral("Stopped the test for safety because the drag destination was about to be a window other than the target app")},
         {QStringLiteral("グループ全体の合計呼び出し回数（毎回ランダムに選ばれたメンバーが\n"
                         "1操作ずつ実行され、この回数に達すると次のステップへ進みます）:"), QStringLiteral("Total call count for the whole group (each time, a randomly chosen member\nexecutes one action; once this count is reached, it moves to the next step):")},
-        {QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには①対象選択の"
-                        "「デフォルト」ボタンを使ってください。"), QStringLiteral("* When \"Use default\" is selected, these values are shown for reference only. To change them, use the \"Default\" button in ① Target Selection.")},
         {QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには②の"
                         "「デフォルト」ボタンを使ってください。"), QStringLiteral("* When \"Use default\" is selected, these values are shown for reference only. To change them, use the \"Default\" button in ②.")},
         {QStringLiteral("候補の番号（上から何番目か、1始まり）。開いたメニューの項目数に収まるものの中からランダムに1つ選択。"
@@ -550,11 +559,11 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("このテスト設定: %1回中%2回クラッシュ（%3%）"), QStringLiteral("This test setup: %2/%1 runs crashed (%3%)")},
         {QStringLiteral("このテスト設定での実行記録はまだありません。"), QStringLiteral("No runs have been recorded yet for this test setup.")},
         {QStringLiteral("統計（クラッシュ率）"), QStringLiteral("Statistics (Crash Rate)")},
-        {QStringLiteral("現在読み込まれているテスト設定（①②③の内容）について、これまでに"
+        {QStringLiteral("現在読み込まれているテスト設定（①②の内容）について、これまでに"
                         "記録された全実行結果の集計です。手動で対象アプリを再起動して同じ"
                         "テストを繰り返した場合も、自動連続実行を使った場合も、同じ集計に"
                         "含まれます。"),
-         QStringLiteral("Aggregated results for the currently loaded test setup (①②③), across every "
+         QStringLiteral("Aggregated results for the currently loaded test setup (①②), across every "
                         "recorded run. Runs where you manually relaunched the target app and repeated "
                         "the same test are counted the same as runs started by the automatic batch loop.")},
         {QStringLiteral("ステップ"), QStringLiteral("Step")},
@@ -659,6 +668,8 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Specify a position via \"Select End Position...\".")},
         {QStringLiteral("文字入力（%1文字、内容はログに記録しません）"),
          QStringLiteral("Text input (%1 characters, content not logged)")},
+        {QStringLiteral("文字入力（%1文字、プライバシーのため非表示）"),
+         QStringLiteral("Text input (%1 characters, hidden for privacy)")},
         {QStringLiteral("パスワード等も入力できます。実行ログにはこの内容自体は記録されません"
                         "（文字数のみ記録されます）。ただし、手動で「テスト設定を保存...」した"
                         "プリセットJSONには、再現用にこの内容が平文のまま保存されます。異常停止時に"
@@ -1226,6 +1237,12 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("負荷注入を今すぐ停止"), QStringLiteral("Stop Load Injection Now")},
         {QStringLiteral("停止中"), QStringLiteral("Stopped")},
         {QStringLiteral("実行中（%1プロセス）"), QStringLiteral("Running (%1 processes)")},
+        {QStringLiteral("⚠ 負荷注入 実行中（%1プロセス）"), QStringLiteral("⚠ Load injection running (%1 processes)")},
+        {QStringLiteral("CPU/メモリ負荷を発生させる別プロセス（loadstress_helper）が動作中です。"
+                        "⑦タイミング・制限の「負荷注入」から停止できます。"),
+         QStringLiteral("A separate CPU/memory load-generating process (loadstress_helper) is "
+                        "currently running. You can stop it from the \"Load injection\" group under "
+                        "⑦ Timing/Limits.")},
         {QStringLiteral("負荷注入を開始しました（%1プロセス、各%2MB）"),
          QStringLiteral("Started load injection (%1 processes, %2 MB each)")},
         {QStringLiteral("負荷注入の開始に失敗しました: %1"), QStringLiteral("Failed to start load injection: %1")},

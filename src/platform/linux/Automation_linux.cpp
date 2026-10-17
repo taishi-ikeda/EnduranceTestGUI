@@ -288,6 +288,11 @@ void openAccessibilitySettings()
     // No OS-level permission gate on X11; nothing to open.
 }
 
+bool hasOpenableAccessibilitySettings()
+{
+    return false;
+}
+
 bool isScreenRecordingTrusted()
 {
     // No OS-level permission gate on X11's screen-grab APIs.
@@ -297,6 +302,11 @@ bool isScreenRecordingTrusted()
 void openScreenRecordingSettings()
 {
     // No OS-level permission gate on X11; nothing to open.
+}
+
+bool hasOpenableScreenRecordingSettings()
+{
+    return false;
 }
 
 bool supportsWindowTransparency()
@@ -542,7 +552,17 @@ void terminateProcess(qint64 pid)
     // failure here (e.g. the pid is already gone, or we lack permission for
     // some pid we don't actually own) isn't worth surfacing to the caller,
     // which is going to poll isProcessRunning() afterward anyway.
+    // SIGCONT first (不具合報告1.2、重大): a process currently stopped
+    // (SIGSTOP, or paused under a debugger) just leaves SIGTERM pending
+    // indefinitely without ever acting on it -- SIGCONT wakes it so the
+    // SIGTERM that follows actually has a chance to be handled.
+    kill((pid_t)pid, SIGCONT);
     kill((pid_t)pid, SIGTERM);
+}
+
+void forceKillProcess(qint64 pid)
+{
+    kill((pid_t)pid, SIGKILL);
 }
 
 ProcessStats queryProcessStats(qint64 pid)
@@ -748,6 +768,27 @@ qint64 windowPidAtPoint(const QPoint &pt)
 {
     Display *dpy = display();
     if (!dpy)
+        return -1;
+
+    // 不具合報告1.1(重大)「対象ウィンドウが画面からはみ出していると…」:
+    // fail closed for any point outside every connected screen's real
+    // bounds, as a second line of defense alongside RandomActionEngine's
+    // own candidate-point clamping. A point like this can never be the
+    // genuine location of a click this engine intended -- XTest/
+    // CGEventPost would silently clip it to the nearest screen edge first,
+    // which may land on a completely different window -- so treat it the
+    // same as "could not positively confirm this is the target" (no
+    // _NET_WM_PID match) rather than let bounds.contains() below possibly
+    // match the target's own (off-screen-extending) window rectangle and
+    // wave it through.
+    bool onAnyScreen = false;
+    for (QScreen *screen : QGuiApplication::screens()) {
+        if (screen->geometry().contains(pt)) {
+            onAnyScreen = true;
+            break;
+        }
+    }
+    if (!onAnyScreen)
         return -1;
 
     Atom netClientListStacking = XInternAtom(dpy, "_NET_CLIENT_LIST_STACKING", True);

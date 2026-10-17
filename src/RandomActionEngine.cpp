@@ -12,6 +12,7 @@
 #include <QMimeData>
 #include <QPainter>
 #include <QPixmap>
+#include <QRegion>
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
@@ -57,6 +58,39 @@ QMimeData *cloneMimeData(const QMimeData *src)
     for (const QString &format : src->formats())
         copy->setData(format, src->data(format));
     return copy;
+}
+
+// 不具合報告(1.1、重大)「対象ウィンドウが画面からはみ出していると、画面外の
+// 座標を操作し、実際には別のウィンドウをクリックする」: the union of every
+// connected screen's *real* pixel bounds (QScreen::geometry(), not
+// availableGeometry() -- XTest/CGEventPost clip the coordinate they're
+// given to the raw screen, not to the area outside any taskbar/menu bar, so
+// matching that exactly is what keeps the clamping below correct). A
+// candidate point/rectangle outside this region can never actually land
+// where this engine thinks it does -- the backend silently clips it to the
+// nearest screen edge first, which may be over an entirely different
+// window.
+QRegion allScreensRegion()
+{
+    QRegion region;
+    for (QScreen *screen : QGuiApplication::screens())
+        region += screen->geometry();
+    return region;
+}
+
+// 不具合報告2.3「ファジングで送った文字列が記録に残らず…」: a short,
+// length-capped preview of a fuzz string actually sent, for logging --
+// matches the same truncation convention FuzzStringCorpusDialog/
+// ActionParamsEditor already use for displaying corpus entries (so a
+// very long entry, e.g. an 8192-character stress-test string, doesn't
+// blow up a single log line), but this exists specifically to record
+// *which* string a given action actually sent, not to browse the corpus.
+QString fuzzStringLogPreview(const QString &text)
+{
+    constexpr int kMaxPreviewChars = 80;
+    if (text.size() <= kMaxPreviewChars)
+        return text;
+    return I18n::t(QStringLiteral("%1...(全%2文字)")).arg(text.left(kMaxPreviewChars)).arg(text.size());
 }
 }  // namespace
 
@@ -253,6 +287,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_fuzzAllFieldsCurrentText.clear();
     m_fuzzAllFieldsCharIndex = 0;
     m_fuzzAllFieldsFieldsFuzzed = 0;
+    m_fuzzAllFieldsSentTexts.clear();
     m_fuzzAllFieldsInactiveStrikes = 0;
     m_fuzzNoCandidatesStrikes = 0;
     m_fuzzAllFieldsNoMatchStrikes = 0;
@@ -451,6 +486,13 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
 
 void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targetCrashed)
 {
+    // 不具合報告2.6「一時停止中も画面の「経過」が進み、サマリーの経過時間と
+    // 食い違う」: read via elapsedMs() *before* m_running/m_paused are
+    // reset below -- that method's own comment explains why it needs
+    // m_paused's pre-stop value (a run stopped while genuinely mid-pause
+    // used to over-count the paused interval, since m_elapsed itself is
+    // stale between pause() and the resume() that never came).
+    const qint64 finalElapsedMs = elapsedMs();
     m_running = false;
     m_paused = false;
     m_timer.stop();
@@ -471,12 +513,7 @@ void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targ
     summary.rngSeedUsed = m_rngSeedUsed;
     summary.totalIterations = m_iterationCount;
     summary.sequenceLoopsCompleted = m_sequenceLoopCount;
-    // Matches the running duration-limit check's own formula (only exact
-    // while not currently paused, which doStop() itself just forced above --
-    // a run stopped while genuinely mid-pause may over-count the paused
-    // interval slightly, a pre-existing quirk of how pause()/resume() track
-    // time, not something this reporting-only field needs to fix).
-    summary.elapsedMs = m_pausedElapsedMs + m_elapsed.elapsed();
+    summary.elapsedMs = finalElapsedMs;
     for (auto it = m_actionKindCounts.constBegin(); it != m_actionKindCounts.constEnd(); ++it)
         summary.actionKindCounts.insert(describeActionKind(it.key()), it.value());
     summary.memoryLeakSuspected = m_memoryLeakEverWarned;
@@ -1138,8 +1175,24 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
                                             const QList<QRect> &excludeRegions, bool &ok)
 {
     ok = false;
+    // 不具合報告1.1(重大): includeRegions is the target window's (or named
+    // region's) rectangle as-is, which can extend past every connected
+    // screen's real pixel bounds -- e.g. a window taller than the display.
+    // Picking uniformly within the raw rectangle could land on a point
+    // that gets silently clipped to the screen edge before the actual
+    // click, landing on whatever window happens to be there instead of the
+    // target. Clamp every candidate rectangle to allScreensRegion() first,
+    // so only genuinely on-screen points are ever considered.
+    QList<QRect> clampedRegions;
+    const QRegion screensRegion = allScreensRegion();
+    for (const QRect &r : includeRegions) {
+        const QRegion clipped = QRegion(r).intersected(screensRegion);
+        for (const QRect &sub : clipped)
+            clampedRegions << sub;
+    }
+
     qint64 totalArea = 0;
-    for (const QRect &r : includeRegions)
+    for (const QRect &r : clampedRegions)
         totalArea += qint64(qMax(1, r.width())) * qint64(qMax(1, r.height()));
     if (totalArea <= 0)
         return {};
@@ -1148,7 +1201,7 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
     for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
         qint64 target = qint64(m_rng.generateDouble() * double(totalArea));
         const QRect *chosen = nullptr;
-        for (const QRect &r : includeRegions) {
+        for (const QRect &r : clampedRegions) {
             const qint64 area = qint64(qMax(1, r.width())) * qint64(qMax(1, r.height()));
             if (target < area) {
                 chosen = &r;
@@ -1157,7 +1210,7 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
             target -= area;
         }
         if (!chosen)
-            chosen = &includeRegions.last();
+            chosen = &clampedRegions.last();
 
         const QPoint pt(chosen->x() + int(m_rng.bounded(quint32(qMax(1, chosen->width())))),
                          chosen->y() + int(m_rng.bounded(quint32(qMax(1, chosen->height())))));
@@ -1192,6 +1245,13 @@ QPoint RandomActionEngine::pickRandomPointOnSweepPath(const QList<QPoint> &waypo
     if (totalLength <= 0.0)
         return {};
 
+    // 不具合報告1.1(重大): waypoints are window-relative, so a window
+    // positioned/sized such that some of them fall outside every screen's
+    // real bounds (same root cause as pickRandomPoint()'s own fix just
+    // above) would otherwise let this pick a point XTest/CGEventPost will
+    // silently clip before clicking -- treat an off-screen candidate the
+    // same way pointExcluded() treats an excluded one: skip it and retry.
+    const QRegion screensRegion = allScreensRegion();
     const int jitter = qMax(0, jitterPx);
     constexpr int kMaxAttempts = 30;
     for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
@@ -1212,7 +1272,7 @@ QPoint RandomActionEngine::pickRandomPointOnSweepPath(const QList<QPoint> &waypo
             pt += QPoint(int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter,
                          int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter);
         }
-        if (!pointExcluded(pt, excludeRegions)) {
+        if (screensRegion.contains(pt) && !pointExcluded(pt, excludeRegions)) {
             ok = true;
             return pt;
         }
@@ -1236,6 +1296,9 @@ QPoint RandomActionEngine::pickSweepPoint(const void *indexKey, const QList<QPoi
     if (index < 0 || index >= points.size())
         index = 0;
 
+    // See pickRandomPointOnSweepPath()'s identical comment (不具合報告1.1、
+    // 重大): a waypoint can fall outside every screen's real bounds.
+    const QRegion screensRegion = allScreensRegion();
     const int jitter = qMax(0, jitterPx);
     for (int attempt = 0; attempt < points.size(); ++attempt) {
         QPoint pt = windowBounds.topLeft() + points[index];
@@ -1244,7 +1307,7 @@ QPoint RandomActionEngine::pickSweepPoint(const void *indexKey, const QList<QPoi
                          int(m_rng.bounded(quint32(2 * jitter + 1))) - jitter);
         }
         index = (index + 1) % points.size();
-        if (!pointExcluded(pt, excludeRegions)) {
+        if (screensRegion.contains(pt) && !pointExcluded(pt, excludeRegions)) {
             ok = true;
             return pt;
         }
@@ -1953,8 +2016,11 @@ void RandomActionEngine::finishFuzzString()
 {
     m_fuzzStringInProgress = false;
 
-    const QString desc =
-        I18n::t(QStringLiteral("ファズ文字列入力（キー入力、%1文字）")).arg(m_fuzzStringText.size());
+    // 不具合報告2.3: include what was actually sent, not just its length --
+    // see fuzzStringLogPreview()'s own comment.
+    const QString desc = I18n::t(QStringLiteral("ファズ文字列入力（キー入力、%1文字、内容: %2）"))
+                              .arg(m_fuzzStringText.size())
+                              .arg(fuzzStringLogPreview(m_fuzzStringText));
     ++m_actionKindCounts[ActionKind::FuzzString];
     recordRecentAction(desc);
     emit actionPerformed(desc);
@@ -2012,6 +2078,10 @@ bool RandomActionEngine::beginNextFuzzAllFieldsField()
         m_fuzzAllFieldsCharIndex = 0;
         m_fuzzAllFieldsInactiveStrikes = 0;
         ++m_fuzzAllFieldsFieldsFuzzed;
+        // 不具合報告2.3: recorded here (not just the char count), so
+        // finishFuzzAllFields()'s completion log shows what was actually
+        // sent to every field -- see fuzzStringLogPreview()'s own comment.
+        m_fuzzAllFieldsSentTexts << fuzzStringLogPreview(m_fuzzAllFieldsCurrentText);
         return true;
     }
     return false;
@@ -2053,8 +2123,11 @@ void RandomActionEngine::finishFuzzAllFields()
 {
     m_fuzzAllFieldsInProgress = false;
 
-    const QString desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（キー入力、%1件）"))
-                              .arg(m_fuzzAllFieldsFieldsFuzzed);
+    // 不具合報告2.3: list what was actually sent to each field -- see
+    // fuzzStringLogPreview()'s own comment.
+    const QString desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（キー入力、%1件、内容: %2）"))
+                              .arg(m_fuzzAllFieldsFieldsFuzzed)
+                              .arg(m_fuzzAllFieldsSentTexts.join(QStringLiteral(" / ")));
     ++m_actionKindCounts[ActionKind::FuzzAllFieldsInRegion];
     recordRecentAction(desc);
     emit actionPerformed(desc);
@@ -2321,9 +2394,20 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         for (const QRect &r : includeRegions)
             bounds = bounds.united(r);
 
+        // 不具合報告1.1(重大): `bounds` above is the step's own region as-
+        // is, which (same as pickRandomPoint()'s identical issue) can
+        // extend past the actual screen -- clamp the drag endpoint to the
+        // screen `pt` (the already-confirmed-on-screen drag start) is on
+        // too, not just to `bounds`, so a drag can never land on a point
+        // XTest/CGEventPost would silently clip to a different window.
+        QScreen *screen = QGuiApplication::screenAt(pt);
+        if (!screen && !QGuiApplication::screens().isEmpty())
+            screen = QGuiApplication::screens().first();
+        const QRect screenGeom = screen ? screen->geometry() : bounds;
+
         QPoint to(pt.x() + dx, pt.y() + dy);
-        to.setX(qBound(bounds.left(), to.x(), bounds.right()));
-        to.setY(qBound(bounds.top(), to.y(), bounds.bottom()));
+        to.setX(qBound(qMax(bounds.left(), screenGeom.left()), to.x(), qMin(bounds.right(), screenGeom.right())));
+        to.setY(qBound(qMax(bounds.top(), screenGeom.top()), to.y(), qMin(bounds.bottom(), screenGeom.bottom())));
 
         if (PlatformAutomation::windowPidAtPoint(to) != m_config.targetPid) {
             doStop(I18n::t(QStringLiteral("ドラッグ先が対象アプリ以外のウィンドウになりそうなため、安全のためテストを停止しました")),
@@ -2508,7 +2592,10 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                 clipboard->setMimeData(originalClipboardData);  // clipboard takes ownership
             else
                 clipboard->clear();
-            desc = I18n::t(QStringLiteral("ファズ文字列入力（貼り付け、%1文字）")).arg(fuzzText.size());
+            // 不具合報告2.3: see fuzzStringLogPreview()'s own comment.
+            desc = I18n::t(QStringLiteral("ファズ文字列入力（貼り付け、%1文字、内容: %2）"))
+                       .arg(fuzzText.size())
+                       .arg(fuzzStringLogPreview(fuzzText));
             break;
         }
 
@@ -2611,6 +2698,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             // accessibility-tree snapshot above) is skipped, not treated as
             // a failure of the whole sweep.
             int fuzzed = 0;
+            QStringList sentTexts;
             QClipboard *clipboard = QGuiApplication::clipboard();
             for (const QRect &bounds : matchedFields) {
                 const QPoint center = bounds.center();
@@ -2637,8 +2725,14 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                 else
                     clipboard->clear();
                 ++fuzzed;
+                sentTexts << fuzzStringLogPreview(fuzzText);
             }
-            desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（貼り付け、%1件）")).arg(fuzzed);
+            // 不具合報告2.3: list what was actually sent to each field, not
+            // just how many fields were fuzzed -- see fuzzStringLogPreview()'s
+            // own comment.
+            desc = I18n::t(QStringLiteral("領域内の入力項目へのファズ入力（貼り付け、%1件、内容: %2）"))
+                       .arg(fuzzed)
+                       .arg(sentTexts.join(QStringLiteral(" / ")));
             break;
         }
 
@@ -2652,6 +2746,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_fuzzAllFieldsCandidates = candidates;
         m_fuzzAllFieldsFieldIndex = 0;
         m_fuzzAllFieldsFieldsFuzzed = 0;
+        m_fuzzAllFieldsSentTexts.clear();
 
         if (!beginNextFuzzAllFieldsField()) {
             // Every match turned out stale right away (rare -- would need

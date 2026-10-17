@@ -86,9 +86,18 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
         // 有効にする」がオフのまま）は、ただ「データなし」とだけ表示されて
         // おり、これが何も壊れていない初期状態なのか、何か操作が必要なのか
         // 判断できなかった。どちらの場合にも当てはまる具体的な案内に変更。
+        // 不具合報告2.4「負荷モニターの案内文が、既定のウィンドウサイズでは
+        // 両端とも切れて読めない」: this drawText() had no Qt::TextWordWrap,
+        // so at the default 560x480 window size the single long line simply
+        // ran off both edges of the widget instead of wrapping -- adding the
+        // flag, plus a small horizontal margin so wrapped lines don't touch
+        // the widget's own edges, makes the guidance readable without
+        // resizing the window.
         painter.setPen(QPen(QColor(140, 140, 140)));
+        constexpr int kTextMargin = 16;
         painter.drawText(
-            QRect(QPoint(0, 0), size), Qt::AlignCenter,
+            QRect(QPoint(0, 0), size).adjusted(kTextMargin, 0, -kTextMargin, 0),
+            Qt::AlignCenter | Qt::TextWordWrap,
             I18n::t(QStringLiteral("データなし\n上の「負荷モニターを有効にする」をオンにしてテストを"
                                     "実行すると、ここにCPU/メモリの推移が表示されます。")));
         return;

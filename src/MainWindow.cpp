@@ -14,6 +14,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -41,6 +42,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -234,6 +236,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                   : I18n::t(QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
                                     "（他のアプリが同じ組み合わせを使用している可能性があります）。"
                                     "「■ 停止」ボタンは通常どおり使用できます。")));
+
+    // 不具合報告2.5: a brand-new, never-touched session also has nothing
+    // to lose -- see m_lastSavedPresetJson's own comment. Captured last,
+    // after buildUi() above has given every widget its default value.
+    m_lastSavedPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
 }
 
 void MainWindow::buildUi()
@@ -318,6 +325,21 @@ void MainWindow::buildUi()
     controlsRow->addWidget(m_pauseResumeButton);
     controlsRow->addWidget(m_manualRecordButton);
     controlsRow->addWidget(m_statusLabel);
+    // 不具合報告3.8「負荷注入が動いていることが、主画面から分からない」:
+    // the only indication used to be m_loadInjectionStatusLabel down in
+    // ⑦タイミング・制限's own「負荷注入」group, which requires scrolling
+    // that far down to even see at the default window size -- easy to
+    // start負荷注入, scroll back up to work on something else, and forget
+    // a CPU-hogging process is still running. This mirrors it in the
+    // always-visible controls row instead; refreshLoadInjectionStatusLabel()
+    // keeps both in sync. Empty (and so invisible-by-content) whenever load
+    // injection isn't running, so it adds no clutter the rest of the time.
+    m_loadInjectionActiveIndicatorLabel = new QLabel(central);
+    m_loadInjectionActiveIndicatorLabel->setStyleSheet(QStringLiteral("color: #b8860b; font-weight: bold;"));
+    m_loadInjectionActiveIndicatorLabel->setToolTip(
+        I18n::t(QStringLiteral("CPU/メモリ負荷を発生させる別プロセス（loadstress_helper）が動作中です。"
+                                "⑦タイミング・制限の「負荷注入」から停止できます。")));
+    controlsRow->addWidget(m_loadInjectionActiveIndicatorLabel);
     controlsRow->addStretch();
 
     // SPEC.md 10 ①: repeat the whole test automatically to help reproduce a
@@ -422,7 +444,33 @@ void MainWindow::buildUi()
     // ① start at a genuinely compact height instead, so ②/ログ are visible
     // immediately; ①'s own internal scroll area still reaches everything
     // below the fold, and the user can still drag any handle to taste.
-    outerSplitter->setSizes({200, 500, 200});
+    // 不具合報告3.10「①対象選択の表示領域が、中身の量に比べて小さい」:
+    // 200px only showed down to the screen-recording permission button,
+    // with the自動起動コマンド (a setting most users actually touch) and
+    // everything below it hidden behind a scroll the user had no reason to
+    // suspect was there. 260px shows a bit further without eating too much
+    // into ②'s share. The second half of that same report -- "スプリッタの
+    // 分割位置は保存されない" -- is addressed just below: whatever the user
+    // drags it to is remembered across restarts instead of resetting to
+    // this default every time.
+    QList<int> initialSizes{260, 500, 200};
+    {
+        QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+        const QVariantList saved = settings.value(QStringLiteral("mainWindowSplitterSizes")).toList();
+        if (saved.size() == 3) {
+            initialSizes.clear();
+            for (const QVariant &v : saved)
+                initialSizes << v.toInt();
+        }
+    }
+    outerSplitter->setSizes(initialSizes);
+    connect(outerSplitter, &QSplitter::splitterMoved, this, [outerSplitter]() {
+        QSettings settings(QStringLiteral("asobi"), QStringLiteral("EnduranceTestGUI"));
+        QVariantList sizes;
+        for (int s : outerSplitter->sizes())
+            sizes << s;
+        settings.setValue(QStringLiteral("mainWindowSplitterSizes"), sizes);
+    });
 
     rootLayout->addWidget(outerSplitter, 1);
 
@@ -648,6 +696,23 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     m_launchTargetNowButton = new QPushButton(I18n::t(QStringLiteral("今すぐ起動")), m_targetGroup);
     targetLayout->addWidget(m_launchTargetNowButton);
 
+    // SPEC.md 10 ⑤: ▶開始時に、この起動コマンドで対象アプリをまず起動して
+    // から②③を実行するオプション。連続実行（m_continuousRunButton）は常に
+    // 起動コマンドを使うので、これはあくまで▶開始（単発実行）用。
+    // 不具合報告3.2「「開始時にこのコマンドで…」のチェックボックスが、別の
+    // 入力欄の真下にある」: this used to sit right after the unrelated対象
+    // アプリのログファイル欄below, which made "このコマンド" read as if it
+    // referred to that log file path instead of the自動起動コマンド above
+    // it. Moved immediately after that command's own row (and the "今すぐ
+    // 起動" button that also acts on it) so "このコマンド" unambiguously
+    // points at what's directly above.
+    m_launchBeforeStartCheck =
+        new QCheckBox(I18n::t(QStringLiteral("開始時にこのコマンドで対象ツールを起動してから開始する")), m_targetGroup);
+    m_launchBeforeStartCheck->setToolTip(
+        I18n::t(QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
+                                "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。")));
+    targetLayout->addWidget(m_launchBeforeStartCheck);
+
     // SPEC.md 10 追加提案「対象アプリ自身のログファイルの監視・クラッシュ時
     // 自動添付」: entirely optional, same convention as the launch command
     // above -- empty (default) means RandomActionEngine::
@@ -668,16 +733,6 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     targetLogFileRow->addWidget(m_targetLogFileEdit, 1);
     targetLogFileRow->addWidget(m_browseTargetLogFileButton);
     targetLayout->addLayout(targetLogFileRow);
-
-    // SPEC.md 10 ⑤: ▶開始時に、この起動コマンドで対象アプリをまず起動して
-    // から②③を実行するオプション。連続実行（m_continuousRunButton）は常に
-    // 起動コマンドを使うので、これはあくまで▶開始（単発実行）用。
-    m_launchBeforeStartCheck =
-        new QCheckBox(I18n::t(QStringLiteral("開始時にこのコマンドで対象ツールを起動してから開始する")), m_targetGroup);
-    m_launchBeforeStartCheck->setToolTip(
-        I18n::t(QStringLiteral("チェックすると、▶開始を押したときにまず上の自動起動コマンドで対象アプリを起動し、"
-                                "起動を確認してから起動時セットアップ→ステップ構成の実行を始めます。")));
-    targetLayout->addWidget(m_launchBeforeStartCheck);
 
     // SPEC.md 10追加実装及び修正依頼「連続実行ボタンを押してツールがすぐに
     // 立ち上がらないとエラーができます...起動まで一定時間待つパラメータを
@@ -914,20 +969,36 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
 
     timingForm->addRow(I18n::t(QStringLiteral("操作間隔:")), intervalContainer);
 
+    // 不具合報告3.9「3つの上限がどれも「（必須）」と書かれていて、どれが
+    // 先に効くかの説明が無い」: all three limits are always active
+    // simultaneously (none can be left empty/unlimited -- hence "必須"),
+    // and whichever is reached first ends the run; nothing in the UI used
+    // to say so. Added as a tooltip on each spin box rather than a fourth
+    // label row, so the explanation is available without permanently
+    // taking up vertical space here.
+    const QString limitsRelationshipTooltip = I18n::t(
+        QStringLiteral("最大実行回数・最大実行時間・繰り返し回数の3つは常に同時に働きます。"
+                        "このうちいずれか1つでも先に達した時点でテストは停止します"
+                        "（例: 1シーケンスの操作回数が多いと、繰り返し回数に達する前に"
+                        "最大実行時間または最大実行回数で先に止まることがあります）。"));
+
     m_maxIterationsSpin = new QSpinBox(m_timingGroup);
     m_maxIterationsSpin->setRange(1, 100000000);
     m_maxIterationsSpin->setValue(1000);
+    m_maxIterationsSpin->setToolTip(limitsRelationshipTooltip);
     timingForm->addRow(I18n::t(QStringLiteral("最大実行回数（全ステップ合計、必須）:")), m_maxIterationsSpin);
 
     m_maxDurationSecSpin = new QSpinBox(m_timingGroup);
     m_maxDurationSecSpin->setRange(1, 6000000);
     m_maxDurationSecSpin->setValue(120);
     m_maxDurationSecSpin->setSuffix(I18n::t(QStringLiteral(" 秒")));
+    m_maxDurationSecSpin->setToolTip(limitsRelationshipTooltip);
     timingForm->addRow(I18n::t(QStringLiteral("最大実行時間（必須）:")), m_maxDurationSecSpin);
 
     m_maxSequenceLoopsSpin = new QSpinBox(m_timingGroup);
     m_maxSequenceLoopsSpin->setRange(1, 100000000);
     m_maxSequenceLoopsSpin->setValue(10);
+    m_maxSequenceLoopsSpin->setToolTip(limitsRelationshipTooltip);
     timingForm->addRow(I18n::t(QStringLiteral("ステップ全体（シーケンス）の繰り返し回数（必須）:")), m_maxSequenceLoopsSpin);
 
     m_keepActiveCheck = new QCheckBox(I18n::t(QStringLiteral("対象アプリを常に最前面に保つ")), m_timingGroup);
@@ -1252,7 +1323,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // comment), so close() is never reached that way -- but guard anyway
     // rather than risk popping a confirmation dialog nothing can answer in
     // an unattended run.
-    if (m_headlessMode || (m_steps.isEmpty() && m_setupActions.isEmpty() && m_namedRegions.isEmpty())) {
+    // 不具合報告2.5: only warn when the current setup actually differs from
+    // what was last saved/loaded -- see m_lastSavedPresetJson's own
+    // comment for why this compares a full serialization rather than
+    // tracking a dirty flag through every individual mutation site.
+    const QByteArray currentPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
+    if (m_headlessMode || currentPresetJson == m_lastSavedPresetJson) {
         event->accept();
         return;
     }
@@ -1326,6 +1402,19 @@ void MainWindow::refreshPermissionLabel()
                                     ? I18n::t(QStringLiteral("✓ 入力送信の権限は許可されています"))
                                     : I18n::t(QStringLiteral("✗ 権限が必要です（下のボタンから設定を開いてください）")));
     m_permissionLabel->setStyleSheet(trusted ? "color: green;" : "color: red;");
+    // 不具合報告3.1「Linuxでは何も起きないボタンが、常に有効な状態で2つ
+    // 並んでいる」: on a platform with no such settings pane to open at all
+    // (Linux/X11 -- see hasOpenableAccessibilitySettings()'s own comment),
+    // clicking this button always did nothing, right below a label that
+    // already says access is granted. Disable it there instead, with a
+    // tooltip explaining why, rather than leaving a dead button enabled.
+    const bool canOpenAccessibilitySettings = PlatformAutomation::hasOpenableAccessibilitySettings();
+    m_openSettingsButton->setEnabled(canOpenAccessibilitySettings);
+    m_openSettingsButton->setToolTip(
+        canOpenAccessibilitySettings
+            ? QString()
+            : I18n::t(QStringLiteral("この環境には開くべき権限設定画面がありません"
+                                      "（X11には入力送信を個別に許可する仕組みがないため）。")));
 
     // SPEC.md 10追加実装及び修正依頼: always true on Linux (no such
     // permission exists there), so this label is harmlessly green outside
@@ -1337,6 +1426,14 @@ void MainWindow::refreshPermissionLabel()
             : I18n::t(QStringLiteral("✗ 画面収録の権限がありません（操作領域を選択する画面が黒くなり、"
                                       "他のアプリが見えなくなります。下のボタンから設定を開いてください）")));
     m_screenRecordingPermissionLabel->setStyleSheet(screenRecordingTrusted ? "color: green;" : "color: red;");
+    // 不具合報告3.1: same reasoning as m_openSettingsButton above.
+    const bool canOpenScreenRecordingSettings = PlatformAutomation::hasOpenableScreenRecordingSettings();
+    m_openScreenRecordingSettingsButton->setEnabled(canOpenScreenRecordingSettings);
+    m_openScreenRecordingSettingsButton->setToolTip(
+        canOpenScreenRecordingSettings
+            ? QString()
+            : I18n::t(QStringLiteral("この環境には開くべき権限設定画面がありません"
+                                      "（X11には画面収録を個別に許可する仕組みがないため）。")));
 }
 
 QString MainWindow::describeStep(const RegionStep &step, int index) const
@@ -1500,7 +1597,16 @@ QString MainWindow::describeSetupAction(const SetupAction &action, int index) co
                        .arg(action.dragToPoint.y());
         break;
     case SetupActionType::TypeText:
-        kindDesc = I18n::t(QStringLiteral("文字入力 '%1'")).arg(action.text);
+        // 不具合報告3.6「起動時セットアップで入力した文字列が、常時表示
+        // される一覧に平文で出る」: the実行ログ（RandomActionEngine.cpp の
+        // 同種の「文字入力（%1文字、内容はログに記録しません）」）と異常
+        // 停止時の自動保存プリセット（TestConfigJson.cpp の同種の「(%1文字、
+        // プライバシーのため非表示)」）はどちらも伏せているのに、この一覧
+        // だけ`action.text`をそのまま表示していた -- 同じ方針に揃える
+        // （実文字列が必要な手動保存は、このUI文字列ではなく
+        // buildPresetJson()がredactSensitiveText=falseでそのまま書き出す
+        // ため、再現用途は従来どおり維持される）。
+        kindDesc = I18n::t(QStringLiteral("文字入力（%1文字、プライバシーのため非表示）")).arg(action.text.size());
         break;
     case SetupActionType::KeyPress:
         kindDesc = I18n::t(QStringLiteral("キー入力 '%1'")).arg(action.keySequence);
@@ -1845,10 +1951,23 @@ void MainWindow::onToggleShowAllRegions()
     }
 
     if (m_namedRegions.isEmpty()) {
+        // 不具合報告3.5「「操作領域がありません」の案内が、ステップ0件の
+        // ときには成り立たない」: NamedRegionEditorDialog only ever opens
+        // from inside StepEditorDialog's own "新規作成..."/"編集..."
+        // buttons (see StepEditorDialog.cpp) -- there is no other entry
+        // point. With zero steps, "ステップの「編集...」" is simply not a
+        // button that exists yet to press, so this guidance pointed at
+        // something unreachable. Branch on whether a step exists at all:
+        // with none, point at ②の「追加...」(which opens the same dialog
+        // and the same "新規作成..." button once a step exists to edit).
         QMessageBox::information(
             this, I18n::t(QStringLiteral("操作領域がありません")),
-            I18n::t(QStringLiteral("ステップの「編集...」ダイアログ内の「新規作成...」から"
-                                    "操作領域を追加してから確認してください。")));
+            m_steps.isEmpty()
+                ? I18n::t(QStringLiteral("操作領域はステップの設定ダイアログの中から追加します。②の"
+                                          "「追加...」でステップを作成し、そのダイアログ内の「新規作成...」"
+                                          "から操作領域を追加してから確認してください。"))
+                : I18n::t(QStringLiteral("ステップの「編集...」ダイアログ内の「新規作成...」から"
+                                          "操作領域を追加してから確認してください。")));
         return;
     }
 
@@ -2411,6 +2530,25 @@ void MainWindow::onCopySelectedSteps()
     QGuiApplication::clipboard()->setText(stepsToClipboardJson(steps));
 }
 
+void MainWindow::collectMissingRegionNames(const RegionStep &step, QSet<QString> &outMissing) const
+{
+    if (!step.isWaitStep && !step.useWholeWindow && !step.regionName.isEmpty()) {
+        bool exists = false;
+        for (const NamedRegion &region : m_namedRegions) {
+            if (region.name == step.regionName) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+            outMissing.insert(step.regionName);
+    }
+    for (const RegionStep &member : step.groupMembers)
+        collectMissingRegionNames(member, outMissing);
+    for (const RegionStep &member : step.taskMembers)
+        collectMissingRegionNames(member, outMissing);
+}
+
 void MainWindow::onPasteSteps()
 {
     const QList<RegionStep> steps = stepsFromClipboardJson(QGuiApplication::clipboard()->text());
@@ -2439,6 +2577,29 @@ void MainWindow::onPasteSteps()
             item->setSelected(true);
     }
     m_stepListWidget->setCurrentRow(insertAt);
+
+    // 不具合報告2.7: a step copied from another preset can reference a
+    // named operation region that preset had but this one doesn't -- the
+    // paste itself used to insert it with no indication anything was
+    // wrong, leaving the user to discover it one step at a time only once
+    // they tried to ▶開始. Warn about every such reference right now,
+    // instead; the steps are still inserted either way (the region can
+    // simply be recreated, or the step re-pointed at an existing one via
+    // ②'s own editor), matching how pasting already behaves for every
+    // other kind of mismatch.
+    QSet<QString> missingRegionNames;
+    for (const RegionStep &step : steps)
+        collectMissingRegionNames(step, missingRegionNames);
+    if (!missingRegionNames.isEmpty()) {
+        QStringList sortedNames(missingRegionNames.begin(), missingRegionNames.end());
+        sortedNames.sort();
+        QMessageBox::warning(
+            this, I18n::t(QStringLiteral("操作領域が見つかりません")),
+            I18n::t(QStringLiteral("貼り付けたステップの一部が、このテスト設定には存在しない操作領域を"
+                                    "参照しています: %1\n\n貼り付け自体は行いましたが、②で同名の操作領域を"
+                                    "作成するか、該当ステップの操作領域を選び直してください。"))
+                .arg(sortedNames.join(QStringLiteral("、"))));
+    }
 }
 
 bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
@@ -2481,11 +2642,55 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
         return false;
     }
     const ActionParams &params = effectiveParamsOf(step, m_defaultActionParams);
-    if (step.enableKey && params.allowedKeyChars.isEmpty()) {
-        errorMessage = I18n::t(QStringLiteral("キー入力を有効にした%1があります。使用文字を指定してください"
+    // 不具合報告2.1「連続キー入力だけを有効にしてキー候補が空だと、検証を
+    // 素通りして実行が空回りする」: this used to check only
+    // allowedKeyChars.isEmpty(), which (a) never looked at
+    // step.enableTypingBurst at all -- a step with only "連続キー入力（一定
+    // 時間）" enabled sailed through this check even with literally no
+    // candidate to type -- and (b) even for step.enableKey, ignored the
+    // named-key checkboxes (Tab/Return/Escape/Backspace/Delete/矢印キー),
+    // so a step with an empty "使用文字" but at least one named key checked
+    // would have been wrongly rejected here. RandomActionEngine::
+    // runOneAction() already computes "no candidate at all" the same way
+    // for both ActionKind::Key and ActionKind::TypingBurst at runtime (see
+    // its own identical check) -- mirror that exact definition here so a
+    // step that would immediately SkippedNoCount-loop at runtime is instead
+    // caught before the run ever starts, for either action kind.
+    const bool hasNamedKeyCandidate = params.keyIncludeTab || params.keyIncludeReturn ||
+                                       params.keyIncludeEscape || params.keyIncludeBackspace ||
+                                       params.keyIncludeDelete || params.keyIncludeArrowKeys;
+    if ((step.enableKey || step.enableTypingBurst) && params.allowedKeyChars.isEmpty() &&
+        !hasNamedKeyCandidate) {
+        errorMessage = I18n::t(QStringLiteral("キー入力または連続キー入力を有効にした%1があります。使用文字または"
+                                        "名前付きキーを最低1つ指定してください"
                                         "（デフォルトまたはそのステップの専用設定）。"))
                            .arg(stepLabel);
         return false;
+    }
+    // 不具合報告2.2「連続キー入力の「時間」「キー間隔」は、下限 > 上限でも
+    // 無言で入れ替わる」: RandomActionEngine.cpp normalizes these with
+    // qMin/qMax at the point of use, so a reversed range never actually
+    // breaks anything at runtime -- but it silently runs a different range
+    // than what the input fields show, with no indication anything was
+    // off. Mirror validateIntervalSettings()'s identical「下限（最小）が
+    // 上限（最大）を上回っています」treatment for 操作間隔, applied here to
+    // ActionParams::typingBurstMin/MaxDurationMs and
+    // typingBurstKeyIntervalMin/MaxMs.
+    if (step.enableTypingBurst) {
+        if (params.typingBurstMinDurationMs > params.typingBurstMaxDurationMs) {
+            errorMessage = I18n::t(QStringLiteral("連続キー入力を有効にした%1の「時間」設定で、下限（最小）が"
+                                            "上限（最大）を上回っています。下限を上限以下の値に直してください"
+                                            "（デフォルトまたはそのステップの専用設定）。"))
+                               .arg(stepLabel);
+            return false;
+        }
+        if (params.typingBurstKeyIntervalMinMs > params.typingBurstKeyIntervalMaxMs) {
+            errorMessage = I18n::t(QStringLiteral("連続キー入力を有効にした%1の「キー間隔」設定で、下限（最小）が"
+                                            "上限（最大）を上回っています。下限を上限以下の値に直してください"
+                                            "（デフォルトまたはそのステップの専用設定）。"))
+                               .arg(stepLabel);
+            return false;
+        }
     }
     if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
         errorMessage = I18n::t(QStringLiteral("ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
@@ -2853,7 +3058,6 @@ bool MainWindow::beginRun(bool interactive)
 
     setControlsEnabled(false);
     m_statusLabel->setText(I18n::t(QStringLiteral("実行中")));
-    m_runElapsed.restart();
     m_uiTimer->start();
 
     m_stopPanel = new StopPanel();
@@ -2966,7 +3170,6 @@ void MainWindow::onTestSetupActions()
     m_setupOnlyTestRun = true;
     setControlsEnabled(false);
     m_statusLabel->setText(I18n::t(QStringLiteral("起動時セットアップを実行中...")));
-    m_runElapsed.restart();
     m_uiTimer->start();
 
     m_stopPanel = new StopPanel();
@@ -3184,9 +3387,15 @@ void MainWindow::refreshLoadInjectionStatusLabel()
         m_loadInjectionStatusLabel->setText(
             I18n::t(QStringLiteral("実行中（%1プロセス）")).arg(m_loadInjector->runningProcessCount()));
         m_loadInjectionManualToggleButton->setText(I18n::t(QStringLiteral("負荷注入を今すぐ停止")));
+        // 不具合報告3.8: see m_loadInjectionActiveIndicatorLabel's own
+        // comment at construction.
+        m_loadInjectionActiveIndicatorLabel->setText(
+            I18n::t(QStringLiteral("⚠ 負荷注入 実行中（%1プロセス）"))
+                .arg(m_loadInjector->runningProcessCount()));
     } else {
         m_loadInjectionStatusLabel->setText(I18n::t(QStringLiteral("停止中")));
         m_loadInjectionManualToggleButton->setText(I18n::t(QStringLiteral("負荷注入を今すぐ開始")));
+        m_loadInjectionActiveIndicatorLabel->setText(QString());
     }
 }
 
@@ -3402,6 +3611,42 @@ void MainWindow::checkHeadlessCompletion()
         appendLog(I18n::t(QStringLiteral("ヘッドレス実行終了のため対象アプリ（PID %1）を終了します"))
                        .arg(m_lastRunTargetPid));
         PlatformAutomation::terminateProcess(m_lastRunTargetPid);
+        // 不具合報告1.2(重大)「SIGSTOPで一時停止した対象アプリが、ヘッドレス
+        // 実行の終了後も残る」: this used to send SIGTERM and immediately
+        // QCoreApplication::exit() without ever checking whether the target
+        // actually went away -- a stopped (SIGSTOP/debugger-paused) target,
+        // or one that simply ignores SIGTERM, was left behind indefinitely
+        // the moment this process itself exited, with nothing left able to
+        // reference its pid again. Headless mode never shows a window (see
+        // runHeadless()'s own comment), so there is no UI to freeze by
+        // blocking here -- give terminateProcess() (now SIGCONT+SIGTERM, see
+        // its own comment) a bounded grace period, and if the target is
+        // still alive after that, escalate to an unconditional SIGKILL
+        // before this process is allowed to exit at all.
+        constexpr int kGracefulTerminateWaitMs = 3000;
+        constexpr int kPollIntervalMs = 100;
+        QElapsedTimer waitTimer;
+        waitTimer.start();
+        while (waitTimer.elapsed() < kGracefulTerminateWaitMs &&
+               PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+            QThread::msleep(kPollIntervalMs);
+        }
+        if (PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+            appendLog(I18n::t(QStringLiteral("対象アプリ（PID %1）が%2秒経っても終了しないため、強制終了します"))
+                           .arg(m_lastRunTargetPid)
+                           .arg(kGracefulTerminateWaitMs / 1000));
+            PlatformAutomation::forceKillProcess(m_lastRunTargetPid);
+            constexpr int kForceKillWaitMs = 1000;
+            QElapsedTimer killWaitTimer;
+            killWaitTimer.start();
+            while (killWaitTimer.elapsed() < kForceKillWaitMs &&
+                   PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+                QThread::msleep(kPollIntervalMs);
+            }
+        }
+        if (PlatformAutomation::isProcessRunning(m_lastRunTargetPid)) {
+            appendLog(I18n::t(QStringLiteral("対象アプリ（PID %1）を終了できませんでした")).arg(m_lastRunTargetPid));
+        }
     }
     // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.1: m_headlessAnomalyOccurred
     // alone used to decide this -- but it is only ever set by
@@ -3471,6 +3716,9 @@ void MainWindow::killTargetThenRelaunchForContinuousRun()
         appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が残っているため終了します")).arg(pidToKill));
         PlatformAutomation::terminateProcess(pidToKill);
         m_continuousWaitPhase = ContinuousWaitPhase::WaitingForExit;
+        m_continuousWaitKillPid = pidToKill;
+        m_continuousWaitForceKilled = false;
+        m_continuousWaitExitTimer.start();
         m_batchWaitTimer->start();
         return;
     }
@@ -3522,8 +3770,53 @@ void MainWindow::onBatchWaitTick()
             // Still showing a window, or the process itself hasn't exited
             // yet (SIGTERM is asynchronous) -- keep waiting.
             if (tryReselectLastTarget() ||
-                (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid)))
+                (m_lastRunTargetPid > 0 && PlatformAutomation::isProcessRunning(m_lastRunTargetPid))) {
+                // 不具合報告1.3(重大): this used to just `return` here every
+                // tick forever -- a target that never actually exits (most
+                // notably one stopped via SIGSTOP or paused under an active
+                // debugger, which may not even react to the SIGCONT+SIGTERM
+                // terminateProcess() now sends -- see its own comment)
+                // left the whole connected run silently stuck in
+                // WaitingForExit indefinitely, with nothing in the log to
+                // explain why and no way for an unattended CI job to
+                // notice besides its own external timeout. Escalate to an
+                // unconditional SIGKILL partway through the wait, then
+                // give up and abort the whole continuous run as an error
+                // if even that doesn't work within the overall limit.
+                constexpr qint64 kForceKillAfterMs = 15000;
+                constexpr qint64 kAbortAfterMs = 30000;
+                const qint64 elapsed = m_continuousWaitExitTimer.elapsed();
+                if (!m_continuousWaitForceKilled && elapsed >= kForceKillAfterMs &&
+                    m_continuousWaitKillPid > 0) {
+                    appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が%2秒経っても終了しないため、"
+                                                      "強制終了（SIGKILL）します"))
+                                   .arg(m_continuousWaitKillPid)
+                                   .arg(kForceKillAfterMs / 1000));
+                    PlatformAutomation::forceKillProcess(m_continuousWaitKillPid);
+                    m_continuousWaitForceKilled = true;
+                } else if (elapsed >= kAbortAfterMs) {
+                    appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリ（PID %1）が%2秒経っても終了しないため、"
+                                                      "連続実行を異常終了します"))
+                                   .arg(m_continuousWaitKillPid)
+                                   .arg(kAbortAfterMs / 1000));
+                    m_batchWaitTimer->stop();
+                    m_continuousWaitPhase = ContinuousWaitPhase::None;
+                    m_batchModeActive = false;
+                    m_continuousRunMode = false;
+                    m_batchProgressLabel->setText(QString());
+                    setControlsEnabled(true);
+                    if (m_fullLogFile.isOpen())
+                        m_fullLogFile.close();
+                    // Same mechanism as beginRun()'s own non-interactive
+                    // failure paths (不具合報告1.1) -- a run that could
+                    // never even get its target terminated/relaunched is
+                    // not a clean headless invocation, so the exit code
+                    // must say so too.
+                    m_headlessSetupError = true;
+                    checkHeadlessCompletion();
+                }
                 return;
+            }
             appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの終了を確認しました。新しいインスタンスを"
                                               "起動します")));
             launchTargetAppFromConfiguredCommand();
@@ -3701,7 +3994,15 @@ void MainWindow::onCurrentSetupActionChanged(int index)
 
 void MainWindow::updateElapsedLabel()
 {
-    const qint64 secs = m_runElapsed.elapsed() / 1000;
+    // 不具合報告2.6「一時停止中も画面の「経過」が進み、サマリーの経過時間と
+    // 食い違う」: m_runElapsed used to be this label's own independent,
+    // always-running QElapsedTimer, with no awareness of pause/resume at
+    // all -- RandomActionEngine::elapsedMs() is the same pause-aware
+    // formula the eventual RunSummary::elapsedMs uses, so the label this
+    // updates now always agrees with it (and correctly stops advancing
+    // while paused, instead of still climbing toward/past a 最大実行時間
+    // limit the engine itself has already frozen against).
+    const qint64 secs = m_engine->elapsedMs() / 1000;
     m_elapsedLabel->setText(I18n::t(QStringLiteral("経過: %1秒")).arg(secs));
 }
 
@@ -4046,6 +4347,19 @@ QJsonObject MainWindow::buildPresetJson(bool redactSensitiveText) const
 
     root["defaultActionParams"] = actionParamsToJson(m_defaultActionParams);
     root["defaultActionKinds"] = regionStepToJson(m_defaultActionKinds);
+    // 不具合報告2.3「ファジングで送った文字列が記録に残らず、コーパスも
+    // プリセットに保存されない」: m_fuzzStringCorpus is app-wide (QSettings-
+    // backed, see loadFuzzStringCorpus()'s own comment), not part of a
+    // step's own ActionParams -- so without this, sharing a preset (or
+    // replaying one with a fixed RNG seed on a different machine) could
+    // silently fuzz with a completely different corpus than the one the
+    // preset was actually built/tested against, defeating the whole point
+    // of a fixed seed for reproduction. Not corpus content a user would
+    // consider private (it's boilerplate fuzz payloads, not their own
+    // secrets like 起動時セットアップ's text input), so included
+    // unconditionally, the same as namedRegions/steps above, regardless of
+    // redactSensitiveText.
+    root["fuzzStringCorpus"] = QJsonArray::fromStringList(m_fuzzStringCorpus);
 
     QJsonObject timing;
     timing["intervalMode"] = m_intervalModeRateRadio->isChecked() ? QStringLiteral("rate") : QStringLiteral("ms");
@@ -4095,7 +4409,11 @@ void MainWindow::onSavePreset()
         QMessageBox::warning(this, I18n::t(QStringLiteral("保存エラー")), I18n::t(QStringLiteral("ファイルに書き込めませんでした。")));
         return;
     }
-    file.write(QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Indented));
+    const QJsonDocument doc(buildPresetJson());
+    file.write(doc.toJson(QJsonDocument::Indented));
+    // 不具合報告2.5: mark this exact state as "saved" -- see
+    // m_lastSavedPresetJson's own comment.
+    m_lastSavedPresetJson = doc.toJson(QJsonDocument::Compact);
     appendLog(I18n::t(QStringLiteral("テスト設定を保存しました: %1")).arg(path));
 }
 
@@ -4149,6 +4467,21 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
 
     m_defaultActionParams = actionParamsFromJson(root["defaultActionParams"].toObject());
     m_defaultActionKinds = regionStepFromJson(root["defaultActionKinds"].toObject());
+    // 不具合報告2.3: only override the in-memory (session) corpus when the
+    // preset actually carries one -- an older preset predating this field
+    // has no "fuzzStringCorpus" key, and should leave whatever is already
+    // loaded (from QSettings, see loadFuzzStringCorpus()) untouched rather
+    // than wiping it to an empty list. Deliberately does not call
+    // saveFuzzStringCorpus(): loading someone else's shared preset should
+    // not silently overwrite this machine's own persisted default corpus,
+    // only this session's current one, for the reproducibility this field
+    // exists for.
+    if (root.contains(QStringLiteral("fuzzStringCorpus"))) {
+        QStringList corpus;
+        for (const QJsonValue &v : root["fuzzStringCorpus"].toArray())
+            corpus << v.toString();
+        m_fuzzStringCorpus = corpus;
+    }
 
     const QJsonObject timing = root["timing"].toObject();
     if (timing["intervalMode"].toString() == QStringLiteral("rate"))
@@ -4239,6 +4572,14 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
                               .arg(path, hint));
 
     updateStatisticsDisplay();
+    // 不具合報告2.5: a freshly-loaded preset, untouched since, has nothing
+    // to lose -- see m_lastSavedPresetJson's own comment. Snapshots the
+    // state actually reconstructed above (which doesn't always round-trip
+    // byte-for-byte from the file -- e.g. targetAppNameHint only resolves
+    // to a real selection if a matching window happens to be running right
+    // now), not the raw file content, since that's what closeEvent() will
+    // actually compare against later.
+    m_lastSavedPresetJson = QJsonDocument(buildPresetJson()).toJson(QJsonDocument::Compact);
     return true;
 }
 

@@ -62,6 +62,15 @@ namespace PlatformAutomation
 // permission dialog on first call.
 bool isAccessibilityTrusted(bool promptIfNeeded);
 void openAccessibilitySettings();
+// 不具合報告3.1「Linuxでは何も起きないボタンが、常に有効な状態で2つ並んで
+// いる」: whether openAccessibilitySettings() above actually opens
+// something (macOS: true, a real System Settings pane) or is a complete
+// no-op (Linux/X11: false, there is no such permission/settings pane to
+// open -- see that function's own comment) -- lets the "権限設定を開く"
+// button disable itself instead of sitting there always enabled, directly
+// under a label that already says access is granted, doing nothing when
+// clicked.
+bool hasOpenableAccessibilitySettings();
 
 // Permission needed for QScreen::grabWindow() to actually capture other
 // applications' on-screen content into the pixmap it returns (macOS: Screen
@@ -78,6 +87,9 @@ void openAccessibilitySettings();
 // usage in refreshPermissionLabel().
 bool isScreenRecordingTrusted();
 void openScreenRecordingSettings();
+// Symmetric counterpart to hasOpenableAccessibilitySettings() above, for
+// openScreenRecordingSettings() (不具合報告3.1).
+bool hasOpenableScreenRecordingSettings();
 
 // Whether a real, live-transparent top-level window (Qt::WA_TranslucentBackground)
 // can be trusted to actually render as see-through on this platform/session,
@@ -204,14 +216,33 @@ bool isProcessSuspended(qint64 pid);
 // error).
 bool isBeingDebugged(qint64 pid);
 
-// Best-effort, asynchronous request that the process exit (SIGTERM on
-// Linux/macOS) -- used by 連続実行 (SPEC.md 10 ⑤) to get rid of a leftover
-// target instance before launching a fresh one. Does not wait for the
-// process to actually exit: callers must poll isProcessRunning() themselves
-// (see MainWindow::killTargetThenRelaunchForContinuousRun()) before treating
-// it as gone, since a process can ignore or take time to act on the signal.
-// No-op (and safe to call) if the pid is already gone.
+// Best-effort, asynchronous request that the process exit (SIGCONT then
+// SIGTERM on Linux/macOS) -- used by 連続実行 (SPEC.md 10 ⑤) to get rid of
+// a leftover target instance before launching a fresh one. The SIGCONT is
+// sent first specifically so a target currently stopped (SIGSTOP, or by a
+// debugger) actually wakes up to receive/act on the SIGTERM that follows --
+// a signal sent to a stopped process is otherwise just left pending
+// indefinitely (不具合報告1.2、重大). Does not wait for the process to
+// actually exit: callers must poll isProcessRunning() themselves (see
+// MainWindow::killTargetThenRelaunchForContinuousRun()) before treating it
+// as gone, since a process can still ignore SIGTERM, take time to act on
+// it, or (if traced) never actually resume at all -- see
+// forceKillProcess() below for callers that need a harder guarantee. No-op
+// (and safe to call) if the pid is already gone.
 void terminateProcess(qint64 pid);
+
+// Unconditional, best-effort request that the process be destroyed right
+// now (SIGKILL on Linux/macOS) -- the escalation step for a caller that
+// already gave terminateProcess() a bounded grace period and confirmed via
+// isProcessRunning() that the target is still alive (不具合報告1.2、重大:
+// headless completion must not exit while an orphaned target is still
+// around, and a plain SIGTERM is not guaranteed to ever be acted on, e.g.
+// a process stuck under an active debugger). Like terminateProcess(), this
+// does not itself wait for the process to actually disappear and is a
+// no-op if the pid is already gone -- SIGKILL cannot be caught or ignored
+// by a normal process, but the kernel still needs a scheduling pass to
+// actually reap it.
+void forceKillProcess(qint64 pid);
 
 // Current resident memory and cumulative CPU time for this process. Sample
 // twice and divide the CPU-time delta by the wall-clock delta to get a CPU

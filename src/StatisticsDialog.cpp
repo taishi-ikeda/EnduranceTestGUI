@@ -22,7 +22,7 @@ StatisticsDialog::StatisticsDialog(TestStatistics *stats, const QString &fingerp
     auto *layout = new QVBoxLayout(this);
 
     auto *introLabel = new QLabel(
-        I18n::t(QStringLiteral("現在読み込まれているテスト設定（①②③の内容）について、これまでに"
+        I18n::t(QStringLiteral("現在読み込まれているテスト設定（①②の内容）について、これまでに"
                                 "記録された全実行結果の集計です。手動で対象アプリを再起動して同じ"
                                 "テストを繰り返した場合も、自動連続実行を使った場合も、同じ集計に"
                                 "含まれます。")),

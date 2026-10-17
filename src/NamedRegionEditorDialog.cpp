@@ -151,6 +151,17 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     auto *regionLabel = new QLabel(I18n::t(QStringLiteral("矩形を画面上で描画してください（複数可）:")), m_rectModeGroup);
     regionLabel->setWordWrap(true);
     rectLayout->addWidget(regionLabel);
+    // 不具合報告3.7「領域エディタの中で、座標表示の基準が2種類混在している」:
+    // m_regionListWidget/m_excludeListWidget below show these QRects exactly
+    // as drawn --画面上の絶対座標 -- whereas m_sweepWaypointListWidget
+    // further down shows window-relative coordinates (see its own identical
+    // comment for why). The underlying saved data was always correct either
+    // way; only the lack of any indication of which basis was being shown
+    // was the actual problem, so this just labels it.
+    auto *regionCoordBasisLabel =
+        new QLabel(I18n::t(QStringLiteral("（以下の座標は画面上の絶対位置です）")), m_rectModeGroup);
+    regionCoordBasisLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    rectLayout->addWidget(regionCoordBasisLabel);
     m_regionListWidget = new QListWidget(m_rectModeGroup);
     m_regionListWidget->setMaximumHeight(100);
     rectLayout->addWidget(m_regionListWidget);
@@ -272,6 +283,18 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
         m_sweepModeGroup);
     sweepHint->setWordWrap(true);
     sweepLayout->addWidget(sweepHint);
+
+    // 不具合報告3.7: unlike m_regionListWidget above (screen-absolute),
+    // m_sweepWaypoints is deliberately stored window-relative (see
+    // onAddSweepWaypoint()'s own `pt - m_targetTopLeft`) so a sweep path
+    // keeps tracking the same position on the target window if it moves --
+    // labeled here so that difference is visible instead of silently
+    // looking like the same kind of coordinate as the rectangle list.
+    auto *sweepCoordBasisLabel =
+        new QLabel(I18n::t(QStringLiteral("（以下の座標は対象ウィンドウ左上を基準にした相対位置です）")),
+                    m_sweepModeGroup);
+    sweepCoordBasisLabel->setStyleSheet(QStringLiteral("color: gray;"));
+    sweepLayout->addWidget(sweepCoordBasisLabel);
 
     m_sweepWaypointListWidget = new QListWidget(m_sweepModeGroup);
     m_sweepWaypointListWidget->setMaximumHeight(100);

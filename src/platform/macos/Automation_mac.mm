@@ -5,6 +5,9 @@
 #import <Carbon/Carbon.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <QGuiApplication>
+#include <QScreen>
+
 #include <libproc.h>
 #include <sys/proc.h>
 #include <sys/proc_info.h>
@@ -54,6 +57,11 @@ void openAccessibilitySettings()
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
+bool hasOpenableAccessibilitySettings()
+{
+    return true;
+}
+
 bool isScreenRecordingTrusted()
 {
     // Preflight-only: unlike CGRequestScreenCaptureAccess(), this never
@@ -68,6 +76,11 @@ void openScreenRecordingSettings()
         @"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
     NSURL *url = [NSURL URLWithString:urlString];
     [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
+bool hasOpenableScreenRecordingSettings()
+{
+    return true;
 }
 
 bool supportsWindowTransparency()
@@ -280,8 +293,17 @@ void terminateProcess(qint64 pid)
     // some pid we don't actually own) isn't worth surfacing to the caller,
     // which is going to poll isProcessRunning() afterward anyway. Not
     // independently verified on real macOS hardware (see SPEC.md 8) --
-    // mirrors Automation_linux.cpp's terminateProcess().
+    // mirrors Automation_linux.cpp's terminateProcess(), including the
+    // SIGCONT-before-SIGTERM fix for 不具合報告1.2(重大): a process
+    // currently stopped (SIGSTOP, or paused under a debugger) just leaves
+    // SIGTERM pending indefinitely without ever acting on it.
+    kill((pid_t)pid, SIGCONT);
     kill((pid_t)pid, SIGTERM);
+}
+
+void forceKillProcess(qint64 pid)
+{
+    kill((pid_t)pid, SIGKILL);
 }
 
 ProcessStats queryProcessStats(qint64 pid)
@@ -328,6 +350,21 @@ static CGPoint toCGPoint(const QPoint &pt)
 
 qint64 windowPidAtPoint(const QPoint &pt)
 {
+    // 不具合報告1.1(重大、Linux上で確認されたが同じ経路のためmacOSにも適用):
+    // fail closed for any point outside every connected screen's real
+    // bounds -- see the identical comment in Automation_linux.cpp's own
+    // windowPidAtPoint() for why this matters alongside RandomActionEngine's
+    // own candidate-point clamping.
+    bool onAnyScreen = false;
+    for (QScreen *screen : QGuiApplication::screens()) {
+        if (screen->geometry().contains(pt)) {
+            onAnyScreen = true;
+            break;
+        }
+    }
+    if (!onAnyScreen)
+        return -1;
+
     CFArrayRef cfWindowList =
         CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
     if (!cfWindowList)

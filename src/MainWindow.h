@@ -1,11 +1,13 @@
 #pragma once
 
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
 #include <QPointer>
+#include <QSet>
 
 #include "RandomActionEngine.h"
 #include "RegionEditContext.h"
@@ -285,6 +287,15 @@ private:
     // `stepLabel`) and returns false.
     bool validateStepActionConfig(const RegionStep &step, const QString &stepLabel,
                                    QString &errorMessage) const;
+    // 不具合報告2.7「貼り付けたステップが存在しない操作領域を指していても、
+    // その場では何も言われない」: recursively collects every regionName
+    // `step` (or, for a group/task, any of its members, at any nesting
+    // depth) references that no longer exists in m_namedRegions -- into
+    // `outMissing`, so onPasteSteps() can warn about all of them in one go
+    // right when the paste happens, instead of the user discovering them
+    // one at a time via validateStepActionConfig()'s own identical check,
+    // which only ever reports the first offending step at ▶開始 time.
+    void collectMissingRegionNames(const RegionStep &step, QSet<QString> &outMissing) const;
     // SPEC.md 不具合報告E9: both buildConfigFromUi()/buildSetupOnlyConfigFromUi()
     // used to silently feed whichever of min/max ended up larger straight
     // into RandomActionEngine::scheduleNext() (which itself re-normalizes
@@ -333,6 +344,23 @@ private:
     // false (errorMessage filled in) on a missing/unreadable/malformed
     // file; never shows any UI itself.
     bool loadPresetFromPath(const QString &path, QString &errorMessage);
+
+    // 不具合報告2.5「終了時の未保存警告が、保存した直後でも出る」:
+    // closeEvent() used to decide whether to warn purely from whether
+    // m_steps/m_setupActions/m_namedRegions were non-empty -- which is true
+    // right after a save, right after a load, and every time in between,
+    // so the warning fired unconditionally for any non-trivial setup and
+    // taught users to click through it without reading it. Rather than
+    // thread a "mark dirty" call through every individual mutation site
+    // (every step/region/setup-action edit, every timing spin box, ...),
+    // this snapshots buildPresetJson()'s serialized output at the moment
+    // of the last successful save or load; closeEvent() only warns when
+    // the current serialization actually differs from it. Updated by
+    // onSavePreset() (after a successful write) and loadPresetFromPath()
+    // (after a successful load), and initialized once at the end of the
+    // constructor so a never-touched, freshly-started session also counts
+    // as "nothing to lose".
+    QByteArray m_lastSavedPresetJson;
 
     // Recomputes m_currentConfigFingerprint from the current ①②③ setup and
     // refreshes m_statisticsSummaryLabel and every ②list row's crash badge
@@ -790,6 +818,14 @@ private:
     QCheckBox *m_loadInjectionLinkToRunCheck = nullptr;
     QPushButton *m_loadInjectionManualToggleButton = nullptr;
     QLabel *m_loadInjectionStatusLabel = nullptr;
+    // 不具合報告3.8「負荷注入が動いていることが、主画面から分からない」:
+    // mirrors m_loadInjectionStatusLabel in the always-visible controls row
+    // (next to m_statusLabel), since that one lives deep inside ⑦タイミング・
+    // 制限's own負荷注入 group and needs scrolling to see at the default
+    // window size. Kept in sync by refreshLoadInjectionStatusLabel(); left
+    // empty (so effectively invisible) whenever load injection isn't
+    // running.
+    QLabel *m_loadInjectionActiveIndicatorLabel = nullptr;
     LoadInjector *m_loadInjector = nullptr;
     bool m_loadInjectionStartedByRun = false;
 
@@ -906,6 +942,27 @@ private:
     // is true and m_batchWaitTimer is active.
     enum class ContinuousWaitPhase { None, WaitingForExit, WaitingForAppear };
     ContinuousWaitPhase m_continuousWaitPhase = ContinuousWaitPhase::None;
+    // 不具合報告1.3(重大)「SIGSTOP等で終了できない対象があると、連続実行が
+    // 「終了待ち」で永久に止まる」: WaitingForExit used to have no time
+    // limit at all -- a target that ignores/never acts on terminateProcess()
+    // (stuck under an active debugger, in particular) left onBatchWaitTick()
+    // returning early forever, with nothing in the log to explain why.
+    // Started by killTargetThenRelaunchForContinuousRun() the moment it
+    // enters WaitingForExit; onBatchWaitTick() reads it each tick to decide
+    // when to escalate to forceKillProcess() and, if that still doesn't
+    // work, abort the whole continuous run as an error.
+    QElapsedTimer m_continuousWaitExitTimer;
+    // The pid killTargetThenRelaunchForContinuousRun() last sent
+    // terminateProcess() to -- separate from m_lastRunTargetPid because the
+    // two aren't always the same pid (see that function's own fallback
+    // logic), and onBatchWaitTick() needs to know exactly which one to
+    // escalate forceKillProcess() against.
+    qint64 m_continuousWaitKillPid = -1;
+    // Whether this WaitingForExit cycle has already escalated to
+    // forceKillProcess() -- so onBatchWaitTick() sends SIGKILL at most once
+    // per cycle instead of resending it every tick while waiting the extra
+    // grace period out.
+    bool m_continuousWaitForceKilled = false;
     // True from onStart() (when its "対象ツールの起動から開始する" checkbox
     // is checked) until the launched target is detected and the run
     // actually begins -- tells onBatchWaitTick() that the run about to
@@ -947,7 +1004,6 @@ private:
     RandomActionEngine *m_engine = nullptr;
     QPointer<StopPanel> m_stopPanel;
     QTimer *m_uiTimer = nullptr;
-    QElapsedTimer m_runElapsed;
 
     // "ファイル" menu: save/load the whole editable test setup (named
     // regions, steps, default action params/kinds, timing & limits) as a

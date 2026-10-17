@@ -127,7 +127,7 @@ TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, RegionEditCont
     modeRow->addStretch();
     rightCol->addLayout(modeRow);
     auto *defaultsNoteLabel = new QLabel(
-        I18n::t(QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには①対象選択の"
+        I18n::t(QStringLiteral("※「デフォルトを使う」場合の値は参照のみです。変更するには②の"
                         "「デフォルト」ボタンを使ってください。")),
         scrollContent);
     defaultsNoteLabel->setWordWrap(true);

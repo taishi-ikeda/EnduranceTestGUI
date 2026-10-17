@@ -82,6 +82,19 @@ public:
     // instance -- same requirement "⟳ 連続実行" already has).
     bool runHeadless(const QString &presetPath, int repeatCount);
 
+    // 不具合報告D4(重大): called from main.cpp's SIGTERM/SIGINT handling
+    // (see its own comment) once the signal has been safely relayed onto
+    // the Qt event loop via a self-pipe -- never from inside the raw
+    // signal handler itself, since this ends up calling into X11/AT-SPI
+    // client libraries that are not async-signal-safe. If a run is in
+    // progress, stops it the same way "■ 停止" would, which (via
+    // RandomActionEngine::doStop()) unconditionally releases any mouse
+    // button/modifier keys a long-press drag is still physically holding
+    // down -- left held, they would otherwise persist at the X server
+    // after this process exits, corrupting every subsequent click/keypress
+    // on the whole display until something else presses and releases them.
+    void releaseHeldInputForTermination();
+
 protected:
     // SPEC.md 不具合報告 E6: previously closed immediately with no warning,
     // silently discarding an entire test setup (steps/operation regions/

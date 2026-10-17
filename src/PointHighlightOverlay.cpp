@@ -1,5 +1,6 @@
 #include "PointHighlightOverlay.h"
 #include "OverlayGeometry.h"
+#include "platform/PlatformAutomation.h"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -51,6 +52,20 @@ public:
         setGeometry(screenGeom);
         m_origin = screenGeom.topLeft();
         raise();
+        // 不具合報告D20(中): Qt::WA_TransparentForMouseEvents (set once, in
+        // the constructor) was found unreliable for this exact kind of
+        // window -- full-screen, Qt::WindowStaysOnTopHint, repeatedly
+        // shown/hidden, under a bare (non-compositing) X11 window manager --
+        // same exact failure mode RegionHighlightOverlay already hit
+        // (SPEC.md 10 不具合報告 D1). This window is shown directly on top
+        // of a still-open dialog (起動時セットアップ's position marker, or a
+        // sweep region's already-added waypoints) while that dialog's own
+        // "OK"/"点を追加..." button is waiting for the next click, so it was
+        // absorbing that click instead of letting it reach the dialog.
+        // Re-asserted on every show()/resize rather than only once in the
+        // constructor, since this needs a valid native window handle
+        // (winId()), which show() is what actually creates.
+        PlatformAutomation::setWindowClickThrough(quint32(winId()));
         update();
     }
 

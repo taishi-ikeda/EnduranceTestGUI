@@ -2,6 +2,7 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -236,6 +237,29 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     m_objectInfoLabel = new QLabel(m_objectModeGroup);
     m_objectInfoLabel->setWordWrap(true);
     objectLayout->addWidget(m_objectInfoLabel);
+
+    // 不具合報告D28: a widget whose own accessible name changes at runtime
+    // (e.g. one that embeds a live counter) can never re-resolve by exact
+    // name after the first run that changed it -- let前方一致/正規表現 match
+    // a name that only partially stays fixed.
+    auto *nameMatchModeRow = new QHBoxLayout;
+    nameMatchModeRow->addWidget(
+        new QLabel(I18n::t(QStringLiteral("名前の照合方法:")), m_objectModeGroup));
+    m_nameMatchModeCombo = new QComboBox(m_objectModeGroup);
+    m_nameMatchModeCombo->addItem(I18n::t(QStringLiteral("完全一致")),
+                                   QVariant::fromValue(int(ObjectNameMatchMode::Exact)));
+    m_nameMatchModeCombo->addItem(I18n::t(QStringLiteral("前方一致")),
+                                   QVariant::fromValue(int(ObjectNameMatchMode::StartsWith)));
+    m_nameMatchModeCombo->addItem(I18n::t(QStringLiteral("正規表現")),
+                                   QVariant::fromValue(int(ObjectNameMatchMode::Regex)));
+    m_nameMatchModeCombo->setCurrentIndex(static_cast<int>(initial.objectTarget.nameMatchMode));
+    m_nameMatchModeCombo->setToolTip(
+        I18n::t(QStringLiteral("対象部品の名前の一部が実行のたびに変わる場合（例:クリック回数を含む表示）、"
+                                "前方一致や正規表現を使うと、名前が変わっても同じ部品を再解決できます。"
+                                "通常は「完全一致」のままで構いません。")));
+    nameMatchModeRow->addWidget(m_nameMatchModeCombo);
+    nameMatchModeRow->addStretch();
+    objectLayout->addLayout(nameMatchModeRow);
 
     m_useDefaultActionCheck = new QCheckBox(
         I18n::t(QStringLiteral("クリック操作では、座標の代わりにこの部品の既定アクションを直接実行する\n"
@@ -718,6 +742,8 @@ NamedRegion NamedRegionEditorDialog::result() const
         // target region (RandomActionEngine::resolveObjectTargetRegion()
         // resolves its bounds dynamically instead).
         region.objectTarget = m_objectTarget;
+        region.objectTarget.nameMatchMode =
+            static_cast<ObjectNameMatchMode>(m_nameMatchModeCombo->currentData().toInt());
         region.objectTarget.useDefaultAction = m_useDefaultActionCheck->isChecked();
         region.objectTarget.reresolveEveryActions = m_reresolveIntervalSpin->value();
         return region;

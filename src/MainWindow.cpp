@@ -36,6 +36,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
@@ -1493,6 +1494,12 @@ QString MainWindow::describeStep(const RegionStep &step, int index) const
         actions << I18n::t(QStringLiteral("ダブルクリック"));
     if (step.enableDrag)
         actions << I18n::t(QStringLiteral("ドラッグ"));
+    // 不具合報告D21(中): this enumeration never listed enableHoldDrag at
+    // all, so a step with only "長押しドラッグ（カメラ操作等）" enabled
+    // displayed "操作: (なし)" despite running correctly -- see
+    // RandomActionEngine::describeActionKind()'s own identical label.
+    if (step.enableHoldDrag)
+        actions << I18n::t(QStringLiteral("長押しドラッグ"));
     if (step.enableKey)
         actions << I18n::t(QStringLiteral("キー入力"));
     if (step.enableTypingBurst)
@@ -1552,6 +1559,17 @@ void MainWindow::refreshStepList()
     for (int i = 0; i < m_steps.size(); ++i)
         m_stepListWidget->addItem(describeStep(m_steps[i], i));
     updateGroupButtonsEnabled();
+    // 不具合報告D19(中): updateStatisticsDisplay() was previously only
+    // called at startup/run-start/run-end/preset-load -- editing ②'s step
+    // list in between (add/edit/delete/move/group/ungroup/task/untask/
+    // paste all funnel through this one shared refresh point) left
+    // m_currentConfigFingerprint and every crash-rate badge/summary label
+    // stale, so a step list edited into a completely different
+    // configuration kept showing the PREVIOUS configuration's crash
+    // history (or a brand-new, never-run configuration showed someone
+    // else's old crash badge). Recomputing here keeps them always in sync
+    // with whatever ② actually looks like right now.
+    updateStatisticsDisplay();
 }
 
 QString MainWindow::describeNamedRegion(const NamedRegion &region) const
@@ -1655,9 +1673,15 @@ void MainWindow::refreshSetupActionList()
 
 void MainWindow::updateSetupActionButtonsEnabled()
 {
+    // 不具合報告D18(中): previously based solely on currentRow(), which a
+    // Ctrl+click that deselects the current row (leaving selectedItems()
+    // empty) does not clear -- so 編集.../削除/↑上へ stayed enabled with
+    // nothing actually selected. Mirror updateGroupButtonsEnabled()'s own
+    // singleValidSelection treatment for the ② step list.
     const int row = m_setupActionListWidget->currentRow();
-    const bool validSelection =
-        m_setupActionsGroup->isEnabled() && row >= 0 && row < m_setupActions.size();
+    const bool validSelection = m_setupActionsGroup->isEnabled() &&
+                                 m_setupActionListWidget->selectedItems().size() == 1 && row >= 0 &&
+                                 row < m_setupActions.size();
     m_editSetupActionButton->setEnabled(validSelection);
     m_removeSetupActionButton->setEnabled(validSelection);
     m_moveSetupActionUpButton->setEnabled(validSelection && row > 0);
@@ -1846,8 +1870,14 @@ bool MainWindow::resolveNamedRegionForDisplay(const NamedRegion &region, QList<Q
         const qint64 pid = currentTargetPidOrInvalid();
         if (pid < 0)
             return false;
+        // 不具合報告D28: ObjectNameMatchMode (TestConfig.h) and NameMatchMode
+        // (PlatformAutomation.h) are declared with identical member order
+        // specifically so this cast is valid -- kept as two separate enums
+        // so PlatformAutomation.h (used on every platform, with no
+        // TestConfig.h dependency by design) never has to include TestConfig.h.
         PlatformAutomation::AccessibleObjectHandle handle = PlatformAutomation::findAccessibleObject(
-            pid, region.objectTarget.role, region.objectTarget.name, region.objectTarget.occurrenceIndex);
+            pid, region.objectTarget.role, region.objectTarget.name, region.objectTarget.occurrenceIndex,
+            static_cast<PlatformAutomation::NameMatchMode>(region.objectTarget.nameMatchMode));
         QRect bounds;
         if (!handle.isValid() || !handle.currentBounds(bounds))
             return false;
@@ -2031,6 +2061,11 @@ void MainWindow::onAddSetupAction()
 
 void MainWindow::onEditSelectedSetupAction()
 {
+    // 不具合報告D18(中): see updateSetupActionButtonsEnabled()'s own
+    // comment -- act only when exactly one row is genuinely selected, not
+    // merely whatever currentRow() still remembers.
+    if (m_setupActionListWidget->selectedItems().size() != 1)
+        return;
     const int row = m_setupActionListWidget->currentRow();
     if (row < 0 || row >= m_setupActions.size())
         return;
@@ -2046,6 +2081,12 @@ void MainWindow::onEditSelectedSetupAction()
 
 void MainWindow::onRemoveSelectedSetupAction()
 {
+    // 不具合報告D18(重大寄り): previously deleted whatever currentRow()
+    // still pointed at even after a Ctrl+click deselected it -- a
+    // no-selection click on "削除" silently removed the wrong (last
+    // current) entry with no confirmation. See updateSetupActionButtonsEnabled().
+    if (m_setupActionListWidget->selectedItems().size() != 1)
+        return;
     const int row = m_setupActionListWidget->currentRow();
     if (row < 0 || row >= m_setupActions.size())
         return;
@@ -2055,6 +2096,8 @@ void MainWindow::onRemoveSelectedSetupAction()
 
 void MainWindow::onMoveSetupActionUp()
 {
+    if (m_setupActionListWidget->selectedItems().size() != 1)
+        return;
     const int row = m_setupActionListWidget->currentRow();
     if (row > 0 && row < m_setupActions.size()) {
         m_setupActions.move(row, row - 1);
@@ -2065,6 +2108,8 @@ void MainWindow::onMoveSetupActionUp()
 
 void MainWindow::onMoveSetupActionDown()
 {
+    if (m_setupActionListWidget->selectedItems().size() != 1)
+        return;
     const int row = m_setupActionListWidget->currentRow();
     if (row >= 0 && row < m_setupActions.size() - 1) {
         m_setupActions.move(row, row + 1);
@@ -2697,6 +2742,62 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
             return false;
         }
     }
+    // 不具合報告D11(高): "選択した文字列のみ"（fuzzStringUseAllEntries=
+    // false）で候補を1つも選んでいない構成は、以前はRandomActionEngine側の
+    // 救済ロジックで気付かれないまま全コーパスから送信されてしまっていた
+    // （その救済自体はD11で削除済み）。利用者が意図して絞ったつもりの設定
+    // が実質「絞っていない」のと同じ挙動になるのを防ぐため、開始前の設定
+    // エラーとして明示する。
+    if ((step.enableFuzzString || step.enableFuzzAllFields) && !params.fuzzStringUseAllEntries &&
+        params.fuzzStringSelectedEntries.isEmpty()) {
+        errorMessage = I18n::t(QStringLiteral("ファズ文字列入力を有効にした%1で、「選択した文字列のみ」が"
+                                        "選ばれているのに候補が1つも選択されていません。候補を最低1つ"
+                                        "選択するか、「すべてのファズ文字列を使う」に切り替えてください"
+                                        "（デフォルトまたはそのステップの専用設定）。"))
+                           .arg(stepLabel);
+        return false;
+    }
+    // 不具合報告D22(中): 長押しドラッグの各種「下限〜上限」設定は、
+    // RandomActionEngine側でqMin/qMaxにより無言で正規化され、エラーなく
+    // 実行できてしまっていた（2.2で連続キー入力に行ったのと同じ種類の
+    // 問題）。下限が上限を上回っている場合は、ここで開始前に弾く。
+    if (step.enableHoldDrag) {
+        struct RangeCheck { int lo; int hi; const char *label; };
+        QList<RangeCheck> ranges = {
+            {params.holdDragDurationMinMs, params.holdDragDurationMaxMs, "継続時間"},
+            {params.holdDragPathExtentMinPx, params.holdDragPathExtentMaxPx, "移動範囲"},
+            {params.holdDragStepIntervalMinMs, params.holdDragStepIntervalMaxMs, "移動の間隔"},
+        };
+        // オーバーレイの範囲設定は、そのオーバーレイ自体が有効な場合のみ
+        // チェックする（無効なオーバーレイの初期値が逆転していても、実行
+        // 時には一切参照されないため）。
+        if (params.holdDragWheelOverlay.enabled) {
+            ranges << RangeCheck{params.holdDragWheelOverlay.notchesPerBurstMin,
+                                  params.holdDragWheelOverlay.notchesPerBurstMax, "ホイールのノッチ数"};
+            ranges << RangeCheck{params.holdDragWheelOverlay.notchIntervalMinMs,
+                                  params.holdDragWheelOverlay.notchIntervalMaxMs, "ホイールのノッチ間隔"};
+            ranges << RangeCheck{params.holdDragWheelOverlay.pauseBetweenBurstsMinMs,
+                                  params.holdDragWheelOverlay.pauseBetweenBurstsMaxMs, "ホイールの休止時間"};
+        }
+        if (params.holdDragKeyOverlay.enabled) {
+            ranges << RangeCheck{params.holdDragKeyOverlay.keyIntervalMinMs,
+                                  params.holdDragKeyOverlay.keyIntervalMaxMs, "キー入力の間隔"};
+        }
+        if (params.holdDragWindowOpOverlay.enabled) {
+            ranges << RangeCheck{params.holdDragWindowOpOverlay.intervalMinMs,
+                                  params.holdDragWindowOpOverlay.intervalMaxMs, "ウィンドウ操作の間隔"};
+        }
+        for (const RangeCheck &r : ranges) {
+            if (r.lo > r.hi) {
+                errorMessage = I18n::t(QStringLiteral("%1を有効にした%2の「%3」設定で、下限（最小）が上限（最大）を"
+                                                "上回っています。下限を上限以下の値に直してください"
+                                                "（デフォルトまたはそのステップの専用設定）。"))
+                                   .arg(I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）")), stepLabel,
+                                        QString::fromUtf8(r.label));
+                return false;
+            }
+        }
+    }
     if (step.enableShortcut && params.shortcutSequences.isEmpty()) {
         errorMessage = I18n::t(QStringLiteral("ショートカットキーを有効にした%1があります。ショートカットを最低1つ追加してください"
             "（デフォルトまたはそのステップの専用設定）。"))
@@ -3011,15 +3112,39 @@ bool MainWindow::beginRun(bool interactive)
     if (PlatformAutomation::queryWindowBounds(config.targetWindowId, config.targetPid, targetBounds)) {
         PlatformAutomation::activateProcess(config.targetPid);
         if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
+            // 不具合報告D33(低): the generic message below never
+            // distinguished "couldn't confirm" from the much more specific
+            // "the window's own center point isn't on any real screen at
+            // all" (e.g. a window positioned mostly or entirely off-screen,
+            // so even moving/restoring it couldn't help the way the
+            // generic advice below suggests). Check that case explicitly
+            // and name it, same information pickRandomPoint()'s own
+            // regionOffScreen distinction already gives mid-run (不具合報告2.6).
+            bool centerOnAnyScreen = false;
+            for (QScreen *screen : QGuiApplication::screens()) {
+                if (screen->geometry().contains(targetBounds.center())) {
+                    centerOnAnyScreen = true;
+                    break;
+                }
+            }
+            const QString reason =
+                centerOnAnyScreen
+                    ? I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、"
+                          "開始できません。\n\n対象ウィンドウが他のウィンドウに覆われていないか、"
+                          "最小化されていないか確認してください。それでも解決しない場合、この環境"
+                          "（特にLinuxの一部のウィンドウマネージャ）では安全チェック機能自体が動作"
+                          "しない可能性があります（詳細はSPEC.md参照）。"))
+                    : I18n::t(QStringLiteral("対象ウィンドウが画面から大きくはみ出しており、安全に操作でき"
+                          "ることを確認できなかったため、開始できません。\n\n対象ウィンドウの位置を"
+                          "画面内に戻すか、①の「保存したウィンドウ位置へ変更」を使ってから、もう一度"
+                          "開始してください。"));
             if (interactive) {
-                QMessageBox::warning(
-                    this, I18n::t(QStringLiteral("安全確認に失敗しました")),
-                    I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
-                        "対象ウィンドウが他のウィンドウに覆われていないか、最小化されていないか確認して"
-                        "ください。それでも解決しない場合、この環境（特にLinuxの一部のウィンドウマネージャ）"
-                        "では安全チェック機能自体が動作しない可能性があります（詳細はSPEC.md参照）。")));
+                QMessageBox::warning(this, I18n::t(QStringLiteral("安全確認に失敗しました")), reason);
             } else {
-                appendLog(I18n::t(QStringLiteral("連続実行: 安全確認に失敗したため中断しました")));
+                appendLog(centerOnAnyScreen
+                              ? I18n::t(QStringLiteral("連続実行: 安全確認に失敗したため中断しました"))
+                              : I18n::t(QStringLiteral("連続実行: 対象ウィンドウが画面から大きくはみ出して"
+                                    "いるため、安全確認に失敗して中断しました")));
                 m_batchModeActive = false;
                 m_headlessSetupError = true;
                 checkHeadlessCompletion();
@@ -3068,7 +3193,41 @@ bool MainWindow::beginRun(bool interactive)
     m_stopPanel = new StopPanel();
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
     connect(m_stopPanel, &StopPanel::pauseResumeRequested, this, &MainWindow::onPauseResume);
-    m_stopPanel->show();
+    // 不具合報告D23(高、TC-024の回帰): m_stopPanel is still constructed and
+    // kept updated (setPaused()/setIterationCount() below) even in headless
+    // mode -- only its own window must stay unshown, since TC-024 documents
+    // "no GUI window is ever shown at all" as this mode's whole point, and a
+    // visible always-on-top panel also opened the door to 不具合報告D2/D7
+    // (a stray click landing on it, or its own "■ 停止" triggering a stop
+    // that never reaches checkHeadlessCompletion()).
+    if (!m_headlessMode)
+        m_stopPanel->show();
+
+    // 不具合報告D13(中): while a long-press drag is held, the pointer is
+    // continuously moved back onto its own path every tick (継続時間は最大
+    // 10分まで設定可能), so a real mouse click can never land on the
+    // floating stop panel's own "■ 停止" button until the gesture ends on
+    // its own. This is a structural limitation of the feature, not a bug
+    // to fix -- warn once up front (not headless: there is no panel to
+    // click there in the first place) so the user knows the global
+    // emergency-stop hotkey is the only way to interrupt it early.
+    if (!m_headlessMode) {
+        const auto stepHasHoldDrag = [](const RegionStep &s) { return s.enableHoldDrag; };
+        bool anyHoldDrag = false;
+        for (const RegionStep &s : config.steps) {
+            if (stepHasHoldDrag(s) ||
+                std::any_of(s.groupMembers.cbegin(), s.groupMembers.cend(), stepHasHoldDrag) ||
+                std::any_of(s.taskMembers.cbegin(), s.taskMembers.cend(), stepHasHoldDrag)) {
+                anyHoldDrag = true;
+                break;
+            }
+        }
+        if (anyHoldDrag) {
+            appendLog(I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）を含むステップがあります。長押し中は"
+                                        "画面上の「■ 停止」をマウスでは押せません。中断したい場合は、グローバル"
+                                        "緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を使ってください。")));
+        }
+    }
 
     // SPEC.md 不具合報告E7「実行のたびにログ表示が消える」: this used to
     // unconditionally clear() here, wiping out not just the previous
@@ -3078,6 +3237,24 @@ bool MainWindow::beginRun(bool interactive)
     // appendLog()'s comment) and the full, uncapped per-run log file below
     // captures everything regardless, so there's no size concern in simply
     // not clearing -- a separator line marks where each run starts instead.
+    //
+    // 不具合報告D29(低): this separator (and the "連続実行: N/M回目を
+    // 開始します" line below) used to be logged *before* m_fullLogFile was
+    // closed and reopened for this run -- appendLog() writes through to
+    // whichever file happens to be open at the moment it's called, so both
+    // lines landed at the tail of the *previous* run's log file instead of
+    // the top of this run's own one. The file switch below now happens
+    // first.
+    if (m_fullLogFile.isOpen())
+        m_fullLogFile.close();
+    const QString logDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/EnduranceTestGUI_Logs");
+    QDir().mkpath(logDir);
+    const QString logPath = QStringLiteral("%1/run_%2.log").arg(
+        logDir, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_fullLogFile.setFileName(logPath);
+    const bool fullLogOpened = m_fullLogFile.open(QIODevice::WriteOnly | QIODevice::Text);
+
     appendLog(I18n::t(QStringLiteral("────── 実行開始 ──────")));
     if (m_batchModeActive) {
         appendLog(I18n::t(QStringLiteral("連続実行: %1/%2回目を開始します"))
@@ -3091,15 +3268,7 @@ bool MainWindow::beginRun(bool interactive)
     // the m_fullLogFile field comment for why this exists separately from
     // m_logView's capped display. Opened fresh per run; closed in
     // onEngineFinished().
-    if (m_fullLogFile.isOpen())
-        m_fullLogFile.close();
-    const QString logDir =
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/EnduranceTestGUI_Logs");
-    QDir().mkpath(logDir);
-    const QString logPath = QStringLiteral("%1/run_%2.log").arg(
-        logDir, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
-    m_fullLogFile.setFileName(logPath);
-    if (m_fullLogFile.open(QIODevice::WriteOnly | QIODevice::Text))
+    if (fullLogOpened)
         appendLog(I18n::t(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
                                   "切れることなく全操作を記録): %1"))
                        .arg(logPath));
@@ -3180,7 +3349,11 @@ void MainWindow::onTestSetupActions()
     m_stopPanel = new StopPanel();
     connect(m_stopPanel, &StopPanel::stopRequested, this, &MainWindow::onStop);
     connect(m_stopPanel, &StopPanel::pauseResumeRequested, this, &MainWindow::onPauseResume);
-    m_stopPanel->show();
+    // See beginRun()'s identical guard (不具合報告D23) -- "▶ Test Startup
+    // Setup" is itself only reachable from the interactive GUI, but guarded
+    // the same way for consistency and in case that ever changes.
+    if (!m_headlessMode)
+        m_stopPanel->show();
 
     // See beginRun()'s identical comment (SPEC.md 不具合報告E7).
     appendLog(I18n::t(QStringLiteral("────── 実行開始 ──────")));
@@ -3252,6 +3425,19 @@ bool MainWindow::runHeadless(const QString &presetPath, int repeatCount)
     // nothing to fall back to here without a human to relaunch by hand).
     onContinuousRun();
     return true;
+}
+
+void MainWindow::releaseHeldInputForTermination()
+{
+    // 不具合報告D4(重大): engine->stop() itself no-ops if nothing is running
+    // (RandomActionEngine::stop()'s own guard), and does nothing at all if
+    // m_engine was never constructed -- both fine, there is then nothing
+    // held to release. Deliberately does none of onStop()'s other
+    // bookkeeping (batch-mode flags, log messages) since the process is
+    // about to exit regardless; only the physical-input release performed
+    // unconditionally inside RandomActionEngine::doStop() matters here.
+    if (m_engine)
+        m_engine->stop();
 }
 
 void MainWindow::onContinuousRun()
@@ -3571,6 +3757,21 @@ void MainWindow::continueBatchIfNeeded()
     if (!m_batchModeActive) {
         if (m_fullLogFile.isOpen())
             m_fullLogFile.close();
+        // 不具合報告D7(高): onStop() clears m_batchModeActive *before*
+        // calling m_engine->stop() (so a manual stop immediately cancels
+        // the whole batch rather than just the current run -- see its own
+        // comment), which means this function's own flag check above can no
+        // longer tell "this was never a batch run" apart from "it was, and
+        // got manually stopped mid-batch" by the time the engine's
+        // asynchronous finished() signal gets here. Previously that made
+        // this branch return having never called checkHeadlessCompletion()
+        // at all for the latter case, leaving a headless `--run` invocation
+        // stopped this way hang forever (with its already-launched target
+        // process also left running). checkHeadlessCompletion() is itself
+        // a no-op whenever m_headlessMode is false, so calling it here
+        // unconditionally is safe for the normal interactive/non-batch case
+        // too.
+        checkHeadlessCompletion();
         return;
     }
     ++m_batchRunsCompleted;

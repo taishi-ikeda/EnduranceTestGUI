@@ -188,6 +188,13 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
         new QCheckBox(I18n::t(QStringLiteral("長押しドラッグ中にキー入力を重ねて行う"
                                               "（使用文字・名前付きキーは下記のキー入力設定を使用）")),
                        this);
+    // 不具合報告D5(重大): Ctrl等を押したままの長押しスタイルと組み合わせると
+    // 無差別にCtrl+文字のショートカットが発火してしまうため、修飾キーを
+    // 伴うスタイルが選ばれている間、この重ね打ちは自動的に無効化される。
+    m_holdDragKeyEnableCheck->setToolTip(
+        I18n::t(QStringLiteral("ボタン・修飾キーのスタイル一覧でShift/Ctrl/Altを伴うものが選ばれた"
+                                "長押しの間は、意図しないショートカット発火（Ctrl+S等）を防ぐため"
+                                "このキー入力の重ね打ちは自動的に行われません。")));
     layout->addWidget(m_holdDragKeyEnableCheck);
     auto *holdDragKeyIntervalRow = new QHBoxLayout;
     holdDragKeyIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("  キー間隔:"))));

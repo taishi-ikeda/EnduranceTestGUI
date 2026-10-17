@@ -6,6 +6,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include <QGuiApplication>
+#include <QRegularExpression>
 #include <QScreen>
 
 #include <libproc.h>
@@ -386,6 +387,20 @@ qint64 windowPidAtPoint(const QPoint &pt)
         if (!pidNum)
             continue;
         const pid_t ownerPid = pidNum.intValue;
+        // 不具合報告D2(重大、Linuxで確認・この行はmacOSでは未検証):
+        // on Linux, unconditionally skipping every one of ETG's own windows
+        // here let a click land unnoticed on ETG's own always-on-top
+        // stop/pause panel instead of a safety stop (see the fix and
+        // comment on this same check in Automation_linux.cpp's
+        // windowPidAtPoint()). The `layerNum.intValue != 0` filter above
+        // already excludes this app's floating/always-on-top panels here
+        // (NSFloatingWindowLevel and above report a non-zero kCGWindowLayer),
+        // so the failure mode as reproduced on Linux is not expected to
+        // reach this line on macOS. This has not been verified on real
+        // macOS hardware (no macOS toolchain in this environment) -- if a
+        // self-owned, normal-layer (layer 0) ETG window is ever found to
+        // overlap the target during a run, this skip would need the same
+        // narrowing the Linux version received.
         if (ownerPid == selfPid)
             continue;
 
@@ -991,10 +1006,29 @@ static bool getElementBounds(AXUIElementRef node, QRect &out)
     return true;
 }
 
+// 不具合報告D28(低、Linux版Automation_linux.cppのmatchesObjectName()と同じ
+// 目的): see that function's own comment -- mirrored here for macOS's
+// AXUIElement-based backend.
+static bool matchesObjectName(const QString &candidate, const QString &pattern, NameMatchMode mode)
+{
+    switch (mode) {
+    case NameMatchMode::StartsWith:
+        return candidate.startsWith(pattern);
+    case NameMatchMode::Regex: {
+        const QRegularExpression re(pattern);
+        return re.isValid() && re.match(candidate).hasMatch();
+    }
+    case NameMatchMode::Exact:
+    default:
+        return candidate == pattern;
+    }
+}
+
 // Bounded recursive search of `node`'s subtree for a descendant whose
-// kAXRoleAttribute and kAXTitleAttribute both match exactly (role as the
-// backend reports it, e.g. "AXButton", "AXMenuItem", "AXCheckBox" -- see
-// ObjectTarget::role's comment), visiting matches in document order and
+// kAXRoleAttribute matches exactly (role as the backend reports it, e.g.
+// "AXButton", "AXMenuItem", "AXCheckBox" -- see ObjectTarget::role's comment)
+// and whose kAXTitleAttribute matches per nameMatchMode (see
+// matchesObjectName() above), visiting matches in document order and
 // returning the `occurrenceIndex`'th one (0-based, via `matchesSeen`) --
 // used by findAccessibleObject() below. Same bounded-traversal rationale as
 // findNamedElementRecursive() above, just also role-checked and not
@@ -1002,8 +1036,9 @@ static bool getElementBounds(AXUIElementRef node, QRect &out)
 // ObjectTarget only wants the bounding box of (useDefaultAction == false)
 // need not be "pressable" to begin with.
 static AXUIElementRef findRoleNamedElementRecursive(AXUIElementRef node, const QString &role,
-                                                     const QString &name, int occurrenceIndex,
-                                                     int &matchesSeen, int depth, int &budget)
+                                                     const QString &name, NameMatchMode nameMatchMode,
+                                                     int occurrenceIndex, int &matchesSeen, int depth,
+                                                     int &budget)
 {
     if (!node || depth > 20 || budget <= 0)
         return nullptr;
@@ -1024,7 +1059,7 @@ static AXUIElementRef findRoleNamedElementRecursive(AXUIElementRef node, const Q
         if (AXUIElementCopyAttributeValue(node, kAXTitleAttribute, (CFTypeRef *)&title) ==
                 kAXErrorSuccess &&
             title) {
-            nameMatches = (QString::fromCFString(title) == name);
+            nameMatches = matchesObjectName(QString::fromCFString(title), name, nameMatchMode);
             CFRelease(title);
         }
     }
@@ -1044,8 +1079,8 @@ static AXUIElementRef findRoleNamedElementRecursive(AXUIElementRef node, const Q
         const CFIndex count = CFArrayGetCount(children);
         for (CFIndex i = 0; i < count && budget > 0; ++i) {
             AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
-            AXUIElementRef found = findRoleNamedElementRecursive(child, role, name, occurrenceIndex,
-                                                                  matchesSeen, depth + 1, budget);
+            AXUIElementRef found = findRoleNamedElementRecursive(
+                child, role, name, nameMatchMode, occurrenceIndex, matchesSeen, depth + 1, budget);
             if (found) {
                 CFRelease(children);
                 return found;
@@ -1197,7 +1232,8 @@ AccessibleObjectInfo accessibleObjectAtPoint(const QPoint &pt, qint64 expectedOw
 }
 
 AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
-                                             const QString &name, int occurrenceIndex)
+                                             const QString &name, int occurrenceIndex,
+                                             NameMatchMode nameMatchMode)
 {
     AccessibleObjectHandle handle;
     if (accessibilityFeaturesDisabled())
@@ -1221,7 +1257,8 @@ AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QStri
     if (AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute, (CFTypeRef *)&menuBar) ==
             kAXErrorSuccess &&
         menuBar) {
-        found = findRoleNamedElementRecursive(menuBar, role, name, wantIndex, matchesSeen, 0, budget);
+        found = findRoleNamedElementRecursive(menuBar, role, name, nameMatchMode, wantIndex, matchesSeen,
+                                               0, budget);
         CFRelease(menuBar);
     }
 
@@ -1233,7 +1270,8 @@ AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QStri
             const CFIndex count = CFArrayGetCount(windows);
             for (CFIndex i = 0; i < count && !found && budget > 0; ++i) {
                 AXUIElementRef win = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
-                found = findRoleNamedElementRecursive(win, role, name, wantIndex, matchesSeen, 0, budget);
+                found = findRoleNamedElementRecursive(win, role, name, nameMatchMode, wantIndex,
+                                                       matchesSeen, 0, budget);
             }
             CFRelease(windows);
         }

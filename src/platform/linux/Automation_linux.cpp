@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QVector>
 
@@ -120,7 +121,13 @@ qint64 windowPid(Display *dpy, Window w, Atom netWmPid)
     return pid;
 }
 
-bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
+// The window's own *client* rect, in screen coordinates -- excludes any
+// titlebar/border chrome a reparenting window manager draws around it.
+// This is what collectWindows()/WindowInfo::bounds/queryWindowBounds() must
+// report: it's the basis for the operation area ("entire target GUI area"),
+// relative-coordinate logging, and saved/restored window size and position,
+// none of which should ever include WM decoration.
+bool windowClientBounds(Display *dpy, Window w, QRect &outBounds)
 {
     XWindowAttributes attrs;
     if (!XGetWindowAttributes(dpy, w, &attrs))
@@ -134,7 +141,30 @@ bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
     if (!XTranslateCoordinates(dpy, w, root, 0, 0, &absX, &absY, &child))
         return false;
 
-    QRect bounds(absX, absY, attrs.width, attrs.height);
+    outBounds = QRect(absX, absY, attrs.width, attrs.height);
+    return true;
+}
+
+// The window's rect as it actually appears on screen, *including* any
+// titlebar/border chrome the window manager draws around it (via
+// _NET_FRAME_EXTENTS when the WM sets it; see 不具合報告3.3 below).
+//
+// 不具合報告D1(重大、767b996の回帰): this frame-inclusive rect must be used
+// ONLY for the "is this point actually over window W" hit-test
+// (windowPidAtPoint() below, and the analogous check at verifyWindowOwner()
+// callers) -- never for collectWindows()/WindowInfo::bounds, which
+// windowClientBounds() above now serves instead. A previous version of this
+// function did double duty for both, which silently grew the operation
+// area, the relative-coordinate origin, and the saved/restored window size
+// by the WM's own decoration thickness: clicks could land on the target's
+// titlebar (double-clicking it into "maximized"), saved sizes/positions
+// drifted by the frame thickness on every save/restore round-trip, and
+// swept/point-sequence coordinates were off by the frame's top-left offset.
+bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
+{
+    QRect bounds;
+    if (!windowClientBounds(dpy, w, bounds))
+        return false;
 
     // 不具合報告3.3(重大): absX/absY/attrs.width/height above are the
     // *client* window's own rect, which excludes whatever titlebar/border
@@ -165,6 +195,35 @@ bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
                 bounds.adjust(-int(extents[0]), -int(extents[2]), int(extents[1]), int(extents[3]));
             }
             XFree(data);
+        }
+    } else {
+        // 不具合報告D6(重大): _NET_FRAME_EXTENTS isn't set at all on some
+        // window managers (confirmed by deliberately removing the property
+        // in testing; some real non-EWMH-frame-extents WMs are expected to
+        // behave the same way). Fall back to walking up the window tree to
+        // find the WM's own reparenting frame -- the direct child of the
+        // root window that is an ancestor of (or equal to) w -- and use
+        // *its* rect instead, so the hit-test still covers the titlebar
+        // even without the property.
+        Window root = DefaultRootWindow(dpy);
+        Window cur = w;
+        Window parent = 0;
+        Window rootRet = 0;
+        Window *children = nullptr;
+        unsigned int nChildren = 0;
+        Window frame = w;
+        while (XQueryTree(dpy, cur, &rootRet, &parent, &children, &nChildren)) {
+            if (children)
+                XFree(children);
+            if (parent == 0 || parent == root)
+                break;
+            frame = parent;
+            cur = parent;
+        }
+        if (frame != w) {
+            QRect frameBounds;
+            if (windowClientBounds(dpy, frame, frameBounds))
+                bounds = bounds.united(frameBounds);
         }
     }
 
@@ -209,7 +268,7 @@ QList<WindowInfo> collectWindows()
             continue;
 
         QRect bounds;
-        if (!windowScreenBounds(dpy, w, bounds))
+        if (!windowClientBounds(dpy, w, bounds))
             continue;
         // 不具合報告3.4(低): excluded here (①'s target-selection list
         // specifically), not inside windowScreenBounds() itself -- see
@@ -834,6 +893,23 @@ ResponsivenessCheck checkWindowResponsive(quint32 windowId, qint64 /*pid*/)
     return result;
 }
 
+// 不具合報告D2(重大): is this one of ETG's OWN windows that was deliberately
+// made click-through via setWindowClickThrough() (the full-screen region-
+// selection/highlight overlays) -- identified by its XShape input region
+// being empty (zero rectangles), the exact condition that function sets up.
+// An ordinary window (no shape applied at all) reports a single rectangle
+// covering its whole area here, so this only matches windows that actually
+// asked to be click-through.
+static bool isSelfClickThroughWindow(Display *dpy, Window w)
+{
+    int count = 0, ordering = 0;
+    XRectangle *rects = XShapeGetRectangles(dpy, w, ShapeInput, &count, &ordering);
+    const bool clickThrough = (rects != nullptr && count == 0);
+    if (rects)
+        XFree(rects);
+    return clickThrough;
+}
+
 qint64 windowPidAtPoint(const QPoint &pt)
 {
     Display *dpy = display();
@@ -885,7 +961,16 @@ qint64 windowPidAtPoint(const QPoint &pt)
     for (long i = long(nItems) - 1; i >= 0; --i) {
         const Window w = windows[i];
         const qint64 pid = netWmPid != None ? windowPid(dpy, w, netWmPid) : -1;
-        if (pid == selfPid)
+        // 不具合報告D2(重大、767b996以前からの既存不具合): previously every
+        // one of ETG's own windows was unconditionally skipped here, so a
+        // real, always-on-top ETG window (the run-control stop/pause panel)
+        // covering part of the target let a click meant for the target
+        // silently land on that panel instead, reporting a phantom "stopped
+        // by the user". Only windows ETG deliberately made click-through
+        // (the full-screen selection/highlight overlays) should be skipped;
+        // any other self-owned window blocks the hit-test like any other
+        // app's window would, so the run safely stops instead of clicking it.
+        if (pid == selfPid && isSelfClickThroughWindow(dpy, w))
             continue;
         QRect bounds;
         if (!windowScreenBounds(dpy, w, bounds))
@@ -1105,19 +1190,23 @@ bool atspiUsable()
 // by the context-menu keyboard-navigation fallback below. A local helper
 // (rather than reusing keyTapNamed(), defined later in this file) so the
 // fallback doesn't need a forward declaration across the HAVE_ATSPI block.
-void sendNamedKey(KeySym keysym)
+// Returns false (and sends nothing) if this keysym has no keycode on the
+// current keyboard mapping -- callers that need to know whether the key
+// actually went anywhere (不具合報告D8) check this instead of assuming success.
+bool sendNamedKey(KeySym keysym)
 {
     Display *dpy = display();
     if (!dpy)
-        return;
+        return false;
     const KeyCode keycode = XKeysymToKeycode(dpy, keysym);
     if (keycode == 0)
-        return;
+        return false;
     XTestFakeKeyEvent(dpy, keycode, True, CurrentTime);
     XFlush(dpy);
     usleep(10000);
     XTestFakeKeyEvent(dpy, keycode, False, CurrentTime);
     XFlush(dpy);
+    return true;
 }
 
 // SPEC.md 不具合報告2.4(高): best-effort, AT-SPI-independent signal that a
@@ -1146,7 +1235,19 @@ bool hasLikelyOpenPopup(Display *dpy)
     for (unsigned int i = 0; i < childCount && !found; ++i) {
         XWindowAttributes attrs;
         if (XGetWindowAttributes(dpy, children[i], &attrs) && attrs.override_redirect &&
-            attrs.map_state == IsViewable) {
+            attrs.map_state == IsViewable &&
+            // 不具合報告D8(重大): openbox (and, presumably, some other window
+            // managers) keeps a permanently-mapped 1x1 override-redirect
+            // helper window of its own around at all times (observed at
+            // position (-100,-100), always off-screen) -- an unconditional
+            // "any override-redirect window at all" check made this
+            // function return true 100% of the time regardless of whether
+            // a menu was actually open, so the keyboard-navigation fallback
+            // below fired (and reported success) even over a plain button
+            // with no menu at all. A genuine popup menu/tooltip/combo
+            // drop-down always has real on-screen size; a window this tiny
+            // cannot plausibly be one.
+            attrs.width > 2 && attrs.height > 2) {
             found = true;
         }
     }
@@ -1252,6 +1353,11 @@ AtspiAccessible *findNamedActionableRecursive(AtspiAccessible *node, const QStri
     return nullptr;
 }
 
+// Forward declarations: scopedApplications()/unrefAll() are defined further
+// down this same anonymous namespace; findOpenMenu() below needs them.
+QList<AtspiAccessible *> scopedApplications(AtspiAccessible *desktop, qint64 expectedOwnerPid);
+void unrefAll(const QList<AtspiAccessible *> &nodes);
+
 AtspiAccessible *findOpenMenu()
 {
     if (accessibilityFeaturesDisabled() || !atspiUsable())
@@ -1264,8 +1370,27 @@ AtspiAccessible *findOpenMenu()
     AtspiAccessible *desktop = atspi_get_desktop(0);
     if (!desktop)
         return nullptr;
+    // 不具合報告D3(重大): previously walked the full, unscoped desktop tree
+    // (including this process's own AT-SPI application node), which is
+    // exactly the self-deadlock root cause 不具合報告2.1 already fixed
+    // elsewhere in this file (see scopedApplications()'s own comment) --
+    // every right-click-menu-selection step reintroduced the same ~17s
+    // hang via this one unscoped search. Excluding only this process's own
+    // node (expectedOwnerPid <= 0 so every *other* application is still
+    // searched) avoids the deadlock while preserving the original
+    // intentionally-broad search: a Qt QMenu popup is not reliably exposed
+    // as an AT-SPI child of its owning application at all (不具合報告2.4),
+    // so narrowing this down to just the target's own pid could miss the
+    // menu entirely even when it's genuinely open.
+    const QList<AtspiAccessible *> apps = scopedApplications(desktop, -1);
     int budget = 4000;
-    AtspiAccessible *menu = findOpenMenuRecursive(desktop, 0, budget);
+    AtspiAccessible *menu = nullptr;
+    for (AtspiAccessible *app : apps) {
+        if (menu)
+            continue;
+        menu = findOpenMenuRecursive(app, 0, budget);
+    }
+    unrefAll(apps);
     g_object_unref(desktop);
     return menu;
 }
@@ -1364,10 +1489,27 @@ void unrefAll(const QList<AtspiAccessible *> &nodes)
 // if no scoped-in application has anything there.
 AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 expectedOwnerPid)
 {
+    // 不具合報告D17(高、ユーザー選択: z順を考慮したヒットテストに変更):
+    // previously tried every scoped-in application in AT-SPI registration
+    // order and returned the first one with ANY Component hit at (x,y),
+    // with no regard for which one is actually topmost on screen. For a
+    // target with no real pid to scope to (expectedOwnerPid <= 0 --
+    // _NET_WM_PID absent, e.g. xmessage), scopedApplications() does not
+    // filter by pid at all, so some other unrelated application's widget
+    // (even one sitting entirely behind the real topmost window at this
+    // point -- this app's own already-running interactive GUI included)
+    // could win purely by happening to be enumerated first. windowPidAtPoint()
+    // already determines exactly which real OS window is topmost at (x,y)
+    // via the X11 stacking order -- reuse it here and restrict the fan-out
+    // below to just that one application's AT-SPI node when it resolves to
+    // something, instead of trying every scoped-in application blindly.
+    const qint64 topmostPid = windowPidAtPoint(QPoint(x, y));
     const QList<AtspiAccessible *> apps = scopedApplications(desktop, expectedOwnerPid);
     AtspiAccessible *hit = nullptr;
     for (AtspiAccessible *app : apps) {
         if (hit)
+            continue;
+        if (topmostPid > 0 && qint64(atspi_accessible_get_process_id(app, nullptr)) != topmostPid)
             continue;
         const gint windowCount = atspi_accessible_get_child_count(app, nullptr);
         for (gint w = 0; w < windowCount && !hit; ++w) {
@@ -1387,11 +1529,34 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
     return hit;
 }
 
+// 不具合報告D28(低): shared accessible-name matcher for findRoleNamedRecursive()
+// below -- Exact preserves the only behavior that existed before this was
+// added. StartsWith/Regex let an ObjectTarget region whose widget embeds
+// live/changing text (e.g. TestTarget's own buttons, named "ボタン1\n左:20
+// ..." after being clicked) still re-resolve on a later run. An invalid
+// regex pattern never matches (fails closed) rather than throwing or
+// matching everything.
+bool matchesObjectName(const QString &candidate, const QString &pattern, NameMatchMode mode)
+{
+    switch (mode) {
+    case NameMatchMode::StartsWith:
+        return candidate.startsWith(pattern);
+    case NameMatchMode::Regex: {
+        const QRegularExpression re(pattern);
+        return re.isValid() && re.match(candidate).hasMatch();
+    }
+    case NameMatchMode::Exact:
+    default:
+        return candidate == pattern;
+    }
+}
+
 // Bounded recursive search of `node`'s subtree for a descendant whose role
-// name and accessible name both match exactly (role as reported by
-// atspi_accessible_get_role_name(), e.g. "push button", "menu item", "check
-// box" -- not scoped to any particular ATSPI_ROLE_* enum value, so this
-// finds menu-bar items and ordinary widgets alike), visiting matches in
+// name matches exactly (role as reported by atspi_accessible_get_role_name(),
+// e.g. "push button", "menu item", "check box" -- not scoped to any
+// particular ATSPI_ROLE_* enum value, so this finds menu-bar items and
+// ordinary widgets alike) and whose accessible name matches per
+// nameMatchMode (see matchesObjectName() above), visiting matches in
 // document order and returning the `occurrenceIndex`'th one (0-based, via
 // `matchesSeen`) -- used by findAccessibleObject() below. Same bounded-
 // traversal rationale as findNamedActionableRecursive() above, just not
@@ -1401,7 +1566,8 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
 // reference the caller must g_object_unref, or nullptr if no such
 // occurrence exists within the budget.
 AtspiAccessible *findRoleNamedRecursive(AtspiAccessible *node, const QString &role, const QString &name,
-                                        int occurrenceIndex, int &matchesSeen, int depth, int &budget)
+                                        NameMatchMode nameMatchMode, int occurrenceIndex, int &matchesSeen,
+                                        int depth, int &budget)
 {
     if (!node || depth > 20 || budget <= 0)
         return nullptr;
@@ -1410,7 +1576,8 @@ AtspiAccessible *findRoleNamedRecursive(AtspiAccessible *node, const QString &ro
     gchar *nodeRole = atspi_accessible_get_role_name(node, nullptr);
     gchar *nodeName = atspi_accessible_get_name(node, nullptr);
     const bool roleMatches = nodeRole && role == QString::fromUtf8(nodeRole);
-    const bool nameMatches = nodeName && name == QString::fromUtf8(nodeName);
+    const bool nameMatches =
+        nodeName && matchesObjectName(QString::fromUtf8(nodeName), name, nameMatchMode);
     if (nodeRole)
         g_free(nodeRole);
     if (nodeName)
@@ -1428,8 +1595,8 @@ AtspiAccessible *findRoleNamedRecursive(AtspiAccessible *node, const QString &ro
         AtspiAccessible *child = atspi_accessible_get_child_at_index(node, i, nullptr);
         if (!child)
             continue;
-        AtspiAccessible *found =
-            findRoleNamedRecursive(child, role, name, occurrenceIndex, matchesSeen, depth + 1, budget);
+        AtspiAccessible *found = findRoleNamedRecursive(child, role, name, nameMatchMode, occurrenceIndex,
+                                                         matchesSeen, depth + 1, budget);
         g_object_unref(child);
         if (found)
             return found;
@@ -1569,7 +1736,8 @@ AccessibleObjectInfo accessibleObjectAtPoint(const QPoint &pt, qint64 expectedOw
 }
 
 AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
-                                             const QString &name, int occurrenceIndex)
+                                             const QString &name, int occurrenceIndex,
+                                             NameMatchMode nameMatchMode)
 {
     // 不具合報告2.1/2.3(重大): scoped via scopedApplications() -- see its
     // comment -- instead of walking the full, unscoped desktop tree.
@@ -1585,7 +1753,8 @@ AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QStri
     for (AtspiAccessible *app : apps) {
         if (node)
             continue;
-        node = findRoleNamedRecursive(app, role, name, qMax(0, occurrenceIndex), matchesSeen, 0, budget);
+        node = findRoleNamedRecursive(app, role, name, nameMatchMode, qMax(0, occurrenceIndex), matchesSeen,
+                                       0, budget);
     }
     unrefAll(apps);
     g_object_unref(desktop);
@@ -1670,7 +1839,16 @@ bool clickContextMenuItem(const QString &itemName, qint64 /*expectedOwnerPid*/)
         Display *dpy = display();
         if (itemName.isEmpty() || !dpy || !hasLikelyOpenPopup(dpy))
             return false;
-        sendNamedKey(KeySym(itemName.at(0).toUpper().unicode()));
+        // 不具合報告D8(重大): itemName's first character frequently has no
+        // keysym/keycode on the current keyboard mapping (any non-Latin-1
+        // text -- Japanese menu item names in particular). sendNamedKey()
+        // then sent nothing at all, yet the unconditional "send Return,
+        // return true" below still activated whatever was already
+        // highlighted (often nothing) and reported it as a successful
+        // selection of itemName, which it was not. Only report success when
+        // the type-ahead character itself could actually be sent.
+        if (!sendNamedKey(KeySym(itemName.at(0).toUpper().unicode())))
+            return false;
         sendNamedKey(XK_Return);
         return true;
     }
@@ -1859,7 +2037,8 @@ AccessibleObjectInfo accessibleObjectAtPoint(const QPoint & /*pt*/, qint64 /*exp
 }
 
 AccessibleObjectHandle findAccessibleObject(qint64 /*expectedOwnerPid*/, const QString & /*role*/,
-                                             const QString & /*name*/, int /*occurrenceIndex*/)
+                                             const QString & /*name*/, int /*occurrenceIndex*/,
+                                             NameMatchMode /*nameMatchMode*/)
 {
     return {};  // AT-SPI not available at build time; see CMakeLists.txt.
 }

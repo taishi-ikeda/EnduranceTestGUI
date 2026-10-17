@@ -10,6 +10,7 @@ class QListWidget;
 class QPushButton;
 class QLabel;
 class QCheckBox;
+class QComboBox;
 class QRadioButton;
 class QSpinBox;
 class QWidget;
@@ -144,6 +145,9 @@ private:
 
     QPushButton *m_pickObjectButton = nullptr;
     QLabel *m_objectInfoLabel = nullptr;
+    // 不具合報告D28: how ObjectTarget::name is compared at runtime -- see
+    // ObjectNameMatchMode's own comment (TestConfig.h).
+    QComboBox *m_nameMatchModeCombo = nullptr;
     QCheckBox *m_useDefaultActionCheck = nullptr;
     QSpinBox *m_reresolveIntervalSpin = nullptr;
 

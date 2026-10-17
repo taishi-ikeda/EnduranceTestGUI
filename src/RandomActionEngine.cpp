@@ -252,6 +252,15 @@ void RandomActionEngine::recordRecentAction(const QString &desc)
 RandomActionEngine::RandomActionEngine(QObject *parent) : QObject(parent), m_rng(0)
 {
     m_timer.setSingleShot(true);
+    // 不具合報告D31(低): Qt::CoarseTimer (the default) is explicitly allowed
+    // to fire up to ~5% early to let the OS coalesce it with other pending
+    // timers -- harmless for the usual short inter-action delays, but a
+    // 待機 step's own (often much longer, up to tens of seconds/minutes)
+    // wait used this same timer and could cut noticeably short (observed:
+    // 9.61s instead of the configured 10000ms). PreciseTimer targets
+    // millisecond accuracy for every use of this timer, including the much
+    // more numerous short ones, at negligible extra cost at this scale.
+    m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, &RandomActionEngine::performRandomAction);
 
     m_resourceTimer.setInterval(5000);
@@ -324,6 +333,7 @@ void RandomActionEngine::start(const TestConfig &config)
     m_fuzzAllFieldsNoMatchStrikes = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
+    m_popupDialogCloseGraceStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
     m_noValidPointOffScreenStrikes = 0;
     m_sequenceLoopCount = 0;
@@ -496,7 +506,25 @@ void RandomActionEngine::resume()
         // activates this application's own window first.
         if (m_config.keepTargetActive)
             PlatformAutomation::activateProcess(m_config.targetPid);
+        // 不具合報告D9(重大): activateProcess() above also un-minimizes the
+        // target (same mechanism finishHoldDrag() itself relies on), so if
+        // the window-op overlay had it minimized at the moment of pause(),
+        // it is back on screen by the time resumePt is computed below --
+        // never press the button back down while it's still hidden.
+        if (m_holdDragWindowMinimized)
+            m_holdDragWindowMinimized = false;
         const QPoint resumePt = holdDragPathPoint(int(m_holdDragTickCount));
+        // 不具合報告D9(重大): previously pressed the button back down at
+        // resumePt unconditionally -- if some other window had moved over
+        // that point while paused (or the target itself had moved/closed),
+        // this physically clicked whatever was actually there instead of
+        // the target. Same zero-tolerance rule as every other point-based
+        // HoldDrag safety check.
+        if (PlatformAutomation::windowPidAtPoint(resumePt) != m_config.targetPid) {
+            doStop(I18n::t(QStringLiteral("対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return;
+        }
         PlatformAutomation::modifierKeysDown(m_holdDragModifiers);
         PlatformAutomation::mouseButtonDown(resumePt, m_holdDragButton);
         m_holdDragElapsed.start();
@@ -966,8 +994,11 @@ bool RandomActionEngine::resolveObjectTargetRegion(const NamedRegion &region, QL
     }
 
     if (needResolve) {
+        // 不具合報告D28: see MainWindow::resolveNamedRegionForDisplay()'s
+        // identical comment on why this cast is valid.
         PlatformAutomation::AccessibleObjectHandle handle = PlatformAutomation::findAccessibleObject(
-            m_config.targetPid, target.role, target.name, target.occurrenceIndex);
+            m_config.targetPid, target.role, target.name, target.occurrenceIndex,
+            static_cast<PlatformAutomation::NameMatchMode>(target.nameMatchMode));
         if (!handle.isValid()) {
             m_objectTargetCache.erase(region.name);
             return false;
@@ -1483,6 +1514,7 @@ void RandomActionEngine::advanceToNextStep()
     m_currentStepActionsDone = 0;
     m_currentTaskMemberIndex = 0;
     m_popupDialogWaitStrikes = 0;
+    m_popupDialogCloseGraceStrikes = 0;
     m_minimizedWindowWaitStrikes = 0;
     m_noValidPointOffScreenStrikes = 0;
     m_currentStepIndex = (m_currentStepIndex + 1) % m_config.steps.size();
@@ -1607,6 +1639,18 @@ constexpr int kMaxUnexpectedWindowStrikes = 5;
 // legitimately take a moment to render (icons/layout), whereas that retry
 // loop is actively working to dismiss something already on screen.
 constexpr int kMaxPopupDialogWaitStrikes = 50;
+
+// 不具合報告D10(重大): how many ticks' worth of grace
+// m_popupDialogCloseGraceStrikes grants after a task member with
+// targetsPopupDialog set performs a successful ActionKind::
+// DialogButtonPress, before handleUnexpectedWindows() is allowed to treat
+// the dialog it just asked the target app to close as "unexpected" and
+// send it an Escape -- see that member's own comment for the race this
+// closes. Small and tick-based (not a genuine wait, just margin for the
+// target's event loop to process the click) -- same rationale as
+// kMaxMinimizedWindowWaitStrikes below, not kMaxPopupDialogWaitStrikes's
+// much longer render-time tolerance.
+constexpr int kMaxPopupDialogCloseGraceStrikes = 5;
 
 // After this many consecutive ticks with a (non-popup-dialog) step's region
 // still failing to resolve even after PlatformAutomation::activateProcess()
@@ -1795,8 +1839,19 @@ void RandomActionEngine::performRandomAction()
                /*isAnomaly=*/true);
         return;
     }
-    if (!currentActionTargetsPopupDialog() && handleUnexpectedWindows())
-        return;
+    if (!currentActionTargetsPopupDialog()) {
+        // 不具合報告D10(重大): see m_popupDialogCloseGraceStrikes's own
+        // comment -- a just-closed (or just-closing) popup dialog still
+        // gets a few grace ticks before handleUnexpectedWindows() is
+        // allowed to treat it as unexpected and Escape it, so the target
+        // app has a real chance to process its own button-click handler
+        // first. A dialog that genuinely never closes is still caught
+        // once this bounded grace runs out.
+        if (m_popupDialogCloseGraceStrikes > 0)
+            --m_popupDialogCloseGraceStrikes;
+        else if (handleUnexpectedWindows())
+            return;
+    }
 
     // An ActionKind::TypingBurst picked on an earlier tick is still
     // running -- continue sending its keystrokes rather than falling
@@ -2004,6 +2059,22 @@ void RandomActionEngine::performTaskAction(const RegionStep &task)
     // whole task counts as exactly one action, credited only once the
     // full pass below completes.
 
+    // 不具合報告D10(重大): this DialogButtonPress just asked the target app
+    // to close its dialog (an AT-SPI DoAction() call), but that's only a
+    // request -- the app still needs its own event loop tick(s) to actually
+    // process the click and tear the window down. m_currentTaskMemberIndex
+    // is about to advance below, and the member that follows typically does
+    // NOT have targetsPopupDialog set (it goes back to operating on the
+    // main window), which would make currentActionTargetsPopupDialog()
+    // return false starting the very next tick and re-arm
+    // handleUnexpectedWindows() -- which would then find the dialog window
+    // still present (just not closed yet) and "dismiss" it with an Escape
+    // keypress, racing with/overriding the button's own effect. Grant a
+    // short grace period so that check stays suppressed for a few ticks
+    // instead -- see m_popupDialogCloseGraceStrikes's own comment.
+    if (member.targetsPopupDialog && kind == ActionKind::DialogButtonPress)
+        m_popupDialogCloseGraceStrikes = kMaxPopupDialogCloseGraceStrikes;
+
     ++m_currentTaskMemberIndex;
     if (m_currentTaskMemberIndex >= task.taskMembers.size()) {
         ++m_iterationCount;
@@ -2168,6 +2239,44 @@ QPoint RandomActionEngine::holdDragPathPoint(int tick)
     QPoint pt = m_holdDragStartPoint + offset;
     pt.setX(qBound(m_holdDragScreenBounds.left(), pt.x(), m_holdDragScreenBounds.right()));
     pt.setY(qBound(m_holdDragScreenBounds.top(), pt.y(), m_holdDragScreenBounds.bottom()));
+
+    // 不具合報告D12(中): additionally confine to the step's own operating
+    // region (and away from its exclude regions) -- see
+    // m_holdDragIncludeBounds's own declaration comment. Skipped entirely
+    // if there was no operating region to confine to in the first place
+    // (m_holdDragIncludeBounds.isNull()).
+    if (!m_holdDragIncludeBounds.isNull()) {
+        pt.setX(qBound(m_holdDragIncludeBounds.left(), pt.x(), m_holdDragIncludeBounds.right()));
+        pt.setY(qBound(m_holdDragIncludeBounds.top(), pt.y(), m_holdDragIncludeBounds.bottom()));
+        bool inExcluded = false;
+        for (const QRect &ex : m_holdDragExcludeRegions) {
+            if (ex.contains(pt)) {
+                inExcluded = true;
+                break;
+            }
+        }
+        if (inExcluded) {
+            // Reflecting the offset through the start point usually lands
+            // somewhere else entirely (an exclude region only ever covers
+            // part of the operating region, never all of it -- the same
+            // assumption pickRandomPoint() already makes for an ordinary
+            // Click/Drag); if even that still lands in an exclude region,
+            // falling back to the start point itself is always safe, since
+            // that point was already confirmed outside every exclude
+            // region when this gesture started.
+            QPoint reflected = m_holdDragStartPoint - offset;
+            reflected.setX(qBound(m_holdDragIncludeBounds.left(), reflected.x(), m_holdDragIncludeBounds.right()));
+            reflected.setY(qBound(m_holdDragIncludeBounds.top(), reflected.y(), m_holdDragIncludeBounds.bottom()));
+            bool reflectedExcluded = false;
+            for (const QRect &ex : m_holdDragExcludeRegions) {
+                if (ex.contains(reflected)) {
+                    reflectedExcluded = true;
+                    break;
+                }
+            }
+            pt = reflectedExcluded ? m_holdDragStartPoint : reflected;
+        }
+    }
     return pt;
 }
 
@@ -2187,7 +2296,17 @@ void RandomActionEngine::continueHoldDrag()
     // while a real mouse button is held, so a mismatch here means it's
     // about to drag onto/release over an unrelated window -- never
     // tolerated, unlike the keyboard-focus check just below.
-    if (PlatformAutomation::windowPidAtPoint(nextPt) != m_config.targetPid) {
+    //
+    // 不具合報告D9(重大): skipped while the window-op overlay (below) has
+    // the target window intentionally minimized -- a minimized window is
+    // unmapped, so windowPidAtPoint() can never match it, and this check
+    // used to fire a false "about to touch an unrelated window" stop on
+    // the very next tick after minimizing, before the overlay's own
+    // restore could ever run. The pointer itself is also left wherever it
+    // last was instead of being moved (see moveMouseWhileHeld() below)
+    // while minimized, since there is no target-window point to move it to.
+    if (!m_holdDragWindowMinimized &&
+        PlatformAutomation::windowPidAtPoint(nextPt) != m_config.targetPid) {
         doStop(I18n::t(QStringLiteral("対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました")),
                /*isAnomaly=*/true);
         return;
@@ -2213,7 +2332,13 @@ void RandomActionEngine::continueHoldDrag()
     }
     m_holdDragInactiveStrikes = 0;
 
-    PlatformAutomation::moveMouseWhileHeld(nextPt, m_holdDragButton);
+    // 不具合報告D9(重大): no on-screen target point to move/scroll at while
+    // the window-op overlay has the target minimized -- see the safety-net
+    // comment above. The window-op overlay itself (further below) still
+    // runs every tick regardless, so the scheduled restore still happens.
+    if (!m_holdDragWindowMinimized) {
+        PlatformAutomation::moveMouseWhileHeld(nextPt, m_holdDragButton);
+    }
 
     // Wheel overlay (SPEC.md 想定パターンP3/P6、「0ms連打」「連打と完全停止
     // の繰り返し」): alternates burst/pause phases -- see
@@ -2222,15 +2347,41 @@ void RandomActionEngine::continueHoldDrag()
     // due tick (at most one extra m_holdDragStepIntervalMs of delay) --
     // simpler than restructuring this into a loop, and well within this
     // feature's own timing granularity.
-    if (m_holdDragWheelOverlay.enabled && elapsed >= m_holdDragWheelPhaseEndMs) {
+    if (!m_holdDragWindowMinimized && m_holdDragWheelOverlay.enabled &&
+        elapsed >= m_holdDragWheelPhaseEndMs) {
         if (m_holdDragWheelBurstActive) {
             const int nLo = qMin(m_holdDragWheelOverlay.notchesPerBurstMin,
                                   m_holdDragWheelOverlay.notchesPerBurstMax);
             const int nHi = qMax(m_holdDragWheelOverlay.notchesPerBurstMin,
                                   m_holdDragWheelOverlay.notchesPerBurstMax);
             const int notches = qMax(1, nLo + (nHi > nLo ? int(m_rng.bounded(quint32(nHi - nLo + 1))) : 0));
-            for (int i = 0; i < notches; ++i)
-                PlatformAutomation::scroll(nextPt, 0, 1);
+            // 不具合報告D14(中): notchIntervalMin/MaxMs was previously read
+            // nowhere at all -- every notch in a burst fired back-to-back
+            // with no pacing between them, regardless of this setting.
+            // A short synchronous sleep between notches (not after the
+            // last one, so it doesn't eat into the following pause phase)
+            // mirrors the same brief same-tick pacing other single-tick
+            // multi-step actions in this file already use (e.g.
+            // sendNamedKey()'s press/release gap).
+            const int iLo = qMin(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                  m_holdDragWheelOverlay.notchIntervalMaxMs);
+            const int iHi = qMax(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                  m_holdDragWheelOverlay.notchIntervalMaxMs);
+            for (int i = 0; i < notches; ++i) {
+                // 不具合報告D26(低): previously always scrolled the same
+                // direction (dy=+1), so a target whose wheel binding is
+                // zoom (SPEC.md 想定パターンP6) pinned itself at its zoom
+                // limit almost immediately and then never visibly changed
+                // again for the rest of the hold. Randomizing the
+                // direction per notch keeps it moving throughout.
+                const int dy = (m_rng.bounded(2u) == 0) ? 1 : -1;
+                PlatformAutomation::scroll(nextPt, 0, dy);
+                if (i + 1 < notches) {
+                    const int notchGap = qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
+                    if (notchGap > 0)
+                        QThread::msleep(notchGap);
+                }
+            }
             const int pLo = qMin(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
                                   m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
             const int pHi = qMax(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
@@ -2245,7 +2396,17 @@ void RandomActionEngine::continueHoldDrag()
     }
 
     // Key overlay ("ドラッグ中にキー").
-    if (m_holdDragKeyOverlay.enabled && elapsed >= m_holdDragNextKeyMs) {
+    // 不具合報告D5(重大): suppressed entirely while this gesture's own style
+    // holds a modifier (Shift/Ctrl/Alt) down -- every overlay keystroke was
+    // previously sent plain, so a held Ctrl turned "a" into Ctrl+A, "s" into
+    // Ctrl+S, etc. On a real app bound to the same Ctrl+letter shortcuts a
+    // VTK-style camera binding uses (save/close/quit/open/print...), this
+    // fired them indiscriminately with no way to tell which of the pool's
+    // characters were "safe". m_holdDragModifiers is fixed for this
+    // gesture's whole duration (chosen once at start), so this simply never
+    // fires for a modifier-holding style -- not a per-tick check.
+    if (m_holdDragKeyOverlay.enabled && m_holdDragModifiers == Qt::NoModifier &&
+        elapsed >= m_holdDragNextKeyMs) {
         const int totalPool = m_holdDragKeyChars.size() + m_holdDragNamedKeys.size();
         if (totalPool > 0) {
             const int index = int(m_rng.bounded(quint32(totalPool)));
@@ -2696,10 +2857,22 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                            : pickSweepPoint(m_currentSweepRegionKey, m_currentRegionSweepWaypoints,
                                              m_currentRegionSweepIntervalPx, m_currentRegionSweepJitterPx,
                                              excludeRegions, ok);
-    const bool kindNeedsPoint = kind == ActionKind::Click || kind == ActionKind::DoubleClick ||
-                                 kind == ActionKind::Drag || kind == ActionKind::HoldDrag ||
-                                 kind == ActionKind::ScrollUp || kind == ActionKind::ScrollDown ||
-                                 kind == ActionKind::ScrollHorizontal;
+    // 不具合報告D32(中、不具合報告2.6の積み残し): a Click on an object-target
+    // region with useDefaultAction invokes AccessibleObjectHandle::
+    // performDefaultAction() below (no synthetic mouse event, no screen
+    // coordinate used at all -- see ObjectTarget::useDefaultAction's own
+    // comment), yet this still required pickRandomPoint() above to have
+    // found a valid *on-screen* point for the object's current bounds, so
+    // an object that happens to be positioned off-screen (e.g. scrolled
+    // out of view) was wrongly treated as a fatal "operating region is
+    // off-screen" failure despite never needing a point to begin with.
+    const bool clickUsesObjectDefaultAction =
+        kind == ActionKind::Click && m_currentRegionUsesObjectDefaultAction && m_currentObjectHandleForAction;
+    const bool kindNeedsPoint = !clickUsesObjectDefaultAction &&
+                                 (kind == ActionKind::Click || kind == ActionKind::DoubleClick ||
+                                  kind == ActionKind::Drag || kind == ActionKind::HoldDrag ||
+                                  kind == ActionKind::ScrollUp || kind == ActionKind::ScrollDown ||
+                                  kind == ActionKind::ScrollHorizontal);
     if (!ok && kindNeedsPoint) {
         // 不具合報告2.6(中): regionOffScreen (only ever set when
         // !m_currentRegionIsSweepTarget -- see pickRandomPoint()'s own
@@ -2921,6 +3094,14 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_holdDragViewerRightButtonNeverOpensMenu = params.viewerRightButtonNeverOpensMenu;
         m_holdDragStartPoint = pt;
         m_holdDragScreenBounds = screen ? screen->geometry() : QRect(pt, pt);
+        // 不具合報告D12(中): union of this step's own operating region(s),
+        // intersected with the screen -- see m_holdDragIncludeBounds's own
+        // comment.
+        QRect includeBounds;
+        for (const QRect &r : includeRegions)
+            includeBounds = includeBounds.isNull() ? r : includeBounds.united(r);
+        m_holdDragIncludeBounds = includeBounds.isNull() ? QRect() : includeBounds.intersected(m_holdDragScreenBounds);
+        m_holdDragExcludeRegions = excludeRegions;
         m_holdDragCurrentOffset = QPoint(0, 0);
         m_holdDragDurationMs = duration;
         m_holdDragElapsedMs = 0;
@@ -3077,7 +3258,14 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         // depending on params.fuzzStringUseAllEntries, then sends it via
         // whichever of the two delivery mechanisms
         // params.fuzzStringDeliveryMode resolves to.
-        const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
+        // 不具合報告D11(高): used to also fall back to "use all" whenever
+        // fuzzStringSelectedEntries was empty, regardless of
+        // fuzzStringUseAllEntries -- so "選択した文字列のみ" with every
+        // candidate unchecked silently sent from the *entire* corpus
+        // instead, which TC-078 explicitly expects to behave as "no
+        // candidates" (logged, then a safety stop once kMaxFuzzNoCandidatesStrikes
+        // is hit, exactly like the candidates.isEmpty() branch just below).
+        const bool useAll = params.fuzzStringUseAllEntries;
         const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
         if (candidates.isEmpty()) {
             ++m_fuzzNoCandidatesStrikes;
@@ -3210,7 +3398,14 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         }
         m_fuzzAllFieldsNoMatchStrikes = 0;
 
-        const bool useAll = params.fuzzStringUseAllEntries || params.fuzzStringSelectedEntries.isEmpty();
+        // 不具合報告D11(高): used to also fall back to "use all" whenever
+        // fuzzStringSelectedEntries was empty, regardless of
+        // fuzzStringUseAllEntries -- so "選択した文字列のみ" with every
+        // candidate unchecked silently sent from the *entire* corpus
+        // instead, which TC-078 explicitly expects to behave as "no
+        // candidates" (logged, then a safety stop once kMaxFuzzNoCandidatesStrikes
+        // is hit, exactly like the candidates.isEmpty() branch just below).
+        const bool useAll = params.fuzzStringUseAllEntries;
         const QStringList &candidates = useAll ? m_config.fuzzStringCorpus : params.fuzzStringSelectedEntries;
         if (candidates.isEmpty()) {
             ++m_fuzzNoCandidatesStrikes;
@@ -3455,8 +3650,18 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
             desc += I18n::t(QStringLiteral(" [対象ウィンドウ相対: (%1, %2)]")).arg(rel.x()).arg(rel.y());
         }
         const QString widgetName = PlatformAutomation::accessibleNameAtPoint(pt, m_config.targetPid);
+        // 不具合報告D24(中、不具合報告3.2と同根): an accessible name is
+        // ordinary application-controlled text, not something this engine
+        // generated or validated -- a target whose own widget name happens
+        // to contain a literal newline (e.g. TestTarget's own counter
+        // buttons, named "ボタン7\n左:0 右:0 二重:0") split what should be
+        // one log line into two, with the second half missing its
+        // timestamp and looking like an unrelated log line. Same escaping
+        // fuzzStringLogPreview() already applies to a fuzz string actually
+        // sent, reused here for the exact same "always a single safe line"
+        // guarantee.
         if (!widgetName.isEmpty())
-            desc += QStringLiteral(" [%1]").arg(widgetName);
+            desc += QStringLiteral(" [%1]").arg(fuzzStringLogPreview(widgetName));
     }
 
     outDesc = desc;

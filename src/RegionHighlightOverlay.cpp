@@ -4,6 +4,7 @@
 #include "platform/PlatformAutomation.h"
 
 #include <QFont>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QPainter>
 #include <QPixmap>
@@ -145,12 +146,32 @@ protected:
 
             if (!entry.includeRegions.isEmpty()) {
                 const QRect first = entry.includeRegions.first().translated(-m_origin);
-                p.setFont(QFont(font().family(), 12, QFont::Bold));
+                const QFont labelFont(font().family(), 12, QFont::Bold);
+                p.setFont(labelFont);
                 const QString label = I18n::t(QStringLiteral("操作領域「%1」")).arg(entry.name);
-                const QRect labelBg(first.left(), qMax(0, first.top() - 26), qMax(160, first.width()), 24);
+                // 不具合報告D16(中): previously a fixed max(160, 矩形幅)
+                // width and a fixed 24px height, with no wrapping or
+                // ellipsis -- a long label (several referencing step
+                // names, or a named-object region whose own name happens
+                // to contain a literal newline) silently overflowed past
+                // the colored background on one or both sides, landing
+                // unreadable over whatever was behind it instead. Size the
+                // background to the label's own text instead, measuring
+                // each line independently (it may contain literal
+                // newlines), capped so it never tries to extend past this
+                // screen's own right edge.
+                const QFontMetrics fm(labelFont);
+                const QStringList lines = label.split(QLatin1Char('\n'));
+                int textWidth = 0;
+                for (const QString &line : lines)
+                    textWidth = qMax(textWidth, fm.horizontalAdvance(line));
+                const int maxWidth = qMax(160, width() - first.left());
+                const int bgWidth = qMin(qMax(160, qMax(first.width(), textWidth + 16)), maxWidth);
+                const int bgHeight = fm.lineSpacing() * lines.size() + 8;
+                const QRect labelBg(first.left(), qMax(0, first.top() - bgHeight - 2), bgWidth, bgHeight);
                 p.fillRect(labelBg, QColor(0, 150, 0, 220));
                 p.setPen(Qt::white);
-                p.drawText(labelBg, Qt::AlignCenter, label);
+                p.drawText(labelBg, Qt::AlignCenter | Qt::TextWordWrap, label);
             }
         }
     }

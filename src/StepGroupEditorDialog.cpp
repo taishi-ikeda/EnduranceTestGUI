@@ -202,6 +202,9 @@ QString StepGroupEditorDialog::describeMember(const RegionStep &member, int inde
         actions << I18n::t(QStringLiteral("ダブルクリック"));
     if (member.enableDrag)
         actions << I18n::t(QStringLiteral("ドラッグ"));
+    // 不具合報告D21(中): see MainWindow::describeStep()'s identical fix.
+    if (member.enableHoldDrag)
+        actions << I18n::t(QStringLiteral("長押しドラッグ"));
     if (member.enableKey)
         actions << I18n::t(QStringLiteral("キー入力"));
     if (member.enableScrollUp)

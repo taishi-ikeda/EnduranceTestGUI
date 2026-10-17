@@ -133,6 +133,24 @@ QString holdDragPathShapeToString(HoldDragPathShape shape)
     }
 }
 
+// 不具合報告D28
+QString objectNameMatchModeToString(ObjectNameMatchMode mode)
+{
+    switch (mode) {
+    case ObjectNameMatchMode::StartsWith: return QStringLiteral("startsWith");
+    case ObjectNameMatchMode::Regex: return QStringLiteral("regex");
+    case ObjectNameMatchMode::Exact:
+    default: return QStringLiteral("exact");
+    }
+}
+
+ObjectNameMatchMode objectNameMatchModeFromString(const QString &s)
+{
+    if (s == QStringLiteral("startsWith")) return ObjectNameMatchMode::StartsWith;
+    if (s == QStringLiteral("regex")) return ObjectNameMatchMode::Regex;
+    return ObjectNameMatchMode::Exact;
+}
+
 HoldDragPathShape holdDragPathShapeFromString(const QString &s)
 {
     if (s == QStringLiteral("zigzag")) return HoldDragPathShape::ZigZag;
@@ -442,6 +460,7 @@ QJsonObject objectTargetToJson(const ObjectTarget &t)
     QJsonObject o;
     o["role"] = t.role;
     o["name"] = t.name;
+    o["nameMatchMode"] = objectNameMatchModeToString(t.nameMatchMode);
     o["occurrenceIndex"] = t.occurrenceIndex;
     o["useDefaultAction"] = t.useDefaultAction;
     o["reresolveEveryActions"] = t.reresolveEveryActions;
@@ -453,6 +472,7 @@ ObjectTarget objectTargetFromJson(const QJsonObject &o)
     ObjectTarget t;
     t.role = o["role"].toString();
     t.name = o["name"].toString();
+    t.nameMatchMode = objectNameMatchModeFromString(o["nameMatchMode"].toString());
     t.occurrenceIndex = o["occurrenceIndex"].toInt(0);
     t.useDefaultAction = o["useDefaultAction"].toBool(false);
     t.reresolveEveryActions = o["reresolveEveryActions"].toInt(0);

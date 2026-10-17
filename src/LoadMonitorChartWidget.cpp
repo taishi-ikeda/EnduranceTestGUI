@@ -1,5 +1,6 @@
 #include "LoadMonitorChartWidget.h"
 
+#include <QFontMetrics>
 #include <QPainter>
 #include <QPainterPath>
 #include <algorithm>
@@ -55,11 +56,30 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
     const QList<LoadSample> empty;
     const QList<LoadSample> &samples = m_monitor ? m_monitor->samples() : empty;
 
+    // Memory's own auto-scaled axis (0..maxMemory, at least 1MB so a
+    // perfectly flat 0MB run doesn't divide by zero) -- computed up front
+    // (rather than where it used to live, after the layout below) since
+    // marginLeft now needs its label text's actual width.
+    double maxMemory = 1.0;
+    for (const LoadSample &s : samples)
+        maxMemory = std::max(maxMemory, s.targetMemoryMb);
+    const QString maxMemoryLabel = QStringLiteral("%1MB").arg(maxMemory, 0, 'f', 0);
+
     // 「CPUのusageとメモリ使用率を別グラフで表示してください」: two stacked
     // plot areas (CPU% on top, memory below) instead of overlaying memory on
     // a secondary axis of a single combined chart -- each metric gets a
     // full-height axis of its own.
-    const int marginLeft = 36;
+    // 不具合報告D25(中): marginLeft was a fixed 36px, sized for a short
+    // label like "100%"/"0MB" -- a 3+ digit memory value ("343MB", or a
+    // GB-scale target's "1234MB") didn't fit, so its left side was
+    // silently clipped off (e.g. "343MB" rendered as "43MB", reading as a
+    // completely different, far smaller number than the chart's own
+    // "メモリ使用量（343.4MB）" heading said). Sized to whichever is wider:
+    // the fixed 36px baseline (still enough for "100%"/"0%"/"0MB"), or
+    // this run's actual maximum memory label plus the same 4px gap the
+    // label's own drawText() rect already reserves before the plot area.
+    const QFontMetrics labelMetrics(painter.font());
+    const int marginLeft = qMax(36, labelMetrics.horizontalAdvance(maxMemoryLabel) + 8);
     const int marginRight = 8;
     const int titleHeight = 16;
     const int gapBetweenCharts = 10;
@@ -103,12 +123,6 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
         return;
     }
 
-    // Memory's own auto-scaled axis (0..maxMemory, at least 1MB so a
-    // perfectly flat 0MB run doesn't divide by zero).
-    double maxMemory = 1.0;
-    for (const LoadSample &s : samples)
-        maxMemory = std::max(maxMemory, s.targetMemoryMb);
-
     const double xStep = double(plotWidth) / double(samples.size() - 1);
     auto xAt = [&](int index) { return marginLeft + int(double(index) * xStep); };
     auto yForCpuPercent = [&](double percent) {
@@ -133,8 +147,7 @@ void LoadMonitorChartWidget::paintChart(QPainter &painter, const QSize &size) co
         painter.drawLine(memPlotRect.left(), y, memPlotRect.right(), y);
     }
     painter.setPen(QPen(QColor(120, 120, 120)));
-    painter.drawText(QRect(0, memPlotRect.top() - 6, marginLeft - 4, 14), Qt::AlignRight,
-                      QStringLiteral("%1MB").arg(maxMemory, 0, 'f', 0));
+    painter.drawText(QRect(0, memPlotRect.top() - 6, marginLeft - 4, 14), Qt::AlignRight, maxMemoryLabel);
     painter.drawText(QRect(0, memPlotRect.bottom() - 6, marginLeft - 4, 14), Qt::AlignRight, QStringLiteral("0MB"));
 
     // Load-injection-active shaded bands, drawn before the series lines so

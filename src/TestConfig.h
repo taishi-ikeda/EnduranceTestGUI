@@ -274,10 +274,26 @@ struct ActionParams
 // IPC on Linux, cross-process AX calls on macOS), so RandomActionEngine
 // caches the resolved object (see AccessibleObjectHandle) rather than
 // re-searching before every single action -- see reresolveEveryActions.
+// 不具合報告D28(低): how ObjectTarget::name is compared against each
+// candidate's own accessible name. Exact (default) preserves every existing
+// preset's behavior unchanged. A widget whose own name changes at runtime
+// (e.g. TestTarget's own buttons, which append their running click counts --
+// "ボタン1\n左:20 ...") can never re-resolve by exact name after the first
+// run that actually clicked it -- StartsWith lets a fixed prefix still
+// match, and Regex allows an arbitrary pattern for names that vary in the
+// middle or have no stable prefix at all.
+enum class ObjectNameMatchMode
+{
+    Exact,
+    StartsWith,
+    Regex
+};
+
 struct ObjectTarget
 {
     QString role;  // accessible role, exactly as the backend reports it
-    QString name;  // accessible name/label to match
+    QString name;  // accessible name/label to match -- interpreted per nameMatchMode
+    ObjectNameMatchMode nameMatchMode = ObjectNameMatchMode::Exact;
 
     // 0-based: which match to use among multiple objects that share the
     // same role+name (common for e.g. several same-styled buttons with no

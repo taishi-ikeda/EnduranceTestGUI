@@ -508,6 +508,18 @@ struct AccessibleObjectInfo
     QString name;    // accessible name/label, if any
 };
 
+// 不具合報告D28(低): mirrors TestConfig.h's ObjectNameMatchMode (kept as a
+// separate enum here rather than including TestConfig.h, which this
+// platform-facade header must stay independent of -- see its own top
+// comment). RandomActionEngine.cpp/NamedRegionEditorDialog.cpp/MainWindow.cpp
+// convert between the two when calling findAccessibleObject() below.
+enum class NameMatchMode
+{
+    Exact,
+    StartsWith,
+    Regex
+};
+
 // Diagnostic/picker use: resolves whatever accessible object is at this
 // screen point (same technique as accessibleNameAtPoint(), but returning
 // the full role/name/bounds instead of just a display string), for the
@@ -570,7 +582,8 @@ private:
     // operations above, which always leave it either empty or an exact copy
     // of an already-resolved one.
     friend AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
-                                                        const QString &name, int occurrenceIndex);
+                                                        const QString &name, int occurrenceIndex,
+                                                        NameMatchMode nameMatchMode);
     std::unique_ptr<Impl> m_impl;
 };
 
@@ -580,14 +593,19 @@ private:
 // belonging to a different, possibly hidden-behind-the-target app instead
 // of the intended one); the frontmost window owned by expectedOwnerPid on
 // macOS, same technique as findFrontmostDialogElement() -- for an object
-// whose role and accessible name both match exactly, returning the
+// whose role matches exactly and whose accessible name matches per
+// nameMatchMode (不具合報告D28: Exact -- the only behavior before this was
+// added -- StartsWith, or Regex, since a widget whose own name changes at
+// runtime, e.g. one that embeds a live counter, can never re-resolve by
+// exact name after the first run that changed it), returning the
 // occurrenceIndex'th such match (0-based) if more than one exists. Returns
 // an invalid handle (see
 // AccessibleObjectHandle::isValid()) if none match, if accessibility is
 // disabled (setAccessibilityFeaturesDisabled(true)), or if this platform/
 // environment cannot use its accessibility backend at all.
 AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QString &role,
-                                             const QString &name, int occurrenceIndex);
+                                             const QString &name, int occurrenceIndex,
+                                             NameMatchMode nameMatchMode = NameMatchMode::Exact);
 
 // SPEC.md 追加実装依頼「ファジングテスト: 領域内の全入力項目」: one matched
 // editable widget's current on-screen bounds -- deliberately lighter-weight

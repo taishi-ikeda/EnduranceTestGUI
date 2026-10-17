@@ -283,6 +283,10 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Right-button actions never open a menu (for 3D viewers; stops sending Escape "
                         "after a right-drag/hold-drag)")},
         {QStringLiteral("%1ボタン（重み:%2）"), QStringLiteral("%1 button (weight: %2)")},
+        // 不具合報告D30(低): the hold-drag style list's own "weight:" spin
+        // box label was missing entirely, falling through to raw Japanese
+        // even in the English UI.
+        {QStringLiteral("重み:"), QStringLiteral("Weight:")},
         {QStringLiteral("長押しドラッグ（%1ボタン、%2 ms間、%3回移動）"),
          QStringLiteral("Hold-drag (%1 button, %2 ms, %3 movements)")},
         {QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"),
@@ -664,6 +668,19 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Batch run: cancelled due to a configuration error: %1")},
         {QStringLiteral("連続実行: 安全確認に失敗したため中断しました"),
          QStringLiteral("Batch run: cancelled because the safety check failed")},
+        // 不具合報告D33(低)
+        {QStringLiteral("連続実行: 対象ウィンドウが画面から大きくはみ出しているため、安全確認に"
+                        "失敗して中断しました"),
+         QStringLiteral("Batch run: cancelled because the safety check failed -- the target window "
+                        "is positioned mostly or entirely off-screen")},
+        {QStringLiteral("対象ウィンドウが画面から大きくはみ出しており、安全に操作できることを"
+                        "確認できなかったため、開始できません。\n\n対象ウィンドウの位置を"
+                        "画面内に戻すか、①の「保存したウィンドウ位置へ変更」を使ってから、もう一度"
+                        "開始してください。"),
+         QStringLiteral("The target window is positioned mostly or entirely off-screen, so it could "
+                        "not be confirmed safe to operate -- starting is blocked.\n\nMove the target "
+                        "window back on screen, or use ①'s \"Restore saved position\", then try "
+                        "starting again.")},
         {QStringLiteral("連続実行: %1/%2回目を開始します"), QStringLiteral("Batch run: starting run %1/%2")},
         {QStringLiteral("連続実行: %1/%2回目"), QStringLiteral("Batch run: %1/%2")},
         {QStringLiteral("連続実行を中断しました（対象アプリの再起動待ち中でした）"),
@@ -1095,6 +1112,17 @@ const QHash<QString, QString> &translationTable()
                         "（ボタンなら押す、チェックボックスなら切り替える、など）"),
          QStringLiteral("For the Click action, invoke this object's default action directly instead "
                         "of a coordinate click\n(press for a button, toggle for a check box, etc.)")},
+        {QStringLiteral("名前の照合方法:"), QStringLiteral("Name matching:")},
+        {QStringLiteral("完全一致"), QStringLiteral("Exact match")},
+        {QStringLiteral("前方一致"), QStringLiteral("Starts with")},
+        {QStringLiteral("正規表現"), QStringLiteral("Regular expression")},
+        {QStringLiteral("対象部品の名前の一部が実行のたびに変わる場合（例:クリック回数を含む表示）、"
+                        "前方一致や正規表現を使うと、名前が変わっても同じ部品を再解決できます。"
+                        "通常は「完全一致」のままで構いません。"),
+         QStringLiteral("If part of the target object's own name changes between runs (e.g. a display "
+                        "that includes its click count), \"Starts with\" or \"Regular expression\" lets "
+                        "it keep re-resolving to the same object despite that. Leave this as \"Exact "
+                        "match\" otherwise.")},
         {QStringLiteral("再解決の間隔（この部品の位置を再検索する頻度）:"),
          QStringLiteral("Re-resolve interval (how often to re-search for this object's position):")},
         {QStringLiteral("ステップが変わるたびのみ"), QStringLiteral("Only when the step changes")},
@@ -1485,6 +1513,14 @@ const QHash<QString, QString> &translationTable()
                         "確認してください。"),
          QStringLiteral("Add an operation region first from \"New...\" inside a step's \"Edit...\" "
                         "dialog, then check again.")},
+        // 不具合報告D30(低): missing entirely before this -- this guidance
+        // fell through to raw Japanese even in the English UI.
+        {QStringLiteral("操作領域はステップの設定ダイアログの中から追加します。②の"
+                        "「追加...」でステップを作成し、そのダイアログ内の「新規作成...」"
+                        "から操作領域を追加してから確認してください。"),
+         QStringLiteral("Operation regions are added from inside a step's settings dialog. Create a "
+                        "step first with ②'s \"Add...\", then add an operation region from \"New...\" "
+                        "inside that dialog, and check again.")},
         {QStringLiteral("起動時セットアップをすべて削除しますか？"), QStringLiteral("Delete all startup setup actions?")},
         {QStringLiteral("登録済みの起動時セットアップ操作（%1件）をすべて削除します。元に戻せません。"
                         "削除しますか？"),

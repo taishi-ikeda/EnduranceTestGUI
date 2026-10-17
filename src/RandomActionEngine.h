@@ -737,6 +737,22 @@ private:
     // to (same rationale as pickRandomPoint()'s own clamping -- 不具合報告
     // 1.1), captured once when the gesture starts.
     QRect m_holdDragScreenBounds;
+    // 不具合報告D12(中): the step's own operating region (includeRegions,
+    // unioned into one bounding rect and intersected with
+    // m_holdDragScreenBounds) and exclude regions, captured once when the
+    // gesture starts -- holdDragPathPoint() additionally confines every
+    // point of the path to the former and away from the latter, the same
+    // constraints an ordinary Click/Drag's own pickRandomPoint() already
+    // respects. Previously the path was only clamped to the whole screen,
+    // so a region narrower than the path's own extent, or one close to the
+    // target window's edge, let the path wander outside the operating
+    // region (even past the window itself) or into an exclude region.
+    // m_holdDragIncludeBounds stays null (isNull()) when includeRegions was
+    // empty (e.g. a sweep-type region, which HoldDrag never targets in
+    // practice but is handled defensively) -- holdDragPathPoint() then
+    // falls back to m_holdDragScreenBounds alone, preserving prior behavior.
+    QRect m_holdDragIncludeBounds;
+    QList<QRect> m_holdDragExcludeRegions;
     // Running offset from m_holdDragStartPoint for HoldDragPathShape::
     // RandomWalk only -- see holdDragPathPoint()'s own comment.
     QPoint m_holdDragCurrentOffset;
@@ -892,6 +908,31 @@ private:
     // advanceToNextStep() (same lifecycle as m_currentTaskMemberIndex),
     // and the moment such a member's region resolves successfully.
     int m_popupDialogWaitStrikes = 0;
+
+    // 不具合報告D10(重大): consecutive ticks of grace remaining after a
+    // task member with targetsPopupDialog set just performed a successful
+    // ActionKind::DialogButtonPress -- clicking a dialog's button (an
+    // AT-SPI DoAction() call) only *requests* that the target app close
+    // the dialog; the app still needs its own event loop to actually
+    // process the click and tear the window down, which doesn't happen
+    // synchronously within runOneAction(). Without this grace,
+    // performTaskAction() advances m_currentTaskMemberIndex to whatever
+    // member follows immediately afterward, and if that member doesn't
+    // itself have targetsPopupDialog set (the common case -- the next
+    // member usually operates on the main window again),
+    // currentActionTargetsPopupDialog() goes back to false on the very
+    // next tick, re-arming handleUnexpectedWindows() -- which then finds
+    // the dialog window still present (the target app hasn't finished
+    // closing it yet) and "dismisses" it with an Escape keypress that can
+    // override/race the button's own effect (e.g. turning an intended "OK"
+    // into what looks like a Cancel). Set to kMaxPopupDialogCloseGraceStrikes
+    // the moment such a DialogButtonPress completes; decremented (not
+    // reset) by performRandomAction() each tick currentActionTargetsPopupDialog()
+    // is false, so handleUnexpectedWindows() stays suppressed only for a
+    // short, bounded window -- a dialog that genuinely never closes is
+    // still caught once the grace runs out. Reset to 0 in start() and
+    // advanceToNextStep(), same lifecycle as m_popupDialogWaitStrikes.
+    int m_popupDialogCloseGraceStrikes = 0;
 
     // Consecutive ticks in a row a (non-popup-dialog) step's region has
     // failed to resolve even after runOneAction() tried restoring the

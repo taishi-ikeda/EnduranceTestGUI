@@ -48,6 +48,20 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     dragRow->addWidget(m_dragWeightSpin);
     layout->addLayout(dragRow);
 
+    auto *holdDragRow = new QHBoxLayout;
+    m_holdDragCheck = new QCheckBox(I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）")), this);
+    m_holdDragCheck->setToolTip(
+        I18n::t(QStringLiteral("ボタンを押したまま、円やジグザグ等の経路で長時間動かし続ける操作です"
+                                "（3Dビューワーの回転・パン・ズーム操作などを想定。ボタン・修飾キーの"
+                                "組み合わせ、継続時間、重ねて行うホイール/キー/ウィンドウ操作は"
+                                "③操作パラメータで設定）。")));
+    holdDragRow->addWidget(m_holdDragCheck);
+    holdDragRow->addStretch();
+    m_holdDragWeightSpin = new QSpinBox(this);
+    m_holdDragWeightSpin->setRange(1, 100);
+    holdDragRow->addWidget(m_holdDragWeightSpin);
+    layout->addLayout(holdDragRow);
+
     auto *keyRow = new QHBoxLayout;
     m_keyCheck = new QCheckBox(I18n::t(QStringLiteral("キー入力")), this);
     keyRow->addWidget(m_keyCheck);
@@ -164,7 +178,8 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
     layout->addWidget(m_countRowWidget);
 
     const QList<QCheckBox *> checks = {m_clickCheck,       m_leftClickCheck,   m_rightClickCheck,
-                                        m_doubleClickCheck, m_dragCheck,        m_keyCheck,
+                                        m_doubleClickCheck, m_dragCheck,        m_holdDragCheck,
+                                        m_keyCheck,
                                         m_typingBurstCheck, m_fuzzStringCheck,  m_fuzzAllFieldsCheck,
                                         m_scrollUpCheck,
                                         m_scrollDownCheck, m_scrollHorizontalCheck, m_shortcutCheck,
@@ -173,7 +188,8 @@ ActionKindEditor::ActionKindEditor(QWidget *parent) : QWidget(parent)
         connect(check, &QCheckBox::toggled, this, &ActionKindEditor::changed);
 
     const QList<QSpinBox *> spins = {m_clickWeightSpin,       m_doubleClickWeightSpin,
-                                      m_dragWeightSpin,        m_keyWeightSpin,
+                                      m_dragWeightSpin,        m_holdDragWeightSpin,
+                                      m_keyWeightSpin,
                                       m_typingBurstWeightSpin, m_fuzzStringWeightSpin,
                                       m_fuzzAllFieldsWeightSpin,
                                       m_scrollUpWeightSpin,    m_scrollDownWeightSpin,
@@ -194,6 +210,8 @@ void ActionKindEditor::setKinds(const RegionStep &step)
     m_doubleClickWeightSpin->setValue(step.doubleClickWeight);
     m_dragCheck->setChecked(step.enableDrag);
     m_dragWeightSpin->setValue(step.dragWeight);
+    m_holdDragCheck->setChecked(step.enableHoldDrag);
+    m_holdDragWeightSpin->setValue(step.holdDragWeight);
     m_keyCheck->setChecked(step.enableKey);
     m_keyWeightSpin->setValue(step.keyWeight);
     m_typingBurstCheck->setChecked(step.enableTypingBurst);
@@ -227,6 +245,8 @@ void ActionKindEditor::applyKindsTo(RegionStep &step) const
     step.doubleClickWeight = m_doubleClickWeightSpin->value();
     step.enableDrag = m_dragCheck->isChecked();
     step.dragWeight = m_dragWeightSpin->value();
+    step.enableHoldDrag = m_holdDragCheck->isChecked();
+    step.holdDragWeight = m_holdDragWeightSpin->value();
     step.enableKey = m_keyCheck->isChecked();
     step.keyWeight = m_keyWeightSpin->value();
     step.enableTypingBurst = m_typingBurstCheck->isChecked();

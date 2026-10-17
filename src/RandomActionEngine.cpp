@@ -297,6 +297,16 @@ void RandomActionEngine::start(const TestConfig &config)
     m_typingBurstElapsedMs = 0;
     m_typingBurstKeyCount = 0;
     m_typingBurstInactiveStrikes = 0;
+    // doStop() (called via stop() just above when a previous run was still
+    // going) already releases any physically-held button/modifiers -- this
+    // is just the same defensive full reset start() gives every other
+    // in-progress action kind's state.
+    m_holdDragInProgress = false;
+    m_holdDragDurationMs = 0;
+    m_holdDragElapsedMs = 0;
+    m_holdDragTickCount = 0;
+    m_holdDragInactiveStrikes = 0;
+    m_holdDragWindowMinimized = false;
     m_fuzzStringInProgress = false;
     m_fuzzStringText.clear();
     m_fuzzStringCharIndex = 0;
@@ -408,6 +418,20 @@ void RandomActionEngine::pause()
     // mid-burst would otherwise cut it short by however long was left.
     if (m_typingBurstInProgress)
         m_typingBurstElapsedMs += m_typingBurstElapsed.elapsed();
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: an in-progress
+    // HoldDrag physically holds a real mouse button (and maybe modifier
+    // keys) down -- unlike every other in-progress action kind, leaving it
+    // held for the whole pause would leak into whatever the user does with
+    // their own mouse while paused. Physically release it now (resume()
+    // re-presses at the same path point before continuing) while keeping
+    // every other piece of its state intact, same "preserve the remaining
+    // budget" treatment m_waitStepElapsedMs/m_typingBurstElapsedMs get.
+    if (m_holdDragInProgress) {
+        m_holdDragElapsedMs += m_holdDragElapsed.elapsed();
+        PlatformAutomation::mouseButtonUp(m_holdDragButton);
+        if (m_holdDragModifiers != Qt::NoModifier)
+            PlatformAutomation::modifierKeysUp(m_holdDragModifiers);
+    }
     m_timer.stop();
     m_resourceTimer.stop();
     m_hangCheckTimer.stop();
@@ -462,6 +486,25 @@ void RandomActionEngine::resume()
         const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
         const int remaining = qMax(0, m_typingBurstDurationMs - int(m_typingBurstElapsedMs));
         m_timer.start(qMax(1, qMin(interval, remaining)));
+    } else if (m_holdDragInProgress) {
+        // Re-presses the button (and any modifier keys) pause() physically
+        // released, at the same path point the gesture had already reached
+        // (m_holdDragTickCount), then continues the SAME gesture for
+        // whatever duration is left -- same "preserve the remaining
+        // budget" treatment as the TypingBurst branch just above. Same
+        // focus-reclaim rationale too: clicking "▶ 再開" necessarily
+        // activates this application's own window first.
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
+        const QPoint resumePt = holdDragPathPoint(int(m_holdDragTickCount));
+        PlatformAutomation::modifierKeysDown(m_holdDragModifiers);
+        PlatformAutomation::mouseButtonDown(resumePt, m_holdDragButton);
+        m_holdDragElapsed.start();
+        const int lo = m_holdDragStepIntervalMinMs;
+        const int hi = m_holdDragStepIntervalMaxMs;
+        const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+        const int remaining = qMax(0, m_holdDragDurationMs - int(m_holdDragElapsedMs));
+        m_timer.start(qMax(1, qMin(interval, remaining)));
     } else if (m_fuzzStringInProgress) {
         // Same focus-reclaim rationale as the TypingBurst branch just above
         // -- clicking this application's own "‖ 一時停止"/"▶ 再開" control
@@ -492,6 +535,7 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
     case ActionKind::Click: return I18n::t(QStringLiteral("クリック"));
     case ActionKind::DoubleClick: return I18n::t(QStringLiteral("ダブルクリック"));
     case ActionKind::Drag: return I18n::t(QStringLiteral("ドラッグ"));
+    case ActionKind::HoldDrag: return I18n::t(QStringLiteral("長押しドラッグ"));
     case ActionKind::Key: return I18n::t(QStringLiteral("キー入力"));
     case ActionKind::TypingBurst: return I18n::t(QStringLiteral("連続キー入力"));
     case ActionKind::FuzzString: return I18n::t(QStringLiteral("ファズ文字列入力"));
@@ -508,6 +552,17 @@ QString RandomActionEngine::describeActionKind(ActionKind kind) const
 
 void RandomActionEngine::doStop(const QString &reason, bool isAnomaly, bool targetCrashed)
 {
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: an in-progress
+    // HoldDrag physically holds a real mouse button (and maybe modifier
+    // keys) down -- unlike every other in-progress action kind, leaving it
+    // held would leak into whatever the user does with their own mouse
+    // after this run ends. Centralized here (rather than at each
+    // individual doStop() call site) so every way this run can end --
+    // a stop condition, a safety-check failure, crash detection, the user
+    // pressing "■ 停止" -- reliably releases it; finishHoldDrag(false, ...)
+    // is a no-op if no HoldDrag is in progress.
+    finishHoldDrag(/*counts=*/false);
+
     // 不具合報告2.6「一時停止中も画面の「経過」が進み、サマリーの経過時間と
     // 食い違う」: read via elapsedMs() *before* m_running/m_paused are
     // reset below -- that method's own comment explains why it needs
@@ -1369,6 +1424,8 @@ RandomActionEngine::ActionKind RandomActionEngine::pickWeightedActionKind(const 
         entries << Entry{ActionKind::DoubleClick, qMax(1, step.doubleClickWeight)};
     if (step.enableDrag)
         entries << Entry{ActionKind::Drag, qMax(1, step.dragWeight)};
+    if (step.enableHoldDrag)
+        entries << Entry{ActionKind::HoldDrag, qMax(1, step.holdDragWeight)};
     if (step.enableKey)
         entries << Entry{ActionKind::Key, qMax(1, step.keyWeight)};
     if (step.enableTypingBurst)
@@ -1439,6 +1496,18 @@ void RandomActionEngine::advanceToNextStep()
 
 bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, QString &desc)
 {
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」「現状では右ドラッグ
+    // のたびにEscapeが入る…3Dビューでは右ドラッグはズームなので、メニュー
+    // が出ないのにEscapeが送られ、実行中の処理を取り消す可能性がある」:
+    // for a target configured this way, the right mouse button never opens
+    // a menu at all -- skip the introspection/dismissal below entirely
+    // (never even the 150ms render-wait) rather than unconditionally
+    // sending Escape once nothing was selected, which would otherwise
+    // cancel whatever the target was in the middle of on every single
+    // right-button action.
+    if (params.viewerRightButtonNeverOpensMenu)
+        return false;
+
     // A right-button action (click or drag) may have opened a native
     // context/popup menu, regardless of whether enableContextMenuSelection
     // is on -- that setting only controls whether we try to pick an item
@@ -1575,6 +1644,15 @@ constexpr int kMaxTypingBurstInactiveStrikes = 10;
 // kMaxTypingBurstInactiveStrikes just above, since continueFuzzStringKeyByKey()
 // runs the exact same per-tick active-process safety check.
 constexpr int kMaxFuzzStringInactiveStrikes = 10;
+
+// Symmetric counterpart for an in-progress ActionKind::HoldDrag (see
+// m_holdDragInProgress) whose style holds a modifier down or whose key
+// overlay is enabled -- same rationale as kMaxTypingBurstInactiveStrikes.
+// Only applies to that keyboard-focus check; the separate windowPidAtPoint()
+// safety check continueHoldDrag() also makes gets zero tolerance, same as
+// Click/Drag's own identical one-shot check (see continueHoldDrag()'s own
+// comment).
+constexpr int kMaxHoldDragInactiveStrikes = 10;
 
 // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.4: after this many
 // consecutive ticks of ActionKind::FuzzString or ActionKind::
@@ -1731,6 +1809,15 @@ void RandomActionEngine::performRandomAction()
     // applies correctly to whichever step/group/task started it.
     if (m_typingBurstInProgress) {
         continueTypingBurst();
+        return;
+    }
+
+    // An ActionKind::HoldDrag picked on an earlier tick is still in
+    // progress (a real mouse button, and maybe modifier keys, are
+    // physically held) -- same "don't pick a brand new action on top of
+    // this one" rationale as the TypingBurst check just above.
+    if (m_holdDragInProgress) {
+        continueHoldDrag();
         return;
     }
 
@@ -2009,6 +2096,270 @@ void RandomActionEngine::finishTypingBurst()
     // burst from was already holding.
     const RegionStep &step = m_config.steps[m_currentStepIndex];
     switch (m_typingBurstContext) {
+    case StepContext::Step:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.actionCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Group:
+        ++m_iterationCount;
+        ++m_currentStepActionsDone;
+        emit iterationCountChanged(m_iterationCount);
+        if (m_currentStepActionsDone >= step.groupTotalCallCount)
+            advanceToNextStep();
+        break;
+    case StepContext::Task:
+        ++m_currentTaskMemberIndex;
+        if (m_currentTaskMemberIndex >= step.taskMembers.size()) {
+            ++m_iterationCount;
+            emit iterationCountChanged(m_iterationCount);
+            advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
+        }
+        break;
+    }
+
+    scheduleNext();
+}
+
+QPoint RandomActionEngine::holdDragPathPoint(int tick)
+{
+    const int extent = qMax(1, m_holdDragPathExtentPx);
+    QPoint offset;
+    switch (m_holdDragPathShape) {
+    case HoldDragPathShape::Circle: {
+        // ~20 degrees/tick keeps the path a smooth circle of radius
+        // `extent` regardless of how many ticks the configured duration/
+        // interval end up producing -- SPEC.md 想定パターンP1「円や…」.
+        const double angle = tick * 0.35;
+        offset = QPoint(qRound(std::cos(angle) * extent), qRound(std::sin(angle) * extent));
+        break;
+    }
+    case HoldDragPathShape::ZigZag: {
+        // A triangle wave across the horizontal extent, alternating which
+        // vertical half it's drawn in every half-period -- SPEC.md 想定
+        // パターンP1「…ジグザグに…」.
+        constexpr int kPeriod = 20;
+        const int phase = ((tick % kPeriod) + kPeriod) % kPeriod;
+        const int half = kPeriod / 2;
+        const int triangle = phase < half ? phase : kPeriod - phase;  // 0..half..0
+        const int x = (triangle * 2 * extent) / qMax(1, half) - extent;
+        const bool upperHalf = ((tick / half) % 2) == 0;
+        offset = QPoint(x, upperHalf ? -extent / 2 : extent / 2);
+        break;
+    }
+    case HoldDragPathShape::RandomWalk:
+    default: {
+        // A small random step each call, pulled back toward the start
+        // point once it strays past `extent` -- stateful (unlike the two
+        // shapes above) since a walk has no meaningful closed-form "Nth
+        // point" to recompute from `tick` alone.
+        const int stepPx = qMax(1, extent / 8);
+        m_holdDragCurrentOffset += QPoint(int(m_rng.bounded(quint32(2 * stepPx + 1))) - stepPx,
+                                           int(m_rng.bounded(quint32(2 * stepPx + 1))) - stepPx);
+        m_holdDragCurrentOffset.setX(qBound(-extent, m_holdDragCurrentOffset.x(), extent));
+        m_holdDragCurrentOffset.setY(qBound(-extent, m_holdDragCurrentOffset.y(), extent));
+        offset = m_holdDragCurrentOffset;
+        break;
+    }
+    }
+
+    QPoint pt = m_holdDragStartPoint + offset;
+    pt.setX(qBound(m_holdDragScreenBounds.left(), pt.x(), m_holdDragScreenBounds.right()));
+    pt.setY(qBound(m_holdDragScreenBounds.top(), pt.y(), m_holdDragScreenBounds.bottom()));
+    return pt;
+}
+
+void RandomActionEngine::continueHoldDrag()
+{
+    const qint64 elapsed = m_holdDragElapsedMs + m_holdDragElapsed.elapsed();
+    if (elapsed >= m_holdDragDurationMs) {
+        finishHoldDrag(/*counts=*/true);
+        return;
+    }
+
+    ++m_holdDragTickCount;
+    const QPoint nextPt = holdDragPathPoint(int(m_holdDragTickCount));
+
+    // Safety net, same zero-tolerance rule as Click/Drag's own one-shot
+    // check (SPEC.md 6.7): the pointer is about to move onto `nextPt`
+    // while a real mouse button is held, so a mismatch here means it's
+    // about to drag onto/release over an unrelated window -- never
+    // tolerated, unlike the keyboard-focus check just below.
+    if (PlatformAutomation::windowPidAtPoint(nextPt) != m_config.targetPid) {
+        doStop(I18n::t(QStringLiteral("対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました")),
+               /*isAnomaly=*/true);
+        return;
+    }
+
+    // Keyboard-focus check, only when keyboard input is actually part of
+    // this gesture (a held modifier, or the key overlay) -- same bounded-
+    // tolerance rationale as continueTypingBurst()'s identical check
+    // (most notably: clicking this application's own "■ 停止"/
+    // "‖ 一時停止" necessarily activates it first).
+    const bool keyboardInvolved = m_holdDragModifiers != Qt::NoModifier || m_holdDragKeyOverlay.enabled;
+    if (keyboardInvolved && PlatformAutomation::activeProcessPid() != m_config.targetPid) {
+        ++m_holdDragInactiveStrikes;
+        if (m_holdDragInactiveStrikes >= kMaxHoldDragInactiveStrikes) {
+            doStop(I18n::t(QStringLiteral("対象アプリがアクティブでないため（キー入力が他アプリに送られる可能性があるため）、"
+                       "安全のためテストを停止しました")),
+                   /*isAnomaly=*/true);
+            return;
+        }
+        const int remainingRetry = int(m_holdDragDurationMs - elapsed);
+        m_timer.start(qMax(1, qMin(m_holdDragStepIntervalMinMs, remainingRetry)));
+        return;
+    }
+    m_holdDragInactiveStrikes = 0;
+
+    PlatformAutomation::moveMouseWhileHeld(nextPt, m_holdDragButton);
+
+    // Wheel overlay (SPEC.md 想定パターンP3/P6、「0ms連打」「連打と完全停止
+    // の繰り返し」): alternates burst/pause phases -- see
+    // HoldDragWheelOverlay's own comment. A phase transition out of a pause
+    // becomes due on this tick but the burst itself fires on the *next*
+    // due tick (at most one extra m_holdDragStepIntervalMs of delay) --
+    // simpler than restructuring this into a loop, and well within this
+    // feature's own timing granularity.
+    if (m_holdDragWheelOverlay.enabled && elapsed >= m_holdDragWheelPhaseEndMs) {
+        if (m_holdDragWheelBurstActive) {
+            const int nLo = qMin(m_holdDragWheelOverlay.notchesPerBurstMin,
+                                  m_holdDragWheelOverlay.notchesPerBurstMax);
+            const int nHi = qMax(m_holdDragWheelOverlay.notchesPerBurstMin,
+                                  m_holdDragWheelOverlay.notchesPerBurstMax);
+            const int notches = qMax(1, nLo + (nHi > nLo ? int(m_rng.bounded(quint32(nHi - nLo + 1))) : 0));
+            for (int i = 0; i < notches; ++i)
+                PlatformAutomation::scroll(nextPt, 0, 1);
+            const int pLo = qMin(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
+                                  m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
+            const int pHi = qMax(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
+                                  m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
+            const int pause = qMax(0, pLo + (pHi > pLo ? int(m_rng.bounded(quint32(pHi - pLo + 1))) : 0));
+            m_holdDragWheelPhaseEndMs = elapsed + pause;
+            m_holdDragWheelBurstActive = false;
+        } else {
+            m_holdDragWheelBurstActive = true;
+            m_holdDragWheelPhaseEndMs = elapsed;
+        }
+    }
+
+    // Key overlay ("ドラッグ中にキー").
+    if (m_holdDragKeyOverlay.enabled && elapsed >= m_holdDragNextKeyMs) {
+        const int totalPool = m_holdDragKeyChars.size() + m_holdDragNamedKeys.size();
+        if (totalPool > 0) {
+            const int index = int(m_rng.bounded(quint32(totalPool)));
+            if (index < m_holdDragKeyChars.size())
+                PlatformAutomation::keyTap(m_holdDragKeyChars[index]);
+            else
+                PlatformAutomation::keyTapNamed(m_holdDragNamedKeys[index - m_holdDragKeyChars.size()]);
+        }
+        const int iLo = qMin(m_holdDragKeyOverlay.keyIntervalMinMs, m_holdDragKeyOverlay.keyIntervalMaxMs);
+        const int iHi = qMax(m_holdDragKeyOverlay.keyIntervalMinMs, m_holdDragKeyOverlay.keyIntervalMaxMs);
+        m_holdDragNextKeyMs = elapsed + qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
+    }
+
+    // Window-op overlay (SPEC.md 想定パターンP5「ドラッグ中のウィンドウ
+    // 操作」): always acts on the main target window, same as
+    // ActionKind::WindowOp.
+    if (m_holdDragWindowOpOverlay.enabled && elapsed >= m_holdDragNextWindowOpMs) {
+        QList<int> ops;
+        if (m_holdDragWindowOpOverlay.allowResize)
+            ops << 0;
+        if (m_holdDragWindowOpOverlay.allowMinimizeRestore)
+            ops << 1;
+        if (!ops.isEmpty()) {
+            const int op = ops[int(m_rng.bounded(quint32(ops.size())))];
+            if (op == 0) {
+                QRect bounds;
+                if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid,
+                                                           bounds)) {
+                    const int newW = qMax(200, bounds.width() + int(m_rng.bounded(161u)) - 80);
+                    const int newH = qMax(150, bounds.height() + int(m_rng.bounded(161u)) - 80);
+                    PlatformAutomation::resizeWindow(m_config.targetPid, m_config.targetWindowId,
+                                                      QSize(newW, newH));
+                }
+            } else if (!m_holdDragWindowMinimized) {
+                PlatformAutomation::minimizeWindow(m_config.targetPid, m_config.targetWindowId);
+                m_holdDragWindowMinimized = true;
+            } else {
+                PlatformAutomation::activateProcess(m_config.targetPid);
+                m_holdDragWindowMinimized = false;
+            }
+        }
+        const int iLo = qMin(m_holdDragWindowOpOverlay.intervalMinMs, m_holdDragWindowOpOverlay.intervalMaxMs);
+        const int iHi = qMax(m_holdDragWindowOpOverlay.intervalMinMs, m_holdDragWindowOpOverlay.intervalMaxMs);
+        m_holdDragNextWindowOpMs =
+            elapsed + qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
+    }
+
+    const int lo = m_holdDragStepIntervalMinMs;
+    const int hi = m_holdDragStepIntervalMaxMs;
+    const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+    const int remaining = int(m_holdDragDurationMs - elapsed);
+    m_timer.start(qMax(1, qMin(interval, remaining)));
+}
+
+void RandomActionEngine::finishHoldDrag(bool counts)
+{
+    if (!m_holdDragInProgress)
+        return;
+    m_holdDragInProgress = false;
+
+    // Always release physically-held input first, regardless of why this
+    // is being called (normal completion, a safety-check failure, pause(),
+    // or doStop()) -- see m_holdDragInProgress's own comment.
+    if (m_holdDragWindowMinimized) {
+        PlatformAutomation::activateProcess(m_config.targetPid);
+        m_holdDragWindowMinimized = false;
+    }
+    PlatformAutomation::mouseButtonUp(m_holdDragButton);
+    if (m_holdDragModifiers != Qt::NoModifier)
+        PlatformAutomation::modifierKeysUp(m_holdDragModifiers);
+
+    if (!counts)
+        return;  // interrupted early -- no bookkeeping, no reschedule (see declaration comment)
+
+    // A right-button hold can pop the same kind of context/popup menu a
+    // plain right click does once released -- dismiss it the same "safety
+    // net, not item-selection" way Click/Drag's own handlePossibleContextMenu()
+    // falls back to when nothing was selected, unless this gesture started
+    // under viewer mode (see m_holdDragViewerRightButtonNeverOpensMenu's
+    // own comment), where the right button never opens a menu at all.
+    if (m_holdDragButton == Qt::RightButton && !m_holdDragViewerRightButtonNeverOpensMenu) {
+        QThread::msleep(150);  // let the menu render before dismissing it
+        PlatformAutomation::dismissContextMenu();
+    }
+
+    const QString buttonLabel = m_holdDragButton == Qt::RightButton    ? I18n::t(QStringLiteral("右"))
+                                 : m_holdDragButton == Qt::MiddleButton ? I18n::t(QStringLiteral("中"))
+                                                                        : I18n::t(QStringLiteral("左"));
+    QStringList modifierLabels;
+    if (m_holdDragModifiers & Qt::ShiftModifier)
+        modifierLabels << QStringLiteral("Shift");
+    if (m_holdDragModifiers & Qt::ControlModifier)
+        modifierLabels << QStringLiteral("Ctrl");
+    if (m_holdDragModifiers & Qt::AltModifier)
+        modifierLabels << QStringLiteral("Alt");
+    if (m_holdDragModifiers & Qt::MetaModifier)
+        modifierLabels << QStringLiteral("Meta");
+    const QString styleLabel = modifierLabels.isEmpty()
+                                    ? buttonLabel
+                                    : QStringLiteral("%1+%2").arg(modifierLabels.join(QStringLiteral("+")), buttonLabel);
+
+    const QString desc = I18n::t(QStringLiteral("長押しドラッグ（%1ボタン、%2 ms間、%3回移動）"))
+                              .arg(styleLabel)
+                              .arg(m_holdDragDurationMs)
+                              .arg(m_holdDragTickCount);
+    ++m_actionKindCounts[ActionKind::HoldDrag];
+    recordRecentAction(desc);
+    emit actionPerformed(desc);
+    emit logMessage(desc);
+
+    // Same "current top-level step cannot have changed while in progress"
+    // reasoning as finishTypingBurst() -- see its own comment.
+    const RegionStep &step = m_config.steps[m_currentStepIndex];
+    switch (m_holdDragContext) {
     case StepContext::Step:
         ++m_iterationCount;
         ++m_currentStepActionsDone;
@@ -2346,8 +2697,9 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                                              m_currentRegionSweepIntervalPx, m_currentRegionSweepJitterPx,
                                              excludeRegions, ok);
     const bool kindNeedsPoint = kind == ActionKind::Click || kind == ActionKind::DoubleClick ||
-                                 kind == ActionKind::Drag || kind == ActionKind::ScrollUp ||
-                                 kind == ActionKind::ScrollDown || kind == ActionKind::ScrollHorizontal;
+                                 kind == ActionKind::Drag || kind == ActionKind::HoldDrag ||
+                                 kind == ActionKind::ScrollUp || kind == ActionKind::ScrollDown ||
+                                 kind == ActionKind::ScrollHorizontal;
     if (!ok && kindNeedsPoint) {
         // 不具合報告2.6(中): regionOffScreen (only ever set when
         // !m_currentRegionIsSweepTarget -- see pickRandomPoint()'s own
@@ -2522,6 +2874,105 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
                 return ActionOutcome::StoppedEngine;
         }
         break;
+    }
+    case ActionKind::HoldDrag: {
+        // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: press a button
+        // (optionally with modifier keys) down at `pt` and keep it down,
+        // moving the pointer along a path for a randomized duration --
+        // optionally layering wheel/key/window-resize input on top while
+        // still held -- instead of Drag's single instantaneous press-move-
+        // release. Dispatch returns ActionOutcome::InProgress immediately
+        // below, same reason TypingBurst's start does: finishHoldDrag()
+        // does all of the counting/logging/advancing once the gesture's
+        // duration has actually elapsed.
+        HoldDragStyle style;  // default {Left, NoModifier, 1} -- see its own comment
+        if (!params.holdDragStyles.isEmpty()) {
+            int total = 0;
+            for (const HoldDragStyle &s : params.holdDragStyles)
+                total += qMax(1, s.weight);
+            int target = int(m_rng.bounded(quint32(total)));
+            for (const HoldDragStyle &s : params.holdDragStyles) {
+                const int w = qMax(1, s.weight);
+                if (target < w) {
+                    style = s;
+                    break;
+                }
+                target -= w;
+            }
+        }
+
+        PlatformAutomation::modifierKeysDown(style.modifiers);
+        PlatformAutomation::mouseButtonDown(pt, style.button);
+        recordMouseActionMarker(MouseActionMarker::Kind::Drag, pt, pt, style.button);
+
+        const int durLo = qMin(params.holdDragDurationMinMs, params.holdDragDurationMaxMs);
+        const int durHi = qMax(params.holdDragDurationMinMs, params.holdDragDurationMaxMs);
+        const int duration =
+            qMax(1, durLo + (durHi > durLo ? int(m_rng.bounded(quint32(durHi - durLo + 1))) : 0));
+
+        QScreen *screen = QGuiApplication::screenAt(pt);
+        if (!screen && !QGuiApplication::screens().isEmpty())
+            screen = QGuiApplication::screens().first();
+
+        m_holdDragInProgress = true;
+        m_holdDragContext = context;
+        m_holdDragButton = style.button;
+        m_holdDragModifiers = style.modifiers;
+        m_holdDragViewerRightButtonNeverOpensMenu = params.viewerRightButtonNeverOpensMenu;
+        m_holdDragStartPoint = pt;
+        m_holdDragScreenBounds = screen ? screen->geometry() : QRect(pt, pt);
+        m_holdDragCurrentOffset = QPoint(0, 0);
+        m_holdDragDurationMs = duration;
+        m_holdDragElapsedMs = 0;
+        m_holdDragElapsed.start();
+        m_holdDragTickCount = 0;
+        m_holdDragInactiveStrikes = 0;
+        m_holdDragPathShape = params.holdDragPathShape;
+        const int extLo = qMin(params.holdDragPathExtentMinPx, params.holdDragPathExtentMaxPx);
+        const int extHi = qMax(params.holdDragPathExtentMinPx, params.holdDragPathExtentMaxPx);
+        m_holdDragPathExtentPx =
+            qMax(1, extLo + (extHi > extLo ? int(m_rng.bounded(quint32(extHi - extLo + 1))) : 0));
+        m_holdDragStepIntervalMinMs =
+            qMax(0, qMin(params.holdDragStepIntervalMinMs, params.holdDragStepIntervalMaxMs));
+        m_holdDragStepIntervalMaxMs =
+            qMax(m_holdDragStepIntervalMinMs,
+                 qMax(params.holdDragStepIntervalMinMs, params.holdDragStepIntervalMaxMs));
+
+        m_holdDragWheelOverlay = params.holdDragWheelOverlay;
+        m_holdDragWheelBurstActive = true;
+        m_holdDragWheelPhaseEndMs = 0;  // due on the very first continueHoldDrag() tick
+
+        m_holdDragKeyOverlay = params.holdDragKeyOverlay;
+        m_holdDragNextKeyMs = 0;
+        m_holdDragKeyChars = params.allowedKeyChars;
+        QList<Qt::Key> holdDragNamedKeys;
+        if (params.keyIncludeTab)
+            holdDragNamedKeys << Qt::Key_Tab;
+        if (params.keyIncludeReturn)
+            holdDragNamedKeys << Qt::Key_Return;
+        if (params.keyIncludeEscape)
+            holdDragNamedKeys << Qt::Key_Escape;
+        if (params.keyIncludeBackspace)
+            holdDragNamedKeys << Qt::Key_Backspace;
+        if (params.keyIncludeDelete)
+            holdDragNamedKeys << Qt::Key_Delete;
+        if (params.keyIncludeArrowKeys)
+            holdDragNamedKeys << Qt::Key_Left << Qt::Key_Right << Qt::Key_Up << Qt::Key_Down;
+        m_holdDragNamedKeys = holdDragNamedKeys;
+
+        m_holdDragWindowOpOverlay = params.holdDragWindowOpOverlay;
+        m_holdDragNextWindowOpMs = 0;
+        m_holdDragWindowMinimized = false;
+
+        emit logMessage(I18n::t(QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"))
+                            .arg(stepLabel)
+                            .arg(duration));
+
+        const int lo = m_holdDragStepIntervalMinMs;
+        const int hi = m_holdDragStepIntervalMaxMs;
+        const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+        m_timer.start(qMax(1, qMin(interval, duration)));
+        return ActionOutcome::InProgress;
     }
     case ActionKind::Key: {
         const QString &chars = params.allowedKeyChars;

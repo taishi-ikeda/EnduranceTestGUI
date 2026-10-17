@@ -204,6 +204,11 @@ private:
         Click,
         DoubleClick,
         Drag,
+        // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: a long-press,
+        // continuously-moving camera-manipulation-style gesture -- see
+        // RegionStep::enableHoldDrag/ActionParams::holdDragStyles and
+        // m_holdDragInProgress's own comment.
+        HoldDrag,
         Key,
         TypingBurst,
         FuzzString,
@@ -316,6 +321,35 @@ private:
     // m_config.steps[m_currentStepIndex] for the relevant threshold since
     // that index cannot have changed while the burst was in progress.
     void finishTypingBurst();
+    // Continues an in-progress ActionKind::HoldDrag (see
+    // m_holdDragInProgress): called instead of the normal step/group/task
+    // dispatch at the top of performRandomAction() on every tick while one
+    // is running. Advances the pointer one step along the path, maybe
+    // injects a wheel/key/window-op overlay action if one is due this
+    // tick, re-checks safety, and reschedules m_timer -- or, once the
+    // gesture's configured duration has actually elapsed, calls
+    // finishHoldDrag() instead.
+    void continueHoldDrag();
+    // Releases the physically-held mouse button and modifier keys (if
+    // any) for an in-progress HoldDrag and, when `counts` is true, logs/
+    // counts it as exactly one action and performs whichever of
+    // performRandomAction()/performGroupAction()/performTaskAction()'s own
+    // completion bookkeeping m_holdDragContext says it was dispatched
+    // from -- same shape as finishTypingBurst(). `counts` is false for an
+    // early, uncounted interruption (the safety check failing, or the run
+    // being paused/stopped while the gesture was still in progress) --
+    // see m_holdDragInProgress's own comment for why those must still
+    // physically release the held input without ever skipping that release.
+    void finishHoldDrag(bool counts);
+    // The next point along the path shape m_holdDragPathShape describes,
+    // `tick` steps after the gesture started, centered on
+    // m_holdDragStartPoint and extending up to m_holdDragPathExtentPx --
+    // shared by the gesture's start (tick 0) and every continueHoldDrag()
+    // tick afterward. Circle/ZigZag are pure functions of `tick` (so
+    // resuming after a pause reproduces the same path); RandomWalk instead
+    // advances m_holdDragCurrentOffset by a small random step each call,
+    // since a walk has no meaningful closed-form "Nth point" to recompute.
+    QPoint holdDragPathPoint(int tick);
     // Continues an in-progress ActionKind::FuzzString whose delivery mode
     // resolved to KeyByKey (see m_fuzzStringInProgress): called instead of
     // the normal step/group/task dispatch at the top of
@@ -664,6 +698,79 @@ private:
     // target is confirmed active again, in the TypingBurst case of
     // runOneAction() (a fresh burst starting), and in start().
     int m_typingBurstInactiveStrikes = 0;
+
+    // State for an in-progress ActionKind::HoldDrag (SPEC.md 追加実装依頼
+    // 「ビューワー耐久テスト強化」) -- mirrors m_typingBurstInProgress's
+    // multi-tick pattern, except what's "in progress" is a real, physically
+    // held OS-level mouse button (and, if the picked HoldDragStyle has any,
+    // modifier keys) -- the first state in this engine that must be
+    // released on *every* exit path, not just normal completion: a safety-
+    // check failure, pause(), or doStop() must all still call
+    // finishHoldDrag(false, ...) to physically release the button/
+    // modifiers before doing anything else, or the real OS pointer would be
+    // left stuck "down" system-wide for as long as this process runs.
+    bool m_holdDragInProgress = false;
+    StepContext m_holdDragContext = StepContext::Step;
+    int m_holdDragDurationMs = 0;
+    qint64 m_holdDragElapsedMs = 0;
+    QElapsedTimer m_holdDragElapsed;
+    Qt::MouseButton m_holdDragButton = Qt::LeftButton;
+    Qt::KeyboardModifiers m_holdDragModifiers = Qt::NoModifier;
+    // Captured from ActionParams::viewerRightButtonNeverOpensMenu at the
+    // gesture's start (the full ActionParams it started under is a local
+    // variable in runOneAction(), long gone by the time finishHoldDrag()
+    // runs) -- see that field's own comment. Only consulted by
+    // finishHoldDrag() when m_holdDragButton is Qt::RightButton and the
+    // gesture completed its full duration normally.
+    bool m_holdDragViewerRightButtonNeverOpensMenu = false;
+    QPoint m_holdDragStartPoint;
+    HoldDragPathShape m_holdDragPathShape = HoldDragPathShape::Circle;
+    int m_holdDragPathExtentPx = 20;
+    int m_holdDragStepIntervalMinMs = 10;
+    int m_holdDragStepIntervalMaxMs = 30;
+    // How many path steps have been taken so far -- also this gesture's
+    // "move count" for its completion log message, and the input
+    // holdDragPathPoint() advances its shape from (so resuming after a
+    // pause continues the same path rather than restarting it).
+    qint64 m_holdDragTickCount = 0;
+    // Clamped-to-the-real-screens bounds the path is additionally confined
+    // to (same rationale as pickRandomPoint()'s own clamping -- 不具合報告
+    // 1.1), captured once when the gesture starts.
+    QRect m_holdDragScreenBounds;
+    // Running offset from m_holdDragStartPoint for HoldDragPathShape::
+    // RandomWalk only -- see holdDragPathPoint()'s own comment.
+    QPoint m_holdDragCurrentOffset;
+    // Consecutive ticks in a row the safety checks below have found a
+    // problem that might resolve itself within a tick or two (the target
+    // process losing OS input focus, while modifier keys are held or the
+    // key overlay is active -- same bounded-tolerance rationale as
+    // m_typingBurstInactiveStrikes, most notably the user clicking this
+    // application's own "■ 停止"/"‖ 一時停止"). Unlike that check, a
+    // mismatched windowPidAtPoint() (the pointer about to land on an
+    // unrelated window) gets zero tolerance, same as Click/Drag's own
+    // identical check -- see continueHoldDrag()'s own comment.
+    int m_holdDragInactiveStrikes = 0;
+    HoldDragWheelOverlay m_holdDragWheelOverlay;
+    // Whether the wheel overlay is currently inside a notch-sending burst
+    // or a pause between bursts, and when the current one ends -- advanced
+    // each tick in continueHoldDrag() against m_holdDragElapsedMs.
+    bool m_holdDragWheelBurstActive = false;
+    qint64 m_holdDragWheelPhaseEndMs = 0;
+    HoldDragKeyOverlay m_holdDragKeyOverlay;
+    qint64 m_holdDragNextKeyMs = 0;
+    // The character/named-key candidate pool for the key overlay -- same
+    // rationale as m_typingBurstChars/m_typingBurstNamedKeys (the
+    // ActionParams this gesture started under is long gone by the time a
+    // later tick fires).
+    QString m_holdDragKeyChars;
+    QList<Qt::Key> m_holdDragNamedKeys;
+    HoldDragWindowOpOverlay m_holdDragWindowOpOverlay;
+    qint64 m_holdDragNextWindowOpMs = 0;
+    // Whether the target window is currently minimized by this gesture's
+    // own window-op overlay (so continueHoldDrag() knows to restore it
+    // before the gesture ends, and doesn't pick "minimize" again while
+    // already minimized).
+    bool m_holdDragWindowMinimized = false;
 
     // State for an in-progress ActionKind::FuzzString (SPEC.md 10
     // "ファジングテスト対応") whose delivery mode resolved to KeyByKey --

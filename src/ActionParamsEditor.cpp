@@ -48,6 +48,191 @@ ActionParamsEditor::ActionParamsEditor(QWidget *parent) : QWidget(parent)
     dragDirectionRow->addStretch();
     layout->addLayout(dragDirectionRow);
 
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」(ActionKind::
+    // HoldDrag): a long-press, continuously-moving camera-manipulation-
+    // style gesture -- a VTK-style viewer's default trackball-camera
+    // bindings (plain left = rotate, Shift+left = pan, Ctrl+left = spin,
+    // middle = pan, right = zoom) are the motivating case, but any
+    // button/modifier combination can be configured.
+    auto *holdDragSectionLabel = new QLabel(
+        I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）のボタン・修飾キーの組み合わせ（複数登録可。"
+                                "実行の都度、重みに応じてランダムに1つ選ばれます）:")),
+        this);
+    holdDragSectionLabel->setWordWrap(true);
+    layout->addWidget(holdDragSectionLabel);
+    m_holdDragStyleListWidget = new QListWidget(this);
+    m_holdDragStyleListWidget->setMaximumHeight(80);
+    layout->addWidget(m_holdDragStyleListWidget);
+    auto *holdDragStyleRow = new QHBoxLayout;
+    m_holdDragStyleButtonCombo = new QComboBox(this);
+    m_holdDragStyleButtonCombo->addItem(I18n::t(QStringLiteral("左")), int(Qt::LeftButton));
+    m_holdDragStyleButtonCombo->addItem(I18n::t(QStringLiteral("中")), int(Qt::MiddleButton));
+    m_holdDragStyleButtonCombo->addItem(I18n::t(QStringLiteral("右")), int(Qt::RightButton));
+    m_holdDragStyleShiftCheck = new QCheckBox(QStringLiteral("Shift"), this);
+    m_holdDragStyleCtrlCheck = new QCheckBox(QStringLiteral("Ctrl"), this);
+    m_holdDragStyleAltCheck = new QCheckBox(QStringLiteral("Alt"), this);
+    m_holdDragStyleWeightSpin = new QSpinBox(this);
+    m_holdDragStyleWeightSpin->setRange(1, 100);
+    m_addHoldDragStyleButton = new QPushButton(I18n::t(QStringLiteral("追加")), this);
+    m_removeHoldDragStyleButton = new QPushButton(I18n::t(QStringLiteral("選択を削除")), this);
+    holdDragStyleRow->addWidget(m_holdDragStyleButtonCombo);
+    holdDragStyleRow->addWidget(m_holdDragStyleShiftCheck);
+    holdDragStyleRow->addWidget(m_holdDragStyleCtrlCheck);
+    holdDragStyleRow->addWidget(m_holdDragStyleAltCheck);
+    holdDragStyleRow->addWidget(new QLabel(I18n::t(QStringLiteral("重み:")), this));
+    holdDragStyleRow->addWidget(m_holdDragStyleWeightSpin);
+    holdDragStyleRow->addWidget(m_addHoldDragStyleButton);
+    holdDragStyleRow->addWidget(m_removeHoldDragStyleButton);
+    layout->addLayout(holdDragStyleRow);
+    connect(m_addHoldDragStyleButton, &QPushButton::clicked, this, &ActionParamsEditor::onAddHoldDragStyle);
+    connect(m_removeHoldDragStyleButton, &QPushButton::clicked, this,
+            &ActionParamsEditor::onRemoveSelectedHoldDragStyle);
+
+    auto *holdDragDurationRow = new QHBoxLayout;
+    holdDragDurationRow->addWidget(new QLabel(I18n::t(QStringLiteral("長押しドラッグの継続時間:"))));
+    m_holdDragDurationMinSpin = new QSpinBox(this);
+    m_holdDragDurationMinSpin->setRange(1, 600000);
+    m_holdDragDurationMinSpin->setValue(2000);
+    m_holdDragDurationMaxSpin = new QSpinBox(this);
+    m_holdDragDurationMaxSpin->setRange(1, 600000);
+    m_holdDragDurationMaxSpin->setValue(5000);
+    holdDragDurationRow->addWidget(m_holdDragDurationMinSpin);
+    holdDragDurationRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragDurationRow->addWidget(m_holdDragDurationMaxSpin);
+    holdDragDurationRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragDurationRow->addStretch();
+    layout->addLayout(holdDragDurationRow);
+
+    auto *holdDragPathRow = new QHBoxLayout;
+    holdDragPathRow->addWidget(new QLabel(I18n::t(QStringLiteral("移動経路:"))));
+    m_holdDragPathShapeCombo = new QComboBox(this);
+    m_holdDragPathShapeCombo->addItem(I18n::t(QStringLiteral("円")), int(HoldDragPathShape::Circle));
+    m_holdDragPathShapeCombo->addItem(I18n::t(QStringLiteral("ジグザグ")), int(HoldDragPathShape::ZigZag));
+    m_holdDragPathShapeCombo->addItem(I18n::t(QStringLiteral("ランダムウォーク")),
+                                       int(HoldDragPathShape::RandomWalk));
+    holdDragPathRow->addWidget(m_holdDragPathShapeCombo);
+    holdDragPathRow->addStretch();
+    layout->addLayout(holdDragPathRow);
+
+    auto *holdDragExtentRow = new QHBoxLayout;
+    holdDragExtentRow->addWidget(new QLabel(I18n::t(QStringLiteral("移動経路の大きさ:"))));
+    m_holdDragPathExtentMinSpin = new QSpinBox(this);
+    m_holdDragPathExtentMinSpin->setRange(1, 5000);
+    m_holdDragPathExtentMinSpin->setValue(20);
+    m_holdDragPathExtentMaxSpin = new QSpinBox(this);
+    m_holdDragPathExtentMaxSpin->setRange(1, 5000);
+    m_holdDragPathExtentMaxSpin->setValue(150);
+    holdDragExtentRow->addWidget(m_holdDragPathExtentMinSpin);
+    holdDragExtentRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragExtentRow->addWidget(m_holdDragPathExtentMaxSpin);
+    holdDragExtentRow->addWidget(new QLabel(QStringLiteral("px")));
+    holdDragExtentRow->addStretch();
+    layout->addLayout(holdDragExtentRow);
+
+    auto *holdDragStepIntervalRow = new QHBoxLayout;
+    holdDragStepIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("移動間隔:"))));
+    m_holdDragStepIntervalMinSpin = new QSpinBox(this);
+    m_holdDragStepIntervalMinSpin->setRange(0, 60000);
+    m_holdDragStepIntervalMinSpin->setValue(10);
+    m_holdDragStepIntervalMaxSpin = new QSpinBox(this);
+    m_holdDragStepIntervalMaxSpin->setRange(0, 60000);
+    m_holdDragStepIntervalMaxSpin->setValue(30);
+    holdDragStepIntervalRow->addWidget(m_holdDragStepIntervalMinSpin);
+    holdDragStepIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragStepIntervalRow->addWidget(m_holdDragStepIntervalMaxSpin);
+    holdDragStepIntervalRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragStepIntervalRow->addStretch();
+    layout->addLayout(holdDragStepIntervalRow);
+
+    m_holdDragWheelEnableCheck =
+        new QCheckBox(I18n::t(QStringLiteral("長押しドラッグ中にホイールを重ねて行う")), this);
+    layout->addWidget(m_holdDragWheelEnableCheck);
+    auto *holdDragWheelNotchesRow = new QHBoxLayout;
+    holdDragWheelNotchesRow->addWidget(new QLabel(I18n::t(QStringLiteral("  ノッチ数/回:"))));
+    m_holdDragWheelNotchesMinSpin = new QSpinBox(this);
+    m_holdDragWheelNotchesMinSpin->setRange(1, 1000);
+    m_holdDragWheelNotchesMaxSpin = new QSpinBox(this);
+    m_holdDragWheelNotchesMaxSpin->setRange(1, 1000);
+    holdDragWheelNotchesRow->addWidget(m_holdDragWheelNotchesMinSpin);
+    holdDragWheelNotchesRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragWheelNotchesRow->addWidget(m_holdDragWheelNotchesMaxSpin);
+    holdDragWheelNotchesRow->addStretch();
+    layout->addLayout(holdDragWheelNotchesRow);
+    auto *holdDragWheelIntervalRow = new QHBoxLayout;
+    holdDragWheelIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("  ノッチ間隔:"))));
+    m_holdDragWheelIntervalMinSpin = new QSpinBox(this);
+    m_holdDragWheelIntervalMinSpin->setRange(0, 60000);
+    m_holdDragWheelIntervalMaxSpin = new QSpinBox(this);
+    m_holdDragWheelIntervalMaxSpin->setRange(0, 60000);
+    holdDragWheelIntervalRow->addWidget(m_holdDragWheelIntervalMinSpin);
+    holdDragWheelIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragWheelIntervalRow->addWidget(m_holdDragWheelIntervalMaxSpin);
+    holdDragWheelIntervalRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragWheelIntervalRow->addStretch();
+    layout->addLayout(holdDragWheelIntervalRow);
+    auto *holdDragWheelPauseRow = new QHBoxLayout;
+    holdDragWheelPauseRow->addWidget(
+        new QLabel(I18n::t(QStringLiteral("  ひとまとまり後の休止（0で休止なし）:"))));
+    m_holdDragWheelPauseMinSpin = new QSpinBox(this);
+    m_holdDragWheelPauseMinSpin->setRange(0, 600000);
+    m_holdDragWheelPauseMaxSpin = new QSpinBox(this);
+    m_holdDragWheelPauseMaxSpin->setRange(0, 600000);
+    holdDragWheelPauseRow->addWidget(m_holdDragWheelPauseMinSpin);
+    holdDragWheelPauseRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragWheelPauseRow->addWidget(m_holdDragWheelPauseMaxSpin);
+    holdDragWheelPauseRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragWheelPauseRow->addStretch();
+    layout->addLayout(holdDragWheelPauseRow);
+
+    m_holdDragKeyEnableCheck =
+        new QCheckBox(I18n::t(QStringLiteral("長押しドラッグ中にキー入力を重ねて行う"
+                                              "（使用文字・名前付きキーは下記のキー入力設定を使用）")),
+                       this);
+    layout->addWidget(m_holdDragKeyEnableCheck);
+    auto *holdDragKeyIntervalRow = new QHBoxLayout;
+    holdDragKeyIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("  キー間隔:"))));
+    m_holdDragKeyIntervalMinSpin = new QSpinBox(this);
+    m_holdDragKeyIntervalMinSpin->setRange(0, 60000);
+    m_holdDragKeyIntervalMaxSpin = new QSpinBox(this);
+    m_holdDragKeyIntervalMaxSpin->setRange(0, 60000);
+    holdDragKeyIntervalRow->addWidget(m_holdDragKeyIntervalMinSpin);
+    holdDragKeyIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragKeyIntervalRow->addWidget(m_holdDragKeyIntervalMaxSpin);
+    holdDragKeyIntervalRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragKeyIntervalRow->addStretch();
+    layout->addLayout(holdDragKeyIntervalRow);
+
+    m_holdDragWindowOpEnableCheck =
+        new QCheckBox(I18n::t(QStringLiteral("長押しドラッグ中にウィンドウ操作を重ねて行う"
+                                              "（対象ウィンドウのリサイズ・最小化/復帰）")),
+                       this);
+    layout->addWidget(m_holdDragWindowOpEnableCheck);
+    auto *holdDragWindowOpKindRow = new QHBoxLayout;
+    m_holdDragWindowOpResizeCheck = new QCheckBox(I18n::t(QStringLiteral("  リサイズ")), this);
+    m_holdDragWindowOpMinimizeRestoreCheck = new QCheckBox(I18n::t(QStringLiteral("最小化/復帰")), this);
+    holdDragWindowOpKindRow->addWidget(m_holdDragWindowOpResizeCheck);
+    holdDragWindowOpKindRow->addWidget(m_holdDragWindowOpMinimizeRestoreCheck);
+    holdDragWindowOpKindRow->addStretch();
+    layout->addLayout(holdDragWindowOpKindRow);
+    auto *holdDragWindowOpIntervalRow = new QHBoxLayout;
+    holdDragWindowOpIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("  間隔:"))));
+    m_holdDragWindowOpIntervalMinSpin = new QSpinBox(this);
+    m_holdDragWindowOpIntervalMinSpin->setRange(0, 600000);
+    m_holdDragWindowOpIntervalMaxSpin = new QSpinBox(this);
+    m_holdDragWindowOpIntervalMaxSpin->setRange(0, 600000);
+    holdDragWindowOpIntervalRow->addWidget(m_holdDragWindowOpIntervalMinSpin);
+    holdDragWindowOpIntervalRow->addWidget(new QLabel(I18n::t(QStringLiteral("〜"))));
+    holdDragWindowOpIntervalRow->addWidget(m_holdDragWindowOpIntervalMaxSpin);
+    holdDragWindowOpIntervalRow->addWidget(new QLabel(QStringLiteral("ms")));
+    holdDragWindowOpIntervalRow->addStretch();
+    layout->addLayout(holdDragWindowOpIntervalRow);
+
+    m_viewerRightButtonNeverOpensMenuCheck = new QCheckBox(
+        I18n::t(QStringLiteral("右ボタン操作ではメニューを開かない（3Dビューワー向け。右ドラッグ/"
+                                "長押しドラッグ後にEscapeを送らなくなります）")),
+        this);
+    layout->addWidget(m_viewerRightButtonNeverOpensMenuCheck);
+
     auto *keyRow = new QHBoxLayout;
     keyRow->addWidget(new QLabel(I18n::t(QStringLiteral("キー入力の使用文字:"))));
     m_allowedKeysEdit = new QLineEdit(QStringLiteral("abcdefghijklmnopqrstuvwxyz0123456789"), this);
@@ -340,6 +525,33 @@ void ActionParamsEditor::setParams(const ActionParams &p)
     const int dirIndex = m_dragDirectionCombo->findData(int(p.dragDirection));
     m_dragDirectionCombo->setCurrentIndex(dirIndex >= 0 ? dirIndex : 0);
 
+    m_holdDragStyles = p.holdDragStyles;
+    refreshHoldDragStyleList();
+    m_holdDragDurationMinSpin->setValue(p.holdDragDurationMinMs);
+    m_holdDragDurationMaxSpin->setValue(p.holdDragDurationMaxMs);
+    const int pathIndex = m_holdDragPathShapeCombo->findData(int(p.holdDragPathShape));
+    m_holdDragPathShapeCombo->setCurrentIndex(pathIndex >= 0 ? pathIndex : 0);
+    m_holdDragPathExtentMinSpin->setValue(p.holdDragPathExtentMinPx);
+    m_holdDragPathExtentMaxSpin->setValue(p.holdDragPathExtentMaxPx);
+    m_holdDragStepIntervalMinSpin->setValue(p.holdDragStepIntervalMinMs);
+    m_holdDragStepIntervalMaxSpin->setValue(p.holdDragStepIntervalMaxMs);
+    m_holdDragWheelEnableCheck->setChecked(p.holdDragWheelOverlay.enabled);
+    m_holdDragWheelNotchesMinSpin->setValue(p.holdDragWheelOverlay.notchesPerBurstMin);
+    m_holdDragWheelNotchesMaxSpin->setValue(p.holdDragWheelOverlay.notchesPerBurstMax);
+    m_holdDragWheelIntervalMinSpin->setValue(p.holdDragWheelOverlay.notchIntervalMinMs);
+    m_holdDragWheelIntervalMaxSpin->setValue(p.holdDragWheelOverlay.notchIntervalMaxMs);
+    m_holdDragWheelPauseMinSpin->setValue(p.holdDragWheelOverlay.pauseBetweenBurstsMinMs);
+    m_holdDragWheelPauseMaxSpin->setValue(p.holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
+    m_holdDragKeyEnableCheck->setChecked(p.holdDragKeyOverlay.enabled);
+    m_holdDragKeyIntervalMinSpin->setValue(p.holdDragKeyOverlay.keyIntervalMinMs);
+    m_holdDragKeyIntervalMaxSpin->setValue(p.holdDragKeyOverlay.keyIntervalMaxMs);
+    m_holdDragWindowOpEnableCheck->setChecked(p.holdDragWindowOpOverlay.enabled);
+    m_holdDragWindowOpResizeCheck->setChecked(p.holdDragWindowOpOverlay.allowResize);
+    m_holdDragWindowOpMinimizeRestoreCheck->setChecked(p.holdDragWindowOpOverlay.allowMinimizeRestore);
+    m_holdDragWindowOpIntervalMinSpin->setValue(p.holdDragWindowOpOverlay.intervalMinMs);
+    m_holdDragWindowOpIntervalMaxSpin->setValue(p.holdDragWindowOpOverlay.intervalMaxMs);
+    m_viewerRightButtonNeverOpensMenuCheck->setChecked(p.viewerRightButtonNeverOpensMenu);
+
     m_allowedKeysEdit->setText(p.allowedKeyChars);
     m_keyTabCheck->setChecked(p.keyIncludeTab);
     m_keyReturnCheck->setChecked(p.keyIncludeReturn);
@@ -399,6 +611,30 @@ ActionParams ActionParamsEditor::params() const
     p.dragMinDistance = m_dragMinSpin->value();
     p.dragMaxDistance = m_dragMaxSpin->value();
     p.dragDirection = DragDirectionMode(m_dragDirectionCombo->currentData().toInt());
+    p.holdDragStyles = m_holdDragStyles;
+    p.holdDragDurationMinMs = m_holdDragDurationMinSpin->value();
+    p.holdDragDurationMaxMs = m_holdDragDurationMaxSpin->value();
+    p.holdDragPathShape = HoldDragPathShape(m_holdDragPathShapeCombo->currentData().toInt());
+    p.holdDragPathExtentMinPx = m_holdDragPathExtentMinSpin->value();
+    p.holdDragPathExtentMaxPx = m_holdDragPathExtentMaxSpin->value();
+    p.holdDragStepIntervalMinMs = m_holdDragStepIntervalMinSpin->value();
+    p.holdDragStepIntervalMaxMs = m_holdDragStepIntervalMaxSpin->value();
+    p.holdDragWheelOverlay.enabled = m_holdDragWheelEnableCheck->isChecked();
+    p.holdDragWheelOverlay.notchesPerBurstMin = m_holdDragWheelNotchesMinSpin->value();
+    p.holdDragWheelOverlay.notchesPerBurstMax = m_holdDragWheelNotchesMaxSpin->value();
+    p.holdDragWheelOverlay.notchIntervalMinMs = m_holdDragWheelIntervalMinSpin->value();
+    p.holdDragWheelOverlay.notchIntervalMaxMs = m_holdDragWheelIntervalMaxSpin->value();
+    p.holdDragWheelOverlay.pauseBetweenBurstsMinMs = m_holdDragWheelPauseMinSpin->value();
+    p.holdDragWheelOverlay.pauseBetweenBurstsMaxMs = m_holdDragWheelPauseMaxSpin->value();
+    p.holdDragKeyOverlay.enabled = m_holdDragKeyEnableCheck->isChecked();
+    p.holdDragKeyOverlay.keyIntervalMinMs = m_holdDragKeyIntervalMinSpin->value();
+    p.holdDragKeyOverlay.keyIntervalMaxMs = m_holdDragKeyIntervalMaxSpin->value();
+    p.holdDragWindowOpOverlay.enabled = m_holdDragWindowOpEnableCheck->isChecked();
+    p.holdDragWindowOpOverlay.allowResize = m_holdDragWindowOpResizeCheck->isChecked();
+    p.holdDragWindowOpOverlay.allowMinimizeRestore = m_holdDragWindowOpMinimizeRestoreCheck->isChecked();
+    p.holdDragWindowOpOverlay.intervalMinMs = m_holdDragWindowOpIntervalMinSpin->value();
+    p.holdDragWindowOpOverlay.intervalMaxMs = m_holdDragWindowOpIntervalMaxSpin->value();
+    p.viewerRightButtonNeverOpensMenu = m_viewerRightButtonNeverOpensMenuCheck->isChecked();
     p.allowedKeyChars = m_allowedKeysEdit->text();
     p.keyIncludeTab = m_keyTabCheck->isChecked();
     p.keyIncludeReturn = m_keyReturnCheck->isChecked();
@@ -432,6 +668,54 @@ ActionParams ActionParamsEditor::params() const
     p.contextMenuIndices = m_contextMenuIndices;
     p.dialogButtonNames = m_dialogButtonNames;
     return p;
+}
+
+void ActionParamsEditor::onAddHoldDragStyle()
+{
+    HoldDragStyle style;
+    style.button = Qt::MouseButton(m_holdDragStyleButtonCombo->currentData().toInt());
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    if (m_holdDragStyleShiftCheck->isChecked())
+        modifiers |= Qt::ShiftModifier;
+    if (m_holdDragStyleCtrlCheck->isChecked())
+        modifiers |= Qt::ControlModifier;
+    if (m_holdDragStyleAltCheck->isChecked())
+        modifiers |= Qt::AltModifier;
+    style.modifiers = modifiers;
+    style.weight = m_holdDragStyleWeightSpin->value();
+    m_holdDragStyles.append(style);
+    refreshHoldDragStyleList();
+}
+
+void ActionParamsEditor::onRemoveSelectedHoldDragStyle()
+{
+    const int row = m_holdDragStyleListWidget->currentRow();
+    if (row >= 0 && row < m_holdDragStyles.size()) {
+        m_holdDragStyles.removeAt(row);
+        refreshHoldDragStyleList();
+    }
+}
+
+void ActionParamsEditor::refreshHoldDragStyleList()
+{
+    m_holdDragStyleListWidget->clear();
+    for (const HoldDragStyle &style : m_holdDragStyles) {
+        const QString buttonLabel = style.button == Qt::RightButton    ? I18n::t(QStringLiteral("右"))
+                                     : style.button == Qt::MiddleButton ? I18n::t(QStringLiteral("中"))
+                                                                        : I18n::t(QStringLiteral("左"));
+        QStringList modifierLabels;
+        if (style.modifiers & Qt::ShiftModifier)
+            modifierLabels << QStringLiteral("Shift");
+        if (style.modifiers & Qt::ControlModifier)
+            modifierLabels << QStringLiteral("Ctrl");
+        if (style.modifiers & Qt::AltModifier)
+            modifierLabels << QStringLiteral("Alt");
+        const QString combo = modifierLabels.isEmpty()
+                                   ? buttonLabel
+                                   : QStringLiteral("%1+%2").arg(modifierLabels.join(QStringLiteral("+")), buttonLabel);
+        m_holdDragStyleListWidget->addItem(
+            I18n::t(QStringLiteral("%1ボタン（重み:%2）")).arg(combo).arg(style.weight));
+    }
 }
 
 void ActionParamsEditor::onAddShortcut()

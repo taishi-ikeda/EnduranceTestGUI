@@ -288,6 +288,7 @@
       <li><a href="#lang">Switching the display language</a></li>
       <li><a href="#faq">Troubleshooting</a></li>
       <li><a href="#license">Licensing</a></li>
+      <li><a href="#build">Building from source (for developers)</a></li>
     </ol>
   </nav>
 
@@ -395,6 +396,15 @@
       <figcaption>Figure 9: The "Edit Fuzz String List" dialog — add, edit, or delete entries, or use "Reset to Default..." to restore the shipped candidate list</figcaption>
     </figure>
     <p>"Fuzz All Input Fields in Region" depends on the target app's accessibility API (see <a href="#target">"④ ① Selecting the target app"</a>). Depending on the target app and its GUI toolkit, some kinds of input fields — a spin box's embedded entry, for instance — may not correctly expose themselves as "editable" in the accessibility tree, and so get missed by detection. This is a known limitation stemming from the target app's own accessibility support, not a bug in this tool.</p>
+    <h3>Hold-and-Drag (camera-style operation) &amp; options for 3D viewers</h3>
+    <p>The "Hold-and-Drag (camera-style operation)" action type models the "press and keep moving" camera gestures (rotate, pan, spin, zoom) used by 3D viewers such as those built on VTK. Whereas an ordinary "Drag" is a single, instantaneous press → move → release, this one keeps a chosen button (left / middle / right) and modifier-key combination (Shift/Ctrl/Alt) held down while moving continuously along a circular, zig-zag, or random-walk path for a specified duration. You can register multiple button+modifier combinations in the detailed action settings, and one is picked at random (weighted) each time the action runs — e.g. registering VTK's own standard bindings (plain left = rotate, Shift+left or middle = pan, Ctrl+left = spin, right = zoom) all at once lets every run exercise a varied mix of camera operations.</p>
+    <p>While a Hold-and-Drag is in progress, the following can additionally be layered on top of it (each independently optional):</p>
+    <ul>
+      <li><strong>Wheel</strong>: sends a burst of a set number of notches, then pauses, repeating. The notch count, notch interval, and pause duration are each given as a range — push the interval toward 0 for rapid-fire input, or lengthen the pause for a "rapid-fire alternating with complete stops" pattern.</li>
+      <li><strong>Key input</strong>: sends one character at a fixed interval (the candidate characters/named keys share the same settings as the ordinary "Key Input" action).</li>
+      <li><strong>Window operation</strong>: resizes the target window, or minimizes then restores it, at a fixed interval.</li>
+    </ul>
+    <p>For apps like 3D viewers where a right-button drag is assigned to zoom (or similar) and there is no real context menu, check "Right button never opens a menu (for 3D viewers)". Without this, every click/drag/hold-and-drag that uses the right button ends up sending an Escape key after searching for a menu that was never actually going to appear, which can unintentionally cancel whatever the target app was doing. Leave this unchecked for ordinary apps that have a real right-click menu.</p>
   </section>
 
   <section id="timing">
@@ -516,6 +526,34 @@
   <section id="license">
     <h2><span class="num">14</span>Licensing</h2>
     <p>EnduranceTestGUI's own source code is hosted on <a href="https://github.com/taishi-ikeda/EnduranceTestGUI" target="_blank" rel="noopener">GitHub</a> and released under the <strong>MIT License</strong> (see <a href="https://github.com/taishi-ikeda/EnduranceTestGUI/blob/main/LICENSE" target="_blank" rel="noopener"><code>LICENSE</code></a> at the repository root). The app uses Qt (the Widgets module); the free-software edition of Qt is distributed under the GNU LGPL version 3 (some modules under the GPL). You can always check exactly which license the Qt build in use is distributed under from "Help" → "About Qt..." inside the app itself. For details on the other dynamically linked libraries, see <a href="https://github.com/taishi-ikeda/EnduranceTestGUI/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener"><code>THIRD_PARTY_NOTICES.md</code></a> at the repository root.</p>
+  </section>
+
+  <section id="build">
+    <h2><span class="num">15</span>Building from source (for developers)</h2>
+    <p>This section is for developers who want to build from source themselves. Regular users can skip it.</p>
+    <h3>Common requirements</h3>
+    <ul>
+      <li>CMake 3.20 or newer</li>
+      <li>A C++17-capable compiler (GCC or Clang on Linux, Xcode Command Line Tools on macOS, MSVC on Windows)</li>
+      <li>Qt 6 (recommended) or Qt 5. Only the <strong>Widgets</strong> module is used. CMake looks for <code>Qt6</code> first and falls back to <code>Qt5</code> if it isn't found.</li>
+    </ul>
+    <h3>Additional requirements on Linux</h3>
+    <p>The following are low-level X11 libraries EnduranceTestGUI itself uses to operate the target app. If their development headers (the <code>-dev</code>/<code>-devel</code> packages) aren't found, CMake configuration itself fails.</p>
+    <ul>
+      <li><strong>X11</strong>, <strong>XTest</strong> (synthesizing mouse/keyboard input)</li>
+      <li><strong>Xi</strong> (XInput2, input-device related)</li>
+      <li><strong>Xext</strong> (the Shape extension, used to determine window shape)</li>
+      <li><strong>gobject-2.0</strong></li>
+    </ul>
+    <p>On Debian/Ubuntu, something like the following covers it (package names may differ slightly on other distributions):</p>
+    <p><code>sudo apt install build-essential cmake qt6-base-dev libx11-dev libxtst-dev libxi-dev libxext-dev libglib2.0-dev</code></p>
+    <p>In addition, the experimental features for automatically selecting a context-menu item and pressing a dialog button use the <strong>AT-SPI</strong> (<code>atspi-2</code>) library. This isn't required — if it's missing, the build simply logs a warning and continues with that feature disabled. To enable it, install <code>libatspi2.0-dev</code> on Debian/Ubuntu, or <code>at-spi2-core-devel</code> on Fedora.</p>
+    <h3>Additional requirements on macOS</h3>
+    <p>The <code>ApplicationServices</code>, <code>Cocoa</code>, and <code>Carbon</code> frameworks are used, but all are provided by the OS itself, so nothing extra needs to be installed. For Qt, a Homebrew install (Intel/x86_64 only) can be used, but on Apple Silicon the <strong>Qt Online Installer</strong> build (installed under <code>~/Qt</code>) is recommended instead, since it's a universal binary covering both x86_64 and arm64, which makes Accessibility permission recognition more reliable. The built app bundle is automatically ad-hoc code-signed after building, which stabilizes Accessibility permission handling and requires neither an Apple Developer Program membership nor a distribution certificate.</p>
+    <h3>Build commands</h3>
+    <p>From the repository root:</p>
+    <p><code>cmake -B build -DCMAKE_BUILD_TYPE=Release</code><br><code>cmake --build build -j</code></p>
+    <p>The same invocation also automatically builds the verification target app <strong>TestTarget</strong> (under <code>testtarget/</code>, pulled in via <code>add_subdirectory</code>) and the load-generation helper process <strong>loadstress_helper</strong> — no separate build step is needed for either. Once the build succeeds, each executable is produced under the <code>build</code> directory (inside the <code>.app</code> bundle under <code>build</code>, on macOS).</p>
   </section>
 
   <footer>

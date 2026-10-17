@@ -306,9 +306,58 @@ qint64 windowPidAtPoint(const QPoint &pt);
 qint64 activeProcessPid();
 
 void moveMouse(const QPoint &pt);
+// `button`: Qt::LeftButton, Qt::RightButton, or Qt::MiddleButton -- all
+// three are supported (SPEC.md 追加実装依頼「ビューワー耐久テスト強化」:
+// a middle-button drag is VTK's default trackball-camera pan binding, and
+// the generalization applies to any toolkit that assigns the middle
+// button a meaning). Any other value is treated as Qt::LeftButton.
 void mouseClick(const QPoint &pt, Qt::MouseButton button);
 void mouseDrag(const QPoint &from, const QPoint &to, Qt::MouseButton button, int steps);
 void scroll(const QPoint &pt, int dx, int dy);
+
+// --- Held mouse button / modifier keys (SPEC.md 追加実装依頼「ビューワー
+// 耐久テスト強化」) ---------------------------------------------------
+// Lower-level than mouseClick()/mouseDrag() above (which are each a single
+// complete, synchronous press-move-release gesture): these let a caller
+// hold a mouse button and/or modifier keys down across many separate
+// moveMouse()/scroll()/keyTap() calls spanning multiple event-loop ticks --
+// needed for RandomActionEngine::ActionKind::HoldDrag, which synthesizes a
+// long camera-manipulation-style gesture (hold button, move through many
+// points over seconds, optionally scroll/type/resize the window while
+// still held) rather than one instantaneous drag. Not meant to be mixed
+// with mouseClick()/mouseDrag() for the same button at the same time.
+
+// Moves to `pt` and presses `button` down without releasing it. A
+// subsequent moveMouse() call synthesizes a drag (the button stays down),
+// exactly as if a real user were holding it.
+void mouseButtonDown(const QPoint &pt, Qt::MouseButton button);
+
+// Releases `button` at its current position (wherever the most recent
+// moveMouse() call left the pointer). Always safe to call even if the
+// button was never pressed (a no-op release).
+void mouseButtonUp(Qt::MouseButton button);
+
+// Moves to `pt` the same way moveMouse() does, but while `button` is
+// currently held down via mouseButtonDown() above. On X11 this is
+// identical to moveMouse() (XTest's synthetic motion doesn't distinguish
+// "dragging" from "just moving" -- client apps infer that from the
+// button's already-known state instead); on macOS it matters: CGEvent
+// requires posting the button-specific *Dragged event type (not a plain
+// mouse-moved one) for the motion to be delivered as a drag while that
+// button is down, so this -- not moveMouse() -- is what
+// RandomActionEngine::ActionKind::HoldDrag's per-tick movement uses.
+void moveMouseWhileHeld(const QPoint &pt, Qt::MouseButton button);
+
+// Presses down whichever of Qt::ShiftModifier/ControlModifier/
+// AltModifier/MetaModifier are set in `modifiers` (Qt::NoModifier presses
+// nothing) and leaves them held. Keys this platform's backend cannot map
+// are silently ignored, same as keyTap()/keyShortcut().
+void modifierKeysDown(Qt::KeyboardModifiers modifiers);
+
+// Releases whichever modifier keys modifierKeysDown() most recently
+// pressed for this same `modifiers` value. Always safe to call even if
+// nothing was pressed.
+void modifierKeysUp(Qt::KeyboardModifiers modifiers);
 
 // Sends a single key press+release for a printable character. Characters
 // this platform's backend cannot map to a key event are silently ignored.

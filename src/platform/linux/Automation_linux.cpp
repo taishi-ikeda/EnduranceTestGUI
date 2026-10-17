@@ -264,7 +264,13 @@ QList<WindowInfo> collectWindows()
 
 unsigned int buttonNumber(Qt::MouseButton button)
 {
-    return button == Qt::RightButton ? 3 : 1;
+    // Standard X11 wheel/button mapping: 1=left, 2=middle, 3=right (4-7 are
+    // the wheel "buttons" scroll() below already uses).
+    if (button == Qt::RightButton)
+        return 3;
+    if (button == Qt::MiddleButton)
+        return 2;
+    return 1;
 }
 
 // Named/functional keys have no printable character of their own, so their
@@ -292,6 +298,25 @@ KeySym qtKeyToX11Keysym(Qt::Key key)
         // X11 keysyms directly.
         return KeySym(key);
     }
+}
+
+// Maps each set bit of `modifiers` to the X11 keycode for its left-hand
+// variant (XK_Shift_L/Control_L/Alt_L/Super_L) -- shared by keyShortcut()
+// and modifierKeysDown()/modifierKeysUp() below, all of which need the
+// same Qt::KeyboardModifiers -> X11 keycode mapping, just with different
+// press/release timing around it.
+QVector<KeyCode> modifierKeyCodes(Display *dpy, Qt::KeyboardModifiers modifiers)
+{
+    QVector<KeyCode> codes;
+    if (modifiers & Qt::ShiftModifier)
+        codes.append(XKeysymToKeycode(dpy, XK_Shift_L));
+    if (modifiers & Qt::ControlModifier)
+        codes.append(XKeysymToKeycode(dpy, XK_Control_L));
+    if (modifiers & Qt::AltModifier)
+        codes.append(XKeysymToKeycode(dpy, XK_Alt_L));
+    if (modifiers & Qt::MetaModifier)
+        codes.append(XKeysymToKeycode(dpy, XK_Super_L));
+    return codes;
 }
 
 }  // namespace
@@ -953,6 +978,36 @@ void mouseDrag(const QPoint &from, const QPoint &to, Qt::MouseButton button, int
 
     XTestFakeButtonEvent(dpy, btn, False, CurrentTime);
     XFlush(dpy);
+}
+
+void mouseButtonDown(const QPoint &pt, Qt::MouseButton button)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return;
+    XTestFakeMotionEvent(dpy, -1, pt.x(), pt.y(), CurrentTime);
+    XFlush(dpy);
+    XTestFakeButtonEvent(dpy, buttonNumber(button), True, CurrentTime);
+    XFlush(dpy);
+}
+
+void mouseButtonUp(Qt::MouseButton button)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return;
+    XTestFakeButtonEvent(dpy, buttonNumber(button), False, CurrentTime);
+    XFlush(dpy);
+}
+
+void moveMouseWhileHeld(const QPoint &pt, Qt::MouseButton /*button*/)
+{
+    // XTest's synthetic motion doesn't distinguish "dragging" from "just
+    // moving" -- X11 clients infer that from the button's already-known
+    // (held-down) state instead, so this is identical to moveMouse(). See
+    // this function's own declaration comment in PlatformAutomation.h for
+    // why macOS's CGEvent-based backend needs a real distinction here.
+    moveMouse(pt);
 }
 
 void scroll(const QPoint &pt, int dx, int dy)
@@ -1822,15 +1877,7 @@ void keyShortcut(Qt::Key key, Qt::KeyboardModifiers modifiers)
     if (keycode == 0)
         return;
 
-    QVector<KeyCode> modifierCodes;
-    if (modifiers & Qt::ShiftModifier)
-        modifierCodes.append(XKeysymToKeycode(dpy, XK_Shift_L));
-    if (modifiers & Qt::ControlModifier)
-        modifierCodes.append(XKeysymToKeycode(dpy, XK_Control_L));
-    if (modifiers & Qt::AltModifier)
-        modifierCodes.append(XKeysymToKeycode(dpy, XK_Alt_L));
-    if (modifiers & Qt::MetaModifier)
-        modifierCodes.append(XKeysymToKeycode(dpy, XK_Super_L));
+    const QVector<KeyCode> modifierCodes = modifierKeyCodes(dpy, modifiers);
 
     for (KeyCode code : modifierCodes)
         XTestFakeKeyEvent(dpy, code, True, CurrentTime);
@@ -1841,6 +1888,30 @@ void keyShortcut(Qt::Key key, Qt::KeyboardModifiers modifiers)
     XTestFakeKeyEvent(dpy, keycode, False, CurrentTime);
 
     for (KeyCode code : modifierCodes)
+        XTestFakeKeyEvent(dpy, code, False, CurrentTime);
+    XFlush(dpy);
+}
+
+// SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: holds down whichever
+// modifier keys modifierKeyCodes() maps `modifiers` to, without releasing
+// them -- the counterpart to mouseButtonDown()/mouseButtonUp() above for a
+// modifier+drag gesture (Shift+drag, Ctrl+drag, ...) spanning many ticks.
+void modifierKeysDown(Qt::KeyboardModifiers modifiers)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return;
+    for (KeyCode code : modifierKeyCodes(dpy, modifiers))
+        XTestFakeKeyEvent(dpy, code, True, CurrentTime);
+    XFlush(dpy);
+}
+
+void modifierKeysUp(Qt::KeyboardModifiers modifiers)
+{
+    Display *dpy = display();
+    if (!dpy)
+        return;
+    for (KeyCode code : modifierKeyCodes(dpy, modifiers))
         XTestFakeKeyEvent(dpy, code, False, CurrentTime);
     XFlush(dpy);
 }

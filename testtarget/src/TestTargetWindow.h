@@ -14,6 +14,7 @@ class QMenu;
 class QPushButton;
 class QSpinBox;
 class CounterButton;
+class SimpleViewerWidget;
 
 // Minimal target application for exercising EnduranceTestGUI against:
 // a grid of buttons, a checkbox, a slider, a text field, vertical and
@@ -122,6 +123,12 @@ private:
     QVector<bool> m_multiFieldTouched;  // size 5, see the indices above
     int m_multiFieldChangeCount = 0;
     QLabel *m_multiFieldStatsLabel = nullptr;
+
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: a minimal 3D-viewer
+    // stand-in (wireframe cube responding to VTK-style camera bindings),
+    // for verifying middle-drag/modifier-drag/HoldDrag/viewer-mode
+    // (viewerRightButtonNeverOpensMenu) features end-to-end.
+    SimpleViewerWidget *m_viewerWidget = nullptr;
 
     QLabel *m_statsLabel = nullptr;
     QPlainTextEdit *m_logView = nullptr;

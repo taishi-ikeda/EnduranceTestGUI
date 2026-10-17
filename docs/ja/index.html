@@ -288,6 +288,7 @@
       <li><a href="#lang">表示言語の切り替え</a></li>
       <li><a href="#faq">困ったときは</a></li>
       <li><a href="#license">ライセンスについて</a></li>
+      <li><a href="#build">ビルド方法（開発者向け）</a></li>
     </ol>
   </nav>
 
@@ -395,6 +396,15 @@
       <figcaption>図9: 「ファズ文字列リストを編集」ダイアログ。一覧の追加・編集・削除のほか、「デフォルトに戻す...」で出荷時の候補一覧に戻せる</figcaption>
     </figure>
     <p>「領域内の全入力項目にファズ入力」は、対象アプリのアクセシビリティAPI（<a href="#target">「④ ① 対象アプリを選択する」</a>参照）に依存する機能です。対象アプリ側やツールキットの実装によっては、一部の入力欄の種類（例えばスピンボックスに埋め込まれた入力欄など）がアクセシビリティツリー上で「編集可能」として正しく公開されず、検出・入力の対象から漏れることがあります。これはこのツール側の不具合ではなく、対象アプリ側のアクセシビリティ対応状況に起因する既知の制限です。</p>
+    <h3>長押しドラッグ（カメラ操作等）・3Dビューワー向けオプション</h3>
+    <p>操作種別の「長押しドラッグ（カメラ操作等）」は、VTKなどの3Dビューワーが採用している「ボタンを押したまま動かし続ける」カメラ操作（回転・パン・スピン・ズーム）を想定した機能です。通常の「ドラッグ」が瞬間的な押下→移動→解放の1回きりの動作なのに対し、こちらはボタン（左・中・右）と修飾キー（Shift/Ctrl/Alt）の組み合わせを押したまま、円・ジグザグ・ランダムウォークのいずれかの経路で指定した時間だけ動かし続けます。ボタン・修飾キーの組み合わせは「操作の詳細設定」で複数登録でき、実行のたびに重みに応じてランダムに1つが選ばれます（例: 左=回転、Shift+左または中=パン、Ctrl+左=スピン、右=ズーム、というVTK標準の割り当てをそのまま複数登録しておくと、実行ごとに様々なカメラ操作が混ざって実行されます）。</p>
+    <p>長押しドラッグ中は、さらに次の操作を重ねて実行できます（いずれも任意で有効化）。</p>
+    <ul>
+      <li><strong>ホイール</strong>: 一定数のノッチをまとめて送ってから休止する、を繰り返します。ノッチ数・ノッチ間隔・休止時間はそれぞれ範囲で指定でき、間隔を0に近づければ連続した高速入力に、休止を長めにすれば「連打と完全停止」を繰り返すパターンにできます。</li>
+      <li><strong>キー入力</strong>: 一定間隔で1文字ずつ送信します（候補の文字・名前付きキーは通常の「キー入力」操作と共通の設定を使います）。</li>
+      <li><strong>ウィンドウ操作</strong>: 一定間隔で対象ウィンドウのリサイズ、または最小化→復帰を行います。</li>
+    </ul>
+    <p>3Dビューワーのように右ボタンのドラッグがズーム等に割り当てられていてコンテキストメニューを持たないアプリを対象にする場合は、「右ボタン操作ではメニューを開かない（3Dビューワー向け）」にチェックを入れてください。これを有効にしないと、右ボタンを使うクリック・ドラッグ・長押しドラッグのたびに、本来は存在しないメニューを探そうとした末にEscapeキーが送られてしまい、対象アプリが実行中だった処理を意図せず取り消してしまうことがあります。通常の右クリックメニューを持つアプリでは、このチェックは外したままにしてください。</p>
   </section>
 
   <section id="timing">
@@ -516,6 +526,34 @@
   <section id="license">
     <h2><span class="num">14</span>ライセンスについて</h2>
     <p>EnduranceTestGUI自体のソースコードは、<a href="https://github.com/taishi-ikeda/EnduranceTestGUI" target="_blank" rel="noopener">GitHubリポジトリ</a>にて <strong>MIT License</strong> で公開されています（リポジトリ直下の <a href="https://github.com/taishi-ikeda/EnduranceTestGUI/blob/main/LICENSE" target="_blank" rel="noopener"><code>LICENSE</code></a>）。本アプリはQt（Widgetsモジュール）を使用しており、Qtのフリーソフトウェア版はGNU LGPL バージョン3（一部モジュールはGPL）の下で配布されています。使用しているQtが実際にどのライセンスで配布されているかは、アプリ内の「ヘルプ」→「Qtについて...」からいつでも確認できます。動的リンクしているその他のライブラリも含めた詳細は、リポジトリ直下の <a href="https://github.com/taishi-ikeda/EnduranceTestGUI/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener"><code>THIRD_PARTY_NOTICES.md</code></a> を参照してください。</p>
+  </section>
+
+  <section id="build">
+    <h2><span class="num">15</span>ビルド方法（開発者向け）</h2>
+    <p>このセクションは、ソースコードから自分でビルドしたい開発者向けです。通常の利用者は読み飛ばして構いません。</p>
+    <h3>共通で必要なもの</h3>
+    <ul>
+      <li>CMake 3.20 以上</li>
+      <li>C++17 に対応したコンパイラ（Linuxは GCC か Clang、macOSは Xcode Command Line Tools、Windowsは MSVC を想定）</li>
+      <li>Qt 6（推奨）または Qt 5。<strong>Widgets</strong> モジュールのみ使用します。CMakeが <code>Qt6</code> を先に探し、見つからなければ <code>Qt5</code> にフォールバックします。</li>
+    </ul>
+    <h3>Linuxでの追加要件</h3>
+    <p>以下は本体（EnduranceTestGUI）が対象アプリを操作するために使う低レベルなX11ライブラリで、開発用ヘッダ（<code>-dev</code>/<code>-devel</code>パッケージ）が見つからないとCMakeの設定自体が失敗します。</p>
+    <ul>
+      <li><strong>X11</strong>、<strong>XTest</strong>（マウス・キー操作の合成）</li>
+      <li><strong>Xi</strong>（XInput2、入力デバイス関連）</li>
+      <li><strong>Xext</strong>（Shape拡張、ウィンドウ形状の判定に使用）</li>
+      <li><strong>gobject-2.0</strong></li>
+    </ul>
+    <p>Debian/Ubuntu系なら、例えば次のようなパッケージで揃います（パッケージ名は配布によって多少異なる場合があります）。</p>
+    <p><code>sudo apt install build-essential cmake qt6-base-dev libx11-dev libxtst-dev libxi-dev libxext-dev libglib2.0-dev</code></p>
+    <p>加えて、右クリックメニュー項目の自動選択やダイアログのボタン操作などの実験的機能は <strong>AT-SPI</strong>（<code>atspi-2</code>）ライブラリを使用します。これは必須ではなく、見つからない場合はビルド時に警告が出るだけでその機能が無効になった状態でビルドが続行されます。有効にしたい場合は、Debian/Ubuntuでは <code>libatspi2.0-dev</code>、Fedoraでは <code>at-spi2-core-devel</code> をインストールしてください。</p>
+    <h3>macOSでの追加要件</h3>
+    <p><code>ApplicationServices</code>、<code>Cocoa</code>、<code>Carbon</code> の各フレームワークを使用しますが、いずれもOS標準で提供されているため別途インストールは不要です。Qtについては、Homebrew版（Intel/x86_64向けのみ）でもビルドできますが、Apple Silicon環境では <strong>Qt公式オンラインインストーラ</strong>（<code>~/Qt</code> 以下にインストールされるもの）で導入したQtの使用を推奨します。こちらはx86_64とarm64の両方を含むユニバーサルバイナリであり、Accessibility（アクセシビリティ）権限の認識がより安定するためです。ビルドされたEnduranceTestGUI.appは、ビルド後に自動的にアドホック署名（ad-hoc codesign）されます。これはAccessibility権限の管理を安定させるための措置で、Apple Developer Programへの登録や配布用証明書は不要です。</p>
+    <h3>ビルド手順</h3>
+    <p>リポジトリ直下で次のように実行します。</p>
+    <p><code>cmake -B build -DCMAKE_BUILD_TYPE=Release</code><br><code>cmake --build build -j</code></p>
+    <p>同じ呼び出しで、検証用のテスト対象アプリ <strong>TestTarget</strong>（<code>testtarget/</code>以下、<code>add_subdirectory</code>で組み込み）と、負荷生成用の補助プロセス <strong>loadstress_helper</strong> も自動的にビルドされます。別途ビルド手順を実行する必要はありません。ビルドが成功すると、<code>build</code>ディレクトリ（macOSでは<code>build</code>内の<code>.app</code>バンドル）に各実行ファイルが生成されます。</p>
   </section>
 
   <footer>

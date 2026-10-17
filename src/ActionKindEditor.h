@@ -55,6 +55,8 @@ private:
     QSpinBox *m_doubleClickWeightSpin = nullptr;
     QCheckBox *m_dragCheck = nullptr;
     QSpinBox *m_dragWeightSpin = nullptr;
+    QCheckBox *m_holdDragCheck = nullptr;
+    QSpinBox *m_holdDragWeightSpin = nullptr;
     QCheckBox *m_keyCheck = nullptr;
     QSpinBox *m_keyWeightSpin = nullptr;
     QCheckBox *m_typingBurstCheck = nullptr;

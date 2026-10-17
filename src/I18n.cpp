@@ -240,6 +240,54 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ドラッグ"), QStringLiteral("Drag")},
         {QStringLiteral("ドラッグ方向:"), QStringLiteral("Drag direction:")},
         {QStringLiteral("ドラッグ距離:"), QStringLiteral("Drag distance:")},
+        // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」(ActionKind::HoldDrag)
+        {QStringLiteral("長押しドラッグ"), QStringLiteral("Hold-drag")},
+        {QStringLiteral("長押しドラッグ（カメラ操作等）"), QStringLiteral("Hold-drag (camera manipulation, etc.)")},
+        {QStringLiteral("ボタンを押したまま、円やジグザグ等の経路で長時間動かし続ける操作です"
+                        "（3Dビューワーの回転・パン・ズーム操作などを想定。ボタン・修飾キーの"
+                        "組み合わせ、継続時間、重ねて行うホイール/キー/ウィンドウ操作は"
+                        "③操作パラメータで設定）。"),
+         QStringLiteral("Holds a button down and keeps moving along a path (circle, zigzag, etc.) for a "
+                        "long time (intended for a 3D viewer's rotate/pan/zoom camera operations. The "
+                        "button/modifier combination, duration, and overlaid wheel/key/window operations "
+                        "are set in ③ Action Parameters).")},
+        {QStringLiteral("長押しドラッグ（カメラ操作等）のボタン・修飾キーの組み合わせ（複数登録可。"
+                        "実行の都度、重みに応じてランダムに1つ選ばれます）:"),
+         QStringLiteral("Hold-drag (camera manipulation, etc.) button/modifier combinations (multiple "
+                        "entries allowed; one is picked at random, weighted, each time):")},
+        {QStringLiteral("長押しドラッグの継続時間:"), QStringLiteral("Hold-drag duration:")},
+        {QStringLiteral("移動経路:"), QStringLiteral("Path shape:")},
+        {QStringLiteral("円"), QStringLiteral("Circle")},
+        {QStringLiteral("ジグザグ"), QStringLiteral("Zigzag")},
+        {QStringLiteral("ランダムウォーク"), QStringLiteral("Random walk")},
+        {QStringLiteral("移動経路の大きさ:"), QStringLiteral("Path extent:")},
+        {QStringLiteral("移動間隔:"), QStringLiteral("Movement interval:")},
+        {QStringLiteral("長押しドラッグ中にホイールを重ねて行う"), QStringLiteral("Also scroll the wheel while hold-dragging")},
+        {QStringLiteral("  ノッチ数/回:"), QStringLiteral("  Notches per burst:")},
+        {QStringLiteral("  ノッチ間隔:"), QStringLiteral("  Notch interval:")},
+        {QStringLiteral("  ひとまとまり後の休止（0で休止なし）:"), QStringLiteral("  Pause after each burst (0 = no pause):")},
+        {QStringLiteral("長押しドラッグ中にキー入力を重ねて行う"
+                        "（使用文字・名前付きキーは下記のキー入力設定を使用）"),
+         QStringLiteral("Also send key input while hold-dragging (uses the allowed characters/named "
+                        "keys settings below)")},
+        {QStringLiteral("  キー間隔:"), QStringLiteral("  Key interval:")},
+        {QStringLiteral("長押しドラッグ中にウィンドウ操作を重ねて行う"
+                        "（対象ウィンドウのリサイズ・最小化/復帰）"),
+         QStringLiteral("Also operate the window while hold-dragging (resize, or minimize/restore, the "
+                        "target window)")},
+        {QStringLiteral("  リサイズ"), QStringLiteral("  Resize")},
+        {QStringLiteral("最小化/復帰"), QStringLiteral("Minimize/restore")},
+        {QStringLiteral("  間隔:"), QStringLiteral("  Interval:")},
+        {QStringLiteral("右ボタン操作ではメニューを開かない（3Dビューワー向け。右ドラッグ/"
+                        "長押しドラッグ後にEscapeを送らなくなります）"),
+         QStringLiteral("Right-button actions never open a menu (for 3D viewers; stops sending Escape "
+                        "after a right-drag/hold-drag)")},
+        {QStringLiteral("%1ボタン（重み:%2）"), QStringLiteral("%1 button (weight: %2)")},
+        {QStringLiteral("長押しドラッグ（%1ボタン、%2 ms間、%3回移動）"),
+         QStringLiteral("Hold-drag (%1 button, %2 ms, %3 movements)")},
+        {QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"),
+         QStringLiteral("%1: Starting a hold-drag (%2 ms)")},
+        {QStringLiteral("中"), QStringLiteral("Middle")},
         {QStringLiteral("ファイル"), QStringLiteral("File")},
         {QStringLiteral("ファイルに書き込めませんでした。"), QStringLiteral("Could not write the file.")},
         {QStringLiteral("ファイルを開けませんでした。"), QStringLiteral("Could not open the file.")},

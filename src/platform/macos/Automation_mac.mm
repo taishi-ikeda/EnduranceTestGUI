@@ -420,38 +420,57 @@ void moveMouse(const QPoint &pt)
     CFRelease(event);
 }
 
+// SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: Qt::MiddleButton ==
+// kCGMouseButtonCenter/kCGEventOtherMouse* -- the "other" family covers
+// every button beyond left/right, but this project only ever means the
+// middle button by it. Shared by mouseClick()/mouseDrag() below and the
+// new mouseButtonDown()/mouseButtonUp() (previously each of mouseClick()/
+// mouseDrag() duplicated this same isRight ternary independently; a third
+// button made a shared mapping worth factoring out).
+struct MouseButtonCodes
+{
+    CGEventType downType;
+    CGEventType dragType;
+    CGEventType upType;
+    CGMouseButton cgButton;
+};
+
+MouseButtonCodes mouseButtonCodesFor(Qt::MouseButton button)
+{
+    if (button == Qt::RightButton)
+        return {kCGEventRightMouseDown, kCGEventRightMouseDragged, kCGEventRightMouseUp,
+                kCGMouseButtonRight};
+    if (button == Qt::MiddleButton)
+        return {kCGEventOtherMouseDown, kCGEventOtherMouseDragged, kCGEventOtherMouseUp,
+                kCGMouseButtonCenter};
+    return {kCGEventLeftMouseDown, kCGEventLeftMouseDragged, kCGEventLeftMouseUp, kCGMouseButtonLeft};
+}
+
 void mouseClick(const QPoint &pt, Qt::MouseButton button)
 {
-    const bool isRight = (button == Qt::RightButton);
-    const CGEventType downType = isRight ? kCGEventRightMouseDown : kCGEventLeftMouseDown;
-    const CGEventType upType = isRight ? kCGEventRightMouseUp : kCGEventLeftMouseUp;
-    const CGMouseButton cgButton = isRight ? kCGMouseButtonRight : kCGMouseButtonLeft;
+    const MouseButtonCodes codes = mouseButtonCodesFor(button);
     const CGPoint cgPt = toCGPoint(pt);
 
-    CGEventRef move = CGEventCreateMouseEvent(nullptr, kCGEventMouseMoved, cgPt, cgButton);
+    CGEventRef move = CGEventCreateMouseEvent(nullptr, kCGEventMouseMoved, cgPt, codes.cgButton);
     CGEventPost(kCGHIDEventTap, move);
     CFRelease(move);
 
-    CGEventRef down = CGEventCreateMouseEvent(nullptr, downType, cgPt, cgButton);
+    CGEventRef down = CGEventCreateMouseEvent(nullptr, codes.downType, cgPt, codes.cgButton);
     CGEventPost(kCGHIDEventTap, down);
     CFRelease(down);
 
     usleep(15000);
 
-    CGEventRef up = CGEventCreateMouseEvent(nullptr, upType, cgPt, cgButton);
+    CGEventRef up = CGEventCreateMouseEvent(nullptr, codes.upType, cgPt, codes.cgButton);
     CGEventPost(kCGHIDEventTap, up);
     CFRelease(up);
 }
 
 void mouseDrag(const QPoint &from, const QPoint &to, Qt::MouseButton button, int steps)
 {
-    const bool isRight = (button == Qt::RightButton);
-    const CGEventType downType = isRight ? kCGEventRightMouseDown : kCGEventLeftMouseDown;
-    const CGEventType dragType = isRight ? kCGEventRightMouseDragged : kCGEventLeftMouseDragged;
-    const CGEventType upType = isRight ? kCGEventRightMouseUp : kCGEventLeftMouseUp;
-    const CGMouseButton cgButton = isRight ? kCGMouseButtonRight : kCGMouseButtonLeft;
+    const MouseButtonCodes codes = mouseButtonCodesFor(button);
 
-    CGEventRef down = CGEventCreateMouseEvent(nullptr, downType, toCGPoint(from), cgButton);
+    CGEventRef down = CGEventCreateMouseEvent(nullptr, codes.downType, toCGPoint(from), codes.cgButton);
     CGEventPost(kCGHIDEventTap, down);
     CFRelease(down);
 
@@ -460,15 +479,55 @@ void mouseDrag(const QPoint &from, const QPoint &to, Qt::MouseButton button, int
         const qreal t = qreal(i) / qreal(steps);
         const QPoint p(from.x() + qRound((to.x() - from.x()) * t),
                        from.y() + qRound((to.y() - from.y()) * t));
-        CGEventRef drag = CGEventCreateMouseEvent(nullptr, dragType, toCGPoint(p), cgButton);
+        CGEventRef drag = CGEventCreateMouseEvent(nullptr, codes.dragType, toCGPoint(p), codes.cgButton);
         CGEventPost(kCGHIDEventTap, drag);
         CFRelease(drag);
         usleep(8000);
     }
 
-    CGEventRef up = CGEventCreateMouseEvent(nullptr, upType, toCGPoint(to), cgButton);
+    CGEventRef up = CGEventCreateMouseEvent(nullptr, codes.upType, toCGPoint(to), codes.cgButton);
     CGEventPost(kCGHIDEventTap, up);
     CFRelease(up);
+}
+
+void mouseButtonDown(const QPoint &pt, Qt::MouseButton button)
+{
+    const MouseButtonCodes codes = mouseButtonCodesFor(button);
+    const CGPoint cgPt = toCGPoint(pt);
+
+    CGEventRef move = CGEventCreateMouseEvent(nullptr, kCGEventMouseMoved, cgPt, codes.cgButton);
+    CGEventPost(kCGHIDEventTap, move);
+    CFRelease(move);
+
+    CGEventRef down = CGEventCreateMouseEvent(nullptr, codes.downType, cgPt, codes.cgButton);
+    CGEventPost(kCGHIDEventTap, down);
+    CFRelease(down);
+}
+
+void mouseButtonUp(Qt::MouseButton button)
+{
+    // CGEventCreateMouseEvent requires *some* location -- the current
+    // pointer location (wherever the most recent moveMouseWhileHeld() call
+    // left it) is exactly what a real button-up event would report.
+    const MouseButtonCodes codes = mouseButtonCodesFor(button);
+    const CGEventRef probe = CGEventCreate(nullptr);
+    const CGPoint currentPt = CGEventGetLocation(probe);
+    CFRelease(probe);
+
+    CGEventRef up = CGEventCreateMouseEvent(nullptr, codes.upType, currentPt, codes.cgButton);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(up);
+}
+
+void moveMouseWhileHeld(const QPoint &pt, Qt::MouseButton button)
+{
+    // Unlike moveMouse() (posts kCGEventMouseMoved), this must post the
+    // button-specific *Dragged event type -- see this function's own
+    // declaration comment in PlatformAutomation.h.
+    const MouseButtonCodes codes = mouseButtonCodesFor(button);
+    CGEventRef drag = CGEventCreateMouseEvent(nullptr, codes.dragType, toCGPoint(pt), codes.cgButton);
+    CGEventPost(kCGHIDEventTap, drag);
+    CFRelease(drag);
 }
 
 void scroll(const QPoint &pt, int dx, int dy)
@@ -1288,6 +1347,61 @@ void keyShortcut(Qt::Key key, Qt::KeyboardModifiers modifiers)
     CGEventSetFlags(up, flags);
     CGEventPost(kCGHIDEventTap, up);
     CFRelease(up);
+}
+
+// SPEC.md 追加実装依頼「ビューワー耐久テスト強化」: unlike keyShortcut()
+// above (which only needs to set CGEventFlags on the one event it sends),
+// holding a modifier down across many *separate* subsequent events (mouse
+// drags, scrolls, key taps) needs a real, persistent key-down -- posting a
+// keyboard event for the modifier's own virtual key code changes macOS's
+// global modifier state for every event posted afterward until the
+// matching key-up, the same way a real key press would.
+void modifierKeysDown(Qt::KeyboardModifiers modifiers)
+{
+    if (modifiers & Qt::ShiftModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Shift, true);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::ControlModifier) {  // Qt's portable Ctrl == Cmd on macOS
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Command, true);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::AltModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Option, true);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::MetaModifier) {  // Qt's portable Meta == Ctrl on macOS
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Control, true);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+}
+
+void modifierKeysUp(Qt::KeyboardModifiers modifiers)
+{
+    if (modifiers & Qt::ShiftModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Shift, false);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::ControlModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Command, false);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::AltModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Option, false);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
+    if (modifiers & Qt::MetaModifier) {
+        CGEventRef e = CGEventCreateKeyboardEvent(nullptr, kVK_Control, false);
+        CGEventPost(kCGHIDEventTap, e);
+        CFRelease(e);
+    }
 }
 
 void keyTapNamed(Qt::Key key)

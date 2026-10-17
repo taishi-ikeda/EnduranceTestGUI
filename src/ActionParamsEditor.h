@@ -40,6 +40,8 @@ public:
     void setAvailableFuzzStrings(const QStringList &corpus);
 
 private slots:
+    void onAddHoldDragStyle();
+    void onRemoveSelectedHoldDragStyle();
     void onAddShortcut();
     void onRemoveSelectedShortcut();
     void onAddContextMenuItem();
@@ -53,6 +55,7 @@ private slots:
     void onFuzzStringSelectionItemChanged(QListWidgetItem *item);
 
 private:
+    void refreshHoldDragStyleList();
     void refreshShortcutList();
     void refreshContextMenuList();
     void refreshContextMenuIndexList();
@@ -62,6 +65,40 @@ private:
     QSpinBox *m_dragMinSpin = nullptr;
     QSpinBox *m_dragMaxSpin = nullptr;
     QComboBox *m_dragDirectionCombo = nullptr;
+
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」(ActionKind::HoldDrag)
+    QListWidget *m_holdDragStyleListWidget = nullptr;
+    QComboBox *m_holdDragStyleButtonCombo = nullptr;
+    QCheckBox *m_holdDragStyleShiftCheck = nullptr;
+    QCheckBox *m_holdDragStyleCtrlCheck = nullptr;
+    QCheckBox *m_holdDragStyleAltCheck = nullptr;
+    QSpinBox *m_holdDragStyleWeightSpin = nullptr;
+    QPushButton *m_addHoldDragStyleButton = nullptr;
+    QPushButton *m_removeHoldDragStyleButton = nullptr;
+    QList<HoldDragStyle> m_holdDragStyles;
+    QSpinBox *m_holdDragDurationMinSpin = nullptr;
+    QSpinBox *m_holdDragDurationMaxSpin = nullptr;
+    QComboBox *m_holdDragPathShapeCombo = nullptr;
+    QSpinBox *m_holdDragPathExtentMinSpin = nullptr;
+    QSpinBox *m_holdDragPathExtentMaxSpin = nullptr;
+    QSpinBox *m_holdDragStepIntervalMinSpin = nullptr;
+    QSpinBox *m_holdDragStepIntervalMaxSpin = nullptr;
+    QCheckBox *m_holdDragWheelEnableCheck = nullptr;
+    QSpinBox *m_holdDragWheelNotchesMinSpin = nullptr;
+    QSpinBox *m_holdDragWheelNotchesMaxSpin = nullptr;
+    QSpinBox *m_holdDragWheelIntervalMinSpin = nullptr;
+    QSpinBox *m_holdDragWheelIntervalMaxSpin = nullptr;
+    QSpinBox *m_holdDragWheelPauseMinSpin = nullptr;
+    QSpinBox *m_holdDragWheelPauseMaxSpin = nullptr;
+    QCheckBox *m_holdDragKeyEnableCheck = nullptr;
+    QSpinBox *m_holdDragKeyIntervalMinSpin = nullptr;
+    QSpinBox *m_holdDragKeyIntervalMaxSpin = nullptr;
+    QCheckBox *m_holdDragWindowOpEnableCheck = nullptr;
+    QCheckBox *m_holdDragWindowOpResizeCheck = nullptr;
+    QCheckBox *m_holdDragWindowOpMinimizeRestoreCheck = nullptr;
+    QSpinBox *m_holdDragWindowOpIntervalMinSpin = nullptr;
+    QSpinBox *m_holdDragWindowOpIntervalMaxSpin = nullptr;
+    QCheckBox *m_viewerRightButtonNeverOpensMenuCheck = nullptr;
 
     QLineEdit *m_allowedKeysEdit = nullptr;
 

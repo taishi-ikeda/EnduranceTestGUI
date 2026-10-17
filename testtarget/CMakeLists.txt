@@ -7,6 +7,8 @@ add_executable(TestTarget
     src/TestTargetWindow.h
     src/CounterButton.cpp
     src/CounterButton.h
+    src/SimpleViewerWidget.cpp
+    src/SimpleViewerWidget.h
 )
 
 target_link_libraries(TestTarget PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)

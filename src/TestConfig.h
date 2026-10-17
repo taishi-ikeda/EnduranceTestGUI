@@ -34,6 +34,85 @@ enum class FuzzStringDeliveryMode { KeyByKey, Paste, Random };
 // (each new capture overwrites the previous one), not a running history.
 enum class ScreenshotCaptureMode { OnceAtStart, PerStepChange, FixedInterval };
 
+// --- SPEC.md 追加実装依頼「ビューワー耐久テスト強化」 -----------------------
+// A 3D viewer (the motivating case: VTK's default trackball-camera
+// interaction style, though none of this is VTK-specific) typically binds
+// camera manipulation to a long mouse-button hold with continuous
+// movement, not an instantaneous drag -- and different button/modifier
+// combinations select different camera operations (plain left = rotate,
+// Shift+left = pan, Ctrl+left = spin, middle = pan, right = zoom being
+// VTK's own bindings). RegionStep::enableHoldDrag/ActionKind::HoldDrag
+// generalizes the existing instantaneous Drag into exactly that: press a
+// button (optionally with modifier keys held) down, move the pointer
+// along a path for a randomized duration -- optionally layering wheel/key/
+// window-resize input on top while still held, to reproduce a target
+// concurrently handling more than one kind of input mid-gesture -- then
+// release.
+
+enum class HoldDragPathShape { Circle, ZigZag, RandomWalk };
+
+// One (button, modifiers) combination HoldDrag can pick for a given
+// occurrence, weighted the same way every other candidate list in this
+// app is (ActionParams::holdDragStyles). An empty holdDragStyles list
+// falls back to a single implicit {LeftButton, NoModifier, weight 1}
+// entry, so a preset that predates this feature keeps behaving like a
+// plain left-button hold.
+struct HoldDragStyle
+{
+    Qt::MouseButton button = Qt::LeftButton;
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    int weight = 1;
+};
+
+// Injects wheel "notches" while a HoldDrag is in progress (SPEC.md 想定
+// パターンP3「ドラッグ中のホイール」/P6「描画より速いホイール」、および
+// 「0msの連打」「連打と完全停止の繰り返し」): alternates between a burst
+// of notchesPerBurst[Min,Max] notches sent notchInterval[Min,Max]Ms apart,
+// then a pause of pauseBetweenBursts[Min,Max]Ms with no wheel activity,
+// repeating for as long as the hold lasts. The defaults (a single notch,
+// no pause) mean "one notch every notchIntervalMs" -- the simple P3 case;
+// an interval of (0, 0) with a longer pause gives "as fast as possible,
+// then a dead stop" (P6/"0ms連打"), and widening notchesPerBurst covers
+// "N notches back to back" before each pause.
+struct HoldDragWheelOverlay
+{
+    bool enabled = false;
+    int notchesPerBurstMin = 1;
+    int notchesPerBurstMax = 1;
+    int notchIntervalMinMs = 30;
+    int notchIntervalMaxMs = 30;
+    int pauseBetweenBurstsMinMs = 0;
+    int pauseBetweenBurstsMaxMs = 0;
+};
+
+// Sends one keystroke at a time -- the same allowedKeyChars/keyInclude*
+// candidate pool ActionKind::Key/TypingBurst already draw from, there is
+// no separate charset for this -- at a randomized interval while a
+// HoldDrag is in progress ("ドラッグ中にキー").
+struct HoldDragKeyOverlay
+{
+    bool enabled = false;
+    int keyIntervalMinMs = 300;
+    int keyIntervalMaxMs = 800;
+};
+
+// Resizes, or minimizes then restores, the target window at a randomized
+// interval while a HoldDrag is in progress (SPEC.md 想定パターンP5「ドラッ
+// グ中のウィンドウ操作」): stresses the target's render-surface-recreation
+// path concurrently with an in-progress camera gesture. Always acts on the
+// main target window (TestConfig::targetWindowId), the same as
+// ActionKind::WindowOp -- covering a window of some OTHER, unrelated
+// application being raised over the target mid-gesture is not supported
+// (SPEC.md「既知の制約」).
+struct HoldDragWindowOpOverlay
+{
+    bool enabled = false;
+    bool allowResize = true;
+    bool allowMinimizeRestore = true;
+    int intervalMinMs = 800;
+    int intervalMaxMs = 2000;
+};
+
 // The detailed "how" of each action kind (drag distance/direction, key
 // character set, scroll amount, shortcut list, context-menu candidates).
 // TestConfig::defaultActionParams is the set edited in the "対象選択"
@@ -137,6 +216,43 @@ struct ActionParams
     bool fuzzStringUseAllEntries = true;
     QStringList fuzzStringSelectedEntries;
     FuzzStringDeliveryMode fuzzStringDeliveryMode = FuzzStringDeliveryMode::Random;
+
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」(RegionStep::
+    // enableHoldDrag, ActionKind::HoldDrag) -- see HoldDragStyle's own
+    // comment for holdDragStyles' empty-list fallback.
+    QList<HoldDragStyle> holdDragStyles;
+    int holdDragDurationMinMs = 2000;
+    int holdDragDurationMaxMs = 5000;
+    HoldDragPathShape holdDragPathShape = HoldDragPathShape::Circle;
+    // How far from the start point the path wanders, in pixels (Circle:
+    // radius; ZigZag: amplitude of each zigzag leg; RandomWalk: the walk
+    // is pulled back toward the start point once it strays past this far).
+    int holdDragPathExtentMinPx = 20;
+    int holdDragPathExtentMaxPx = 150;
+    // How often the pointer advances to a new point along the path while
+    // held -- SPEC.md 想定パターンP1「長押し回転」の「数百回動かす」は、
+    // 専用の移動回数設定ではなく、長い継続時間とこの短い間隔の組み合わせ
+    // から自然に生じる。
+    int holdDragStepIntervalMinMs = 10;
+    int holdDragStepIntervalMaxMs = 30;
+    HoldDragWheelOverlay holdDragWheelOverlay;
+    HoldDragKeyOverlay holdDragKeyOverlay;
+    HoldDragWindowOpOverlay holdDragWindowOpOverlay;
+
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」「現状では右ドラッグ
+    // のたびにEscapeが入る…3Dビューでは右ドラッグはズームなので、メニュー
+    // が出ないのにEscapeが送られ、実行中の処理を取り消す可能性がある」: a
+    // 3D viewer commonly binds the right mouse button to a camera operation
+    // (zoom) that never opens a context/popup menu, unlike most ordinary
+    // applications. Without this flag, every right-button Click/Drag/
+    // HoldDrag still goes through handlePossibleContextMenu()'s "resolve or
+    // dismiss" logic, which sends Escape whenever nothing was selected --
+    // silently cancelling whatever the viewer itself was in the middle of,
+    // once per right-button action. true skips that handling entirely for
+    // this step's right-button actions (treated as "no menu could possibly
+    // have appeared"); false (default) preserves the existing behavior for
+    // every app that does use the right button for a real context menu.
+    bool viewerRightButtonNeverOpensMenu = false;
 };
 
 // A named, reusable operation target resolved via the OS accessibility tree
@@ -342,6 +458,12 @@ struct RegionStep
     // plain Click.
     bool enableDoubleClick = false;
     bool enableDrag = false;
+    // SPEC.md 追加実装依頼「ビューワー耐久テスト強化」(ActionKind::
+    // HoldDrag): a long-press, continuously-moving camera-manipulation-
+    // style gesture -- see ActionParams::holdDragStyles/
+    // holdDragDurationMinMs/etc. and HoldDragStyle's own comment. Distinct
+    // from enableDrag (an instantaneous flick) so a step can mix both.
+    bool enableHoldDrag = false;
     bool enableKey = false;
     // 一定時間キーボード入力 (ActionKind::TypingBurst in RandomActionEngine):
     // like enableKey, but one occurrence keeps sending keystrokes for a
@@ -406,6 +528,7 @@ struct RegionStep
     int clickWeight = 1;
     int doubleClickWeight = 1;
     int dragWeight = 1;
+    int holdDragWeight = 1;
     int keyWeight = 1;
     int typingBurstWeight = 1;
     int fuzzStringWeight = 1;
@@ -507,10 +630,10 @@ struct RegionStep
     {
         if (isWaitStep || isGroup || isTask)
             return true;  // waiting/grouping/tasking is this step's whole purpose, not a missing setting
-        return enableClick || enableDoubleClick || enableDrag || enableKey || enableTypingBurst ||
-               enableFuzzString || enableFuzzAllFields || enableScrollUp || enableScrollDown ||
-               enableScrollHorizontal || enableShortcut || (enableWindowOp && !targetsPopupDialog) ||
-               (enableDialogButtonPress && targetsPopupDialog);
+        return enableClick || enableDoubleClick || enableDrag || enableHoldDrag || enableKey ||
+               enableTypingBurst || enableFuzzString || enableFuzzAllFields || enableScrollUp ||
+               enableScrollDown || enableScrollHorizontal || enableShortcut ||
+               (enableWindowOp && !targetsPopupDialog) || (enableDialogButtonPress && targetsPopupDialog);
     }
 };
 

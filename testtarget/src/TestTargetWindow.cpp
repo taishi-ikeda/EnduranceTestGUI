@@ -25,6 +25,7 @@
 #include <QVBoxLayout>
 
 #include "CounterButton.h"
+#include "SimpleViewerWidget.h"
 
 TestTargetWindow::TestTargetWindow(QWidget *parent) : QMainWindow(parent)
 {
@@ -185,6 +186,24 @@ TestTargetWindow::TestTargetWindow(QWidget *parent) : QMainWindow(parent)
     m_customDialogLabel = new QLabel(QStringLiteral("押下内訳: 承認:0 却下:0 保留:0"), dialogButtonGroup);
     dialogButtonLayout->addWidget(m_customDialogLabel);
     rootLayout->addWidget(dialogButtonGroup);
+
+    // --- Simple 3D-viewer stand-in (SPEC.md 追加実装依頼「ビューワー耐久
+    // テスト強化」): no VTK/3D API dependency, just a QPainter wireframe
+    // cube responding to the same button/modifier bindings VTK's own
+    // default trackball-camera style uses, for verifying middle-drag/
+    // modifier-drag/HoldDrag/viewer-mode features end-to-end.
+    auto *viewerGroup = new QGroupBox(
+        QStringLiteral("簡易3Dビューワー（左ドラッグ:回転 / Shift+左 or 中ドラッグ:パン / "
+                       "Ctrl+左ドラッグ:スピン / 右ドラッグ・ホイール:ズーム）"),
+        central);
+    auto *viewerLayout = new QVBoxLayout(viewerGroup);
+    m_viewerWidget = new SimpleViewerWidget(viewerGroup);
+    connect(m_viewerWidget, &SimpleViewerWidget::interactionLogged, this, &TestTargetWindow::appendLog);
+    viewerLayout->addWidget(m_viewerWidget);
+    auto *viewerResetButton = new QPushButton(QStringLiteral("ビューをリセット"), viewerGroup);
+    connect(viewerResetButton, &QPushButton::clicked, m_viewerWidget, &SimpleViewerWidget::resetView);
+    viewerLayout->addWidget(viewerResetButton);
+    rootLayout->addWidget(viewerGroup);
 
     // --- Window geometry / state ---
     m_geometryLabel = new QLabel(central);

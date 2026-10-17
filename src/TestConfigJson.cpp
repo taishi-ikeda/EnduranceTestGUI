@@ -85,6 +85,161 @@ FuzzStringDeliveryMode fuzzStringDeliveryModeFromString(const QString &s)
     return FuzzStringDeliveryMode::Random;
 }
 
+// SPEC.md 追加実装依頼「ビューワー耐久テスト強化」
+QString mouseButtonToString(Qt::MouseButton button)
+{
+    if (button == Qt::RightButton) return QStringLiteral("right");
+    if (button == Qt::MiddleButton) return QStringLiteral("middle");
+    return QStringLiteral("left");
+}
+
+Qt::MouseButton mouseButtonFromString(const QString &s)
+{
+    if (s == QStringLiteral("right")) return Qt::RightButton;
+    if (s == QStringLiteral("middle")) return Qt::MiddleButton;
+    return Qt::LeftButton;
+}
+
+QJsonArray keyboardModifiersToJson(Qt::KeyboardModifiers modifiers)
+{
+    QJsonArray arr;
+    if (modifiers & Qt::ShiftModifier) arr.append(QStringLiteral("shift"));
+    if (modifiers & Qt::ControlModifier) arr.append(QStringLiteral("ctrl"));
+    if (modifiers & Qt::AltModifier) arr.append(QStringLiteral("alt"));
+    if (modifiers & Qt::MetaModifier) arr.append(QStringLiteral("meta"));
+    return arr;
+}
+
+Qt::KeyboardModifiers keyboardModifiersFromJson(const QJsonArray &arr)
+{
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    for (const QJsonValue &v : arr) {
+        const QString s = v.toString();
+        if (s == QStringLiteral("shift")) modifiers |= Qt::ShiftModifier;
+        else if (s == QStringLiteral("ctrl")) modifiers |= Qt::ControlModifier;
+        else if (s == QStringLiteral("alt")) modifiers |= Qt::AltModifier;
+        else if (s == QStringLiteral("meta")) modifiers |= Qt::MetaModifier;
+    }
+    return modifiers;
+}
+
+QString holdDragPathShapeToString(HoldDragPathShape shape)
+{
+    switch (shape) {
+    case HoldDragPathShape::ZigZag: return QStringLiteral("zigzag");
+    case HoldDragPathShape::RandomWalk: return QStringLiteral("randomWalk");
+    case HoldDragPathShape::Circle:
+    default: return QStringLiteral("circle");
+    }
+}
+
+HoldDragPathShape holdDragPathShapeFromString(const QString &s)
+{
+    if (s == QStringLiteral("zigzag")) return HoldDragPathShape::ZigZag;
+    if (s == QStringLiteral("randomWalk")) return HoldDragPathShape::RandomWalk;
+    return HoldDragPathShape::Circle;
+}
+
+QJsonObject holdDragStyleToJson(const HoldDragStyle &style)
+{
+    QJsonObject o;
+    o["button"] = mouseButtonToString(style.button);
+    o["modifiers"] = keyboardModifiersToJson(style.modifiers);
+    o["weight"] = style.weight;
+    return o;
+}
+
+HoldDragStyle holdDragStyleFromJson(const QJsonObject &o)
+{
+    HoldDragStyle style;
+    style.button = mouseButtonFromString(o["button"].toString());
+    style.modifiers = keyboardModifiersFromJson(o["modifiers"].toArray());
+    style.weight = o["weight"].toInt(1);
+    return style;
+}
+
+QJsonArray holdDragStylesToJson(const QList<HoldDragStyle> &styles)
+{
+    QJsonArray arr;
+    for (const HoldDragStyle &style : styles)
+        arr.append(holdDragStyleToJson(style));
+    return arr;
+}
+
+QList<HoldDragStyle> holdDragStylesFromJson(const QJsonArray &arr)
+{
+    QList<HoldDragStyle> styles;
+    for (const QJsonValue &v : arr)
+        styles.append(holdDragStyleFromJson(v.toObject()));
+    return styles;
+}
+
+QJsonObject holdDragWheelOverlayToJson(const HoldDragWheelOverlay &w)
+{
+    QJsonObject o;
+    o["enabled"] = w.enabled;
+    o["notchesPerBurstMin"] = w.notchesPerBurstMin;
+    o["notchesPerBurstMax"] = w.notchesPerBurstMax;
+    o["notchIntervalMinMs"] = w.notchIntervalMinMs;
+    o["notchIntervalMaxMs"] = w.notchIntervalMaxMs;
+    o["pauseBetweenBurstsMinMs"] = w.pauseBetweenBurstsMinMs;
+    o["pauseBetweenBurstsMaxMs"] = w.pauseBetweenBurstsMaxMs;
+    return o;
+}
+
+HoldDragWheelOverlay holdDragWheelOverlayFromJson(const QJsonObject &o)
+{
+    HoldDragWheelOverlay w;
+    w.enabled = o["enabled"].toBool(w.enabled);
+    w.notchesPerBurstMin = o["notchesPerBurstMin"].toInt(w.notchesPerBurstMin);
+    w.notchesPerBurstMax = o["notchesPerBurstMax"].toInt(w.notchesPerBurstMax);
+    w.notchIntervalMinMs = o["notchIntervalMinMs"].toInt(w.notchIntervalMinMs);
+    w.notchIntervalMaxMs = o["notchIntervalMaxMs"].toInt(w.notchIntervalMaxMs);
+    w.pauseBetweenBurstsMinMs = o["pauseBetweenBurstsMinMs"].toInt(w.pauseBetweenBurstsMinMs);
+    w.pauseBetweenBurstsMaxMs = o["pauseBetweenBurstsMaxMs"].toInt(w.pauseBetweenBurstsMaxMs);
+    return w;
+}
+
+QJsonObject holdDragKeyOverlayToJson(const HoldDragKeyOverlay &k)
+{
+    QJsonObject o;
+    o["enabled"] = k.enabled;
+    o["keyIntervalMinMs"] = k.keyIntervalMinMs;
+    o["keyIntervalMaxMs"] = k.keyIntervalMaxMs;
+    return o;
+}
+
+HoldDragKeyOverlay holdDragKeyOverlayFromJson(const QJsonObject &o)
+{
+    HoldDragKeyOverlay k;
+    k.enabled = o["enabled"].toBool(k.enabled);
+    k.keyIntervalMinMs = o["keyIntervalMinMs"].toInt(k.keyIntervalMinMs);
+    k.keyIntervalMaxMs = o["keyIntervalMaxMs"].toInt(k.keyIntervalMaxMs);
+    return k;
+}
+
+QJsonObject holdDragWindowOpOverlayToJson(const HoldDragWindowOpOverlay &w)
+{
+    QJsonObject o;
+    o["enabled"] = w.enabled;
+    o["allowResize"] = w.allowResize;
+    o["allowMinimizeRestore"] = w.allowMinimizeRestore;
+    o["intervalMinMs"] = w.intervalMinMs;
+    o["intervalMaxMs"] = w.intervalMaxMs;
+    return o;
+}
+
+HoldDragWindowOpOverlay holdDragWindowOpOverlayFromJson(const QJsonObject &o)
+{
+    HoldDragWindowOpOverlay w;
+    w.enabled = o["enabled"].toBool(w.enabled);
+    w.allowResize = o["allowResize"].toBool(w.allowResize);
+    w.allowMinimizeRestore = o["allowMinimizeRestore"].toBool(w.allowMinimizeRestore);
+    w.intervalMinMs = o["intervalMinMs"].toInt(w.intervalMinMs);
+    w.intervalMaxMs = o["intervalMaxMs"].toInt(w.intervalMaxMs);
+    return w;
+}
+
 QJsonArray rectListToJson(const QList<QRect> &rects)
 {
     QJsonArray arr;
@@ -205,6 +360,18 @@ QJsonObject actionParamsToJson(const ActionParams &p)
     o["fuzzStringUseAllEntries"] = p.fuzzStringUseAllEntries;
     o["fuzzStringSelectedEntries"] = stringListToJson(p.fuzzStringSelectedEntries);
     o["fuzzStringDeliveryMode"] = fuzzStringDeliveryModeToString(p.fuzzStringDeliveryMode);
+    o["holdDragStyles"] = holdDragStylesToJson(p.holdDragStyles);
+    o["holdDragDurationMinMs"] = p.holdDragDurationMinMs;
+    o["holdDragDurationMaxMs"] = p.holdDragDurationMaxMs;
+    o["holdDragPathShape"] = holdDragPathShapeToString(p.holdDragPathShape);
+    o["holdDragPathExtentMinPx"] = p.holdDragPathExtentMinPx;
+    o["holdDragPathExtentMaxPx"] = p.holdDragPathExtentMaxPx;
+    o["holdDragStepIntervalMinMs"] = p.holdDragStepIntervalMinMs;
+    o["holdDragStepIntervalMaxMs"] = p.holdDragStepIntervalMaxMs;
+    o["holdDragWheelOverlay"] = holdDragWheelOverlayToJson(p.holdDragWheelOverlay);
+    o["holdDragKeyOverlay"] = holdDragKeyOverlayToJson(p.holdDragKeyOverlay);
+    o["holdDragWindowOpOverlay"] = holdDragWindowOpOverlayToJson(p.holdDragWindowOpOverlay);
+    o["viewerRightButtonNeverOpensMenu"] = p.viewerRightButtonNeverOpensMenu;
     return o;
 }
 
@@ -249,6 +416,23 @@ ActionParams actionParamsFromJson(const QJsonObject &o)
     if (o.contains("fuzzStringSelectedEntries"))
         p.fuzzStringSelectedEntries = stringListFromJson(o["fuzzStringSelectedEntries"].toArray());
     p.fuzzStringDeliveryMode = fuzzStringDeliveryModeFromString(o["fuzzStringDeliveryMode"].toString());
+    if (o.contains("holdDragStyles"))
+        p.holdDragStyles = holdDragStylesFromJson(o["holdDragStyles"].toArray());
+    p.holdDragDurationMinMs = o["holdDragDurationMinMs"].toInt(p.holdDragDurationMinMs);
+    p.holdDragDurationMaxMs = o["holdDragDurationMaxMs"].toInt(p.holdDragDurationMaxMs);
+    p.holdDragPathShape = holdDragPathShapeFromString(o["holdDragPathShape"].toString());
+    p.holdDragPathExtentMinPx = o["holdDragPathExtentMinPx"].toInt(p.holdDragPathExtentMinPx);
+    p.holdDragPathExtentMaxPx = o["holdDragPathExtentMaxPx"].toInt(p.holdDragPathExtentMaxPx);
+    p.holdDragStepIntervalMinMs = o["holdDragStepIntervalMinMs"].toInt(p.holdDragStepIntervalMinMs);
+    p.holdDragStepIntervalMaxMs = o["holdDragStepIntervalMaxMs"].toInt(p.holdDragStepIntervalMaxMs);
+    if (o.contains("holdDragWheelOverlay"))
+        p.holdDragWheelOverlay = holdDragWheelOverlayFromJson(o["holdDragWheelOverlay"].toObject());
+    if (o.contains("holdDragKeyOverlay"))
+        p.holdDragKeyOverlay = holdDragKeyOverlayFromJson(o["holdDragKeyOverlay"].toObject());
+    if (o.contains("holdDragWindowOpOverlay"))
+        p.holdDragWindowOpOverlay = holdDragWindowOpOverlayFromJson(o["holdDragWindowOpOverlay"].toObject());
+    p.viewerRightButtonNeverOpensMenu =
+        o["viewerRightButtonNeverOpensMenu"].toBool(p.viewerRightButtonNeverOpensMenu);
     return p;
 }
 
@@ -335,6 +519,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["enableRightClick"] = s.enableRightClick;
     o["enableDoubleClick"] = s.enableDoubleClick;
     o["enableDrag"] = s.enableDrag;
+    o["enableHoldDrag"] = s.enableHoldDrag;
     o["enableKey"] = s.enableKey;
     o["enableTypingBurst"] = s.enableTypingBurst;
     o["enableFuzzString"] = s.enableFuzzString;
@@ -348,6 +533,7 @@ QJsonObject regionStepToJson(const RegionStep &s)
     o["clickWeight"] = s.clickWeight;
     o["doubleClickWeight"] = s.doubleClickWeight;
     o["dragWeight"] = s.dragWeight;
+    o["holdDragWeight"] = s.holdDragWeight;
     o["keyWeight"] = s.keyWeight;
     o["typingBurstWeight"] = s.typingBurstWeight;
     o["fuzzStringWeight"] = s.fuzzStringWeight;
@@ -390,6 +576,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.enableRightClick = o["enableRightClick"].toBool(s.enableRightClick);
     s.enableDoubleClick = o["enableDoubleClick"].toBool(s.enableDoubleClick);
     s.enableDrag = o["enableDrag"].toBool(s.enableDrag);
+    s.enableHoldDrag = o["enableHoldDrag"].toBool(s.enableHoldDrag);
     s.enableKey = o["enableKey"].toBool(s.enableKey);
     s.enableTypingBurst = o["enableTypingBurst"].toBool(s.enableTypingBurst);
     s.enableFuzzString = o["enableFuzzString"].toBool(s.enableFuzzString);
@@ -403,6 +590,7 @@ RegionStep regionStepFromJson(const QJsonObject &o)
     s.clickWeight = o["clickWeight"].toInt(s.clickWeight);
     s.doubleClickWeight = o["doubleClickWeight"].toInt(s.doubleClickWeight);
     s.dragWeight = o["dragWeight"].toInt(s.dragWeight);
+    s.holdDragWeight = o["holdDragWeight"].toInt(s.holdDragWeight);
     s.keyWeight = o["keyWeight"].toInt(s.keyWeight);
     s.typingBurstWeight = o["typingBurstWeight"].toInt(s.typingBurstWeight);
     s.fuzzStringWeight = o["fuzzStringWeight"].toInt(s.fuzzStringWeight);

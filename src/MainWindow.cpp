@@ -1160,6 +1160,19 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
     loadInjectionParamsRow->addWidget(
         new QLabel(I18n::t(QStringLiteral("プロセスあたりのメモリ使用量:")), m_loadInjectionGroup));
     loadInjectionParamsRow->addWidget(m_loadInjectionMemoryMbSpin);
+    m_loadInjectionMemoryModeCombo = new QComboBox(m_loadInjectionGroup);
+    m_loadInjectionMemoryModeCombo->addItem(I18n::t(QStringLiteral("1つの連続した領域にまとめて確保")),
+                                             int(LoadInjector::MemoryLoadMode::Single));
+    m_loadInjectionMemoryModeCombo->addItem(I18n::t(QStringLiteral("小さく分割して確保（断片化）")),
+                                             int(LoadInjector::MemoryLoadMode::Fragmented));
+    m_loadInjectionMemoryModeCombo->setToolTip(
+        I18n::t(QStringLiteral("確保したメモリを常駐させ続ける掛け方は同じですが、確保の仕方によって"
+                                "負荷のかかり方が変わります。「1つの連続した領域にまとめて確保」は総メモリ"
+                                "使用量・OOMへの近さの再現に向き、「小さく分割して確保（断片化）」は仮想"
+                                "アドレス空間の断片化やTLB/ページフォールトまわりへの負荷の再現に向きます。")));
+    loadInjectionParamsRow->addWidget(
+        new QLabel(I18n::t(QStringLiteral("メモリの確保方式:")), m_loadInjectionGroup));
+    loadInjectionParamsRow->addWidget(m_loadInjectionMemoryModeCombo);
     loadInjectionParamsRow->addStretch();
     loadInjectionLayout->addLayout(loadInjectionParamsRow);
 
@@ -3286,6 +3299,8 @@ bool MainWindow::beginRun(bool interactive)
         !m_loadInjector->isRunning()) {
         QString loadInjectionError;
         if (m_loadInjector->start(m_loadInjectionProcessCountSpin->value(), m_loadInjectionMemoryMbSpin->value(),
+                                   static_cast<LoadInjector::MemoryLoadMode>(
+                                       m_loadInjectionMemoryModeCombo->currentData().toInt()),
                                    loadInjectionError)) {
             m_loadInjectionStartedByRun = true;
             appendLog(I18n::t(QStringLiteral("負荷注入を開始しました（%1プロセス、各%2MB）"))
@@ -3553,6 +3568,8 @@ void MainWindow::onToggleLoadInjectionManual()
     } else {
         QString errorMessage;
         if (m_loadInjector->start(m_loadInjectionProcessCountSpin->value(), m_loadInjectionMemoryMbSpin->value(),
+                                   static_cast<LoadInjector::MemoryLoadMode>(
+                                       m_loadInjectionMemoryModeCombo->currentData().toInt()),
                                    errorMessage)) {
             appendLog(I18n::t(QStringLiteral("負荷注入を手動で開始しました（%1プロセス、各%2MB）"))
                            .arg(m_loadInjectionProcessCountSpin->value())
@@ -4641,6 +4658,11 @@ QJsonObject MainWindow::buildPresetJson(bool redactSensitiveText) const
     timing["loadInjectionEnabled"] = m_loadInjectionEnabledCheck->isChecked();
     timing["loadInjectionProcessCount"] = m_loadInjectionProcessCountSpin->value();
     timing["loadInjectionMemoryMbPerProcess"] = m_loadInjectionMemoryMbSpin->value();
+    timing["loadInjectionMemoryMode"] =
+        static_cast<LoadInjector::MemoryLoadMode>(m_loadInjectionMemoryModeCombo->currentData().toInt()) ==
+                LoadInjector::MemoryLoadMode::Fragmented
+            ? QStringLiteral("fragmented")
+            : QStringLiteral("single");
     timing["loadInjectionLinkToRun"] = m_loadInjectionLinkToRunCheck->isChecked();
     // SPEC.md 追加実装依頼「負荷モニター」
     timing["loadMonitorEnabled"] = m_loadMonitorWindow->monitoringEnabled();
@@ -4782,6 +4804,17 @@ bool MainWindow::loadPresetFromPath(const QString &path, QString &errorMessage)
         timing["loadInjectionProcessCount"].toInt(m_loadInjectionProcessCountSpin->value()));
     m_loadInjectionMemoryMbSpin->setValue(
         timing["loadInjectionMemoryMbPerProcess"].toInt(m_loadInjectionMemoryMbSpin->value()));
+    // 新規フィールドのため古いプリセットには存在せず、その場合toString()は
+    // 空文字列を返す（"fragmented"と一致しない）ので、自然にSingle扱いに
+    // なり既存プリセットの挙動は変わらない。
+    {
+        const QString savedMode = timing["loadInjectionMemoryMode"].toString();
+        const int index = m_loadInjectionMemoryModeCombo->findData(
+            int(savedMode == QStringLiteral("fragmented") ? LoadInjector::MemoryLoadMode::Fragmented
+                                                            : LoadInjector::MemoryLoadMode::Single));
+        if (index >= 0)
+            m_loadInjectionMemoryModeCombo->setCurrentIndex(index);
+    }
     m_loadInjectionLinkToRunCheck->setChecked(
         timing["loadInjectionLinkToRun"].toBool(m_loadInjectionLinkToRunCheck->isChecked()));
     // SPEC.md 追加実装依頼「負荷モニター」

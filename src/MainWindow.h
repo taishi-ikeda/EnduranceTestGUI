@@ -835,6 +835,12 @@ private:
     QCheckBox *m_loadInjectionEnabledCheck = nullptr;
     QSpinBox *m_loadInjectionProcessCountSpin = nullptr;
     QSpinBox *m_loadInjectionMemoryMbSpin = nullptr;
+    // 「メモリへの負荷の掛け方として二つのオプションを選べるようにしてく
+    // ださい」: LoadInjector::MemoryLoadMode, stored as item data (int cast
+    // of the enum) -- see that enum's own comment for what the two options
+    // actually change about the load. Defaults to Single (index 0), the
+    // only behavior that existed before this option.
+    QComboBox *m_loadInjectionMemoryModeCombo = nullptr;
     // If checked (the default), beginRun() starts m_loadInjector right
     // before m_engine->start() (only when m_loadInjectionEnabledCheck is
     // also checked), and onEngineFinished() stops it again once the run

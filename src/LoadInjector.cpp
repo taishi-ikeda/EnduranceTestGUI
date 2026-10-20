@@ -79,7 +79,7 @@ void LoadInjector::pinWorkerAffinity(qint64 pid, int workerIndex, int totalCores
 #endif
 }
 
-bool LoadInjector::start(int processCount, int memoryMbPerProcess, QString &errorMessage)
+bool LoadInjector::start(int processCount, int memoryMbPerProcess, MemoryLoadMode memoryMode, QString &errorMessage)
 {
     stop();  // always start from a clean slate with the newly requested parameters
 
@@ -104,7 +104,9 @@ bool LoadInjector::start(int processCount, int memoryMbPerProcess, QString &erro
     for (int i = 0; i < processCount; ++i) {
         auto *process = new QProcess(this);
         process->setProgram(helperPath);
-        process->setArguments({QString::number(memoryMbPerProcess)});
+        process->setArguments({QString::number(memoryMbPerProcess),
+                                memoryMode == MemoryLoadMode::Fragmented ? QStringLiteral("fragmented")
+                                                                          : QStringLiteral("single")});
         connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
                 &LoadInjector::onWorkerFinished);
         process->start();

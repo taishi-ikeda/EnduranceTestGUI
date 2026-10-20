@@ -1,8 +1,10 @@
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <csignal>
 #include <vector>
 
+#include <sys/mman.h>
 #include <unistd.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
@@ -12,6 +14,28 @@ namespace
 {
 std::atomic<bool> g_stop{false};
 void handleSignal(int) { g_stop.store(true); }
+
+// 「メモリへの負荷の掛け方として二つのオプションを選べるようにしてください」:
+// how the requested MB are laid out in the process's address space, not just
+// how many of them there are -- one large contiguous block maximizes
+// resident-memory/OOM pressure while staying cheap on the TLB (and eligible
+// for transparent huge pages), whereas many separate smaller mappings
+// exercise the kernel's VMA bookkeeping and the TLB/page-fault path harder
+// per byte touched, at the cost of being gentler on raw resident-size
+// pressure. Each chunk is requested via a direct, separate mmap() call
+// (MAP_PRIVATE|MAP_ANONYMOUS) rather than many small heap allocations, so
+// fragmentation is genuine (distinct VMAs/mappings) regardless of whatever
+// threshold the platform's own malloc happens to use for falling back to
+// mmap internally.
+constexpr std::size_t kFragmentedChunkBytes = 256 * 1024;
+
+// Size of the unmapped-access (PROT_NONE) guard page placed after every
+// fragmented-mode chunk -- see that branch's own comment for why it's
+// needed at all (preventing the kernel from merging adjacent chunks back
+// into one VMA). One page is enough: the guard's own job is only to make
+// the chunk on either side of it non-adjacent in the sense vma_merge()
+// cares about, not to reserve any particular amount of address space.
+constexpr std::size_t kGuardPageBytes = 4096;
 }  // namespace
 
 // Standalone CPU+memory load-generator helper, launched as a separate OS
@@ -27,8 +51,15 @@ void handleSignal(int) { g_stop.store(true); }
 // avoids any risk of it competing for the same libraries/resources the main
 // app and the target app are also using.
 //
-// Takes one optional argument: how many MB to allocate and keep touching
-// (default 64). Anything unparseable is ignored and the default is used.
+// Takes up to two optional arguments: how many MB to allocate and keep
+// touching (default 64; anything unparseable is ignored and the default is
+// used), and the memory layout mode -- "single" (default: one contiguous
+// block, see memoryBlock below) or "fragmented" (many separate
+// kFragmentedChunkBytes-sized mmap() mappings scattered across the address
+// space instead of one mapping for the whole amount -- see
+// kFragmentedChunkBytes' own comment for why that changes how the load
+// actually behaves). Anything other than exactly "fragmented" is treated as
+// "single".
 int main(int argc, char **argv)
 {
     std::signal(SIGTERM, handleSignal);
@@ -67,16 +98,66 @@ int main(int argc, char **argv)
         if (end != argv[1] && parsed > 0)
             memoryMb = parsed;
     }
+    const bool fragmented = argc > 2 && std::strcmp(argv[2], "fragmented") == 0;
 
     const std::size_t byteCount = static_cast<std::size_t>(memoryMb) * 1024 * 1024;
+
+    // One contiguous region to touch (single mode), or several scattered
+    // ones (fragmented mode) -- see each branch's own comment. Either way,
+    // `spans` below is what the touching loop actually walks, so it doesn't
+    // need to know or care which mode produced it.
+    struct Span
+    {
+        volatile unsigned char *ptr;
+        std::size_t size;
+    };
+    std::vector<Span> spans;
+
     // std::vector<T> requires a non-cv-qualified value_type, so the buffer
     // itself is plain unsigned char; every access below instead goes through
     // a volatile pointer to it, so the compiler can't prove the touching
-    // writes are dead and optimize them away entirely.
-    std::vector<unsigned char> memoryBlock(byteCount, 0);
-    volatile unsigned char *memoryPtr = memoryBlock.data();
+    // writes are dead and optimize them away entirely. Declared here (not
+    // inside the `if` below) so it stays alive for the rest of main(), since
+    // `spans` only borrows a pointer into it.
+    std::vector<unsigned char> memoryBlock;
 
-    std::size_t touchCursor = 0;
+    if (!fragmented) {
+        memoryBlock.assign(byteCount, 0);
+        if (byteCount > 0)
+            spans.push_back({memoryBlock.data(), byteCount});
+    } else {
+        // Never explicitly munmap()'d -- the process exiting at the end of
+        // main() reclaims every mapping just as it would memoryBlock's heap
+        // storage above; nothing other than this process ever needs any of
+        // them back sooner.
+        //
+        // A PROT_NONE guard page follows each data chunk. Without it, the
+        // kernel's own vma_merge() quietly coalesces consecutive mmap()
+        // calls that land adjacent to each other (the common case, since
+        // nothing else is allocating in between) and share the same
+        // protection/flags back into a single VMA -- found via
+        // /proc/<pid>/maps while verifying this feature: the "fragmented"
+        // mode produced exactly the same single-mapping layout as "single"
+        // without this, defeating the entire point of the option. The guard
+        // page's differing protection breaks that merge on both sides, so
+        // each data chunk keeps its own distinct mapping.
+        std::size_t remaining = byteCount;
+        while (remaining > 0) {
+            const std::size_t chunkSize = remaining < kFragmentedChunkBytes ? remaining : kFragmentedChunkBytes;
+            void *mapped = ::mmap(nullptr, chunkSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (mapped == MAP_FAILED)
+                break;  // best-effort: address space/VMA-count limit reached -- touch whatever mapped so far
+            spans.push_back({static_cast<volatile unsigned char *>(mapped), chunkSize});
+            remaining -= chunkSize;
+            // Best-effort: if this fails there's simply no guard between
+            // this chunk and the next (they may end up merged with each
+            // other), not a reason to stop fragmenting the rest.
+            ::mmap(nullptr, kGuardPageBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        }
+    }
+
+    std::size_t spanIndex = 0;
+    std::size_t offsetInSpan = 0;
     volatile double busySink = 0.0;
     while (!g_stop.load(std::memory_order_relaxed)) {
         // CPU load: pure floating-point churn with no syscalls/sleeps in the
@@ -87,15 +168,23 @@ int main(int argc, char **argv)
         for (int i = 0; i < 200000 && !g_stop.load(std::memory_order_relaxed); ++i)
             busySink += static_cast<double>(i) * 1.0000001;
 
-        // Memory load: keep touching the allocated block a little at a time
-        // so the OS can't quietly page it out and the allocation can't be
-        // optimized away, without memory traffic dominating runtime over
-        // the CPU churn above.
-        if (byteCount > 0) {
-            for (int i = 0; i < 4096 && touchCursor < byteCount; ++i, ++touchCursor)
-                memoryPtr[touchCursor] = static_cast<unsigned char>(touchCursor);
-            if (touchCursor >= byteCount)
-                touchCursor = 0;
+        // Memory load: keep touching the allocated memory a little at a
+        // time so the OS can't quietly page it out and the allocation can't
+        // be optimized away, without memory traffic dominating runtime over
+        // the CPU churn above. Walks `spans` round-robin -- a single span in
+        // single mode (so this behaves exactly as before), many in
+        // fragmented mode (so every mapping gets touched in turn, not just
+        // the first one).
+        if (!spans.empty()) {
+            for (int i = 0; i < 4096; ++i) {
+                Span &span = spans[spanIndex];
+                span.ptr[offsetInSpan] = static_cast<unsigned char>(offsetInSpan);
+                ++offsetInSpan;
+                if (offsetInSpan >= span.size) {
+                    offsetInSpan = 0;
+                    spanIndex = (spanIndex + 1) % spans.size();
+                }
+            }
         }
 
         // Portable orphan check, once per outer pass (so at worst a fraction

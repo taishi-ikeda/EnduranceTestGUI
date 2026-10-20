@@ -35,15 +35,27 @@ class LoadInjector : public QObject
     Q_OBJECT
 
 public:
+    // 「メモリへの負荷の掛け方として二つのオプションを選べるようにしてくだ
+    // さい」: how each worker's requested memory is laid out in its own
+    // address space, not just how much of it there is -- see
+    // loadstress_helper's own (LoadStressHelperMain.cpp) top-of-file comment
+    // for what actually differs between the two. Single is the original,
+    // unconditional behavior from before this option existed.
+    enum class MemoryLoadMode
+    {
+        Single,
+        Fragmented
+    };
+
     explicit LoadInjector(QObject *parent = nullptr);
     ~LoadInjector() override;
 
     // Stops whatever is currently running (if anything) and starts
     // `processCount` fresh worker processes, each allocating/touching
-    // `memoryMbPerProcess` MB. Returns false (errorMessage filled in, and
-    // nothing left running) if the helper executable can't be found or a
-    // worker fails to start.
-    bool start(int processCount, int memoryMbPerProcess, QString &errorMessage);
+    // `memoryMbPerProcess` MB laid out per `memoryMode`. Returns false
+    // (errorMessage filled in, and nothing left running) if the helper
+    // executable can't be found or a worker fails to start.
+    bool start(int processCount, int memoryMbPerProcess, MemoryLoadMode memoryMode, QString &errorMessage);
     // Terminates every worker (QProcess::terminate(), then kill() after a
     // short grace period if still alive) and clears all state. Safe to call
     // when nothing is running.

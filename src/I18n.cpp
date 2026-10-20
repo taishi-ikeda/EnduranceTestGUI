@@ -1307,6 +1307,18 @@ const QHash<QString, QString> &translationTable()
                         "crashes.")},
         {QStringLiteral("プロセス数:"), QStringLiteral("Process count:")},
         {QStringLiteral("プロセスあたりのメモリ使用量:"), QStringLiteral("Memory per process:")},
+        {QStringLiteral("メモリの確保方式:"), QStringLiteral("Memory layout:")},
+        {QStringLiteral("1つの連続した領域にまとめて確保"), QStringLiteral("One contiguous block")},
+        {QStringLiteral("小さく分割して確保（断片化）"), QStringLiteral("Many small, scattered blocks (fragmented)")},
+        {QStringLiteral("確保したメモリを常駐させ続ける掛け方は同じですが、確保の仕方によって"
+                        "負荷のかかり方が変わります。「1つの連続した領域にまとめて確保」は総メモリ"
+                        "使用量・OOMへの近さの再現に向き、「小さく分割して確保（断片化）」は仮想"
+                        "アドレス空間の断片化やTLB/ページフォールトまわりへの負荷の再現に向きます。"),
+         QStringLiteral("Both keep the same total amount resident the whole time, but how it's laid "
+                        "out changes what kind of load it actually applies. \"One contiguous block\" "
+                        "is best for reproducing total memory pressure/closeness to OOM; \"Many small, "
+                        "scattered blocks (fragmented)\" is best for reproducing load on virtual "
+                        "address-space fragmentation and the TLB/page-fault path.")},
         {QStringLiteral("テスト実行の開始・停止と連動させる"), QStringLiteral("Link to the test run's start/stop")},
         {QStringLiteral("有効（デフォルト）の場合、▶開始でテストが始まると同時に負荷注入を自動的に"
                         "開始し、■停止・異常停止・正常終了のいずれでも自動的に停止します。"

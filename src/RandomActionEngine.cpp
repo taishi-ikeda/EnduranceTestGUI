@@ -1627,7 +1627,16 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
                     // nothing here then told the user it had actually failed
                     // instead of simply finding no configured candidate to
                     // try at all.
-                    emit logMessage(I18n::t(QStringLiteral("メニュー項目「%1」を選べませんでした")).arg(chosen));
+                    // 不具合報告H-16(低、E-13の残り): appended into `desc`
+                    // (same as the success case just above) instead of a
+                    // separate emit logMessage() call here -- this function
+                    // runs synchronously *before* the caller logs `desc`
+                    // (the right-click action's own log line), so a
+                    // separately emitted message here always appeared
+                    // *before* that right-click line in the log, reading
+                    // backwards ("couldn't select" before the click that
+                    // opened the menu it was trying to select from).
+                    desc += I18n::t(QStringLiteral(" → メニュー項目「%1」を選べませんでした")).arg(chosen);
                 }
             }
         } else {  // ByIndex
@@ -1646,10 +1655,10 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
                 if (selected) {
                     desc += I18n::t(QStringLiteral(" → メニュー項目(上から%1番目)を選択")).arg(chosen + 1);
                 } else {
-                    // 不具合報告E-13(高、ByName側と同じ理由): see its own
-                    // comment just above.
-                    emit logMessage(
-                        I18n::t(QStringLiteral("メニュー項目(上から%1番目)を選べませんでした")).arg(chosen + 1));
+                    // 不具合報告E-13(高、ByName側と同じ理由)/H-16(低、ByName側と
+                    // 同じ理由): see ByName's own comments just above.
+                    desc +=
+                        I18n::t(QStringLiteral(" → メニュー項目(上から%1番目)を選べませんでした")).arg(chosen + 1);
                 }
             }
         }

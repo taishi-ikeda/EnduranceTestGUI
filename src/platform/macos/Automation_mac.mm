@@ -103,6 +103,30 @@ void setWindowClickThrough(quint32 /*windowId*/)
     // own attribute (NSWindow.ignoresMouseEvents) has been sufficient there.
 }
 
+// 不具合報告H-20(低、Linuxで確認・この関数はmacOSでは未検証): collectWindows()
+// below only ever excluded a window whose owning pid is *this exact
+// process's own* pid (getpid()) -- not any OTHER process also running the
+// same EnduranceTestGUI binary, which on Linux (see the identical fix and
+// comment in Automation_linux.cpp's own collectWindows()) let a second ETG
+// instance's own main window appear in, and even become the default
+// selection in, ①'s own target-selection list. Comparing each window's
+// owning process's executableURL (via NSRunningApplication, which the OS
+// resolves from the actual running binary regardless of what window
+// title/app name that process happens to show) against this process's own
+// identifies "another instance of this exact program" the same way
+// /proc/<pid>/exe does on Linux.
+static bool isAnotherInstanceOfThisApp(pid_t pid)
+{
+    if (pid <= 0)
+        return false;
+    NSURL *selfExe = [NSRunningApplication currentApplication].executableURL;
+    if (!selfExe)
+        return false;
+    NSRunningApplication *other = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    NSURL *otherExe = other.executableURL;
+    return otherExe && [otherExe isEqual:selfExe];
+}
+
 static QList<WindowInfo> collectWindows()
 {
     QList<WindowInfo> result;
@@ -126,6 +150,9 @@ static QList<WindowInfo> collectWindows()
             continue;
         pid_t ownerPid = pidNum.intValue;
         if (ownerPid == selfPid)
+            continue;
+        // 不具合報告H-20(低): see isAnotherInstanceOfThisApp()'s own comment.
+        if (isAnotherInstanceOfThisApp(ownerPid))
             continue;
 
         NSDictionary *boundsDict = info[(id)kCGWindowBounds];

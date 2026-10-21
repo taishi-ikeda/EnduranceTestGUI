@@ -17,6 +17,7 @@
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QFrame>
@@ -257,6 +258,24 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_stats.reload();
     loadFuzzStringCorpus();
 
+    // 不具合報告H-19(低): see m_statsFileWatcher's own header comment.
+    // Ensure the directory exists so it can actually be watched (a fresh
+    // install with no run ever recorded yet has neither it nor the file),
+    // then watch whichever of the file/directory currently exists --
+    // onStatsFileChanged() re-adds the file path once it first appears.
+    {
+        const QString statsPath = TestStatistics::historyFilePath();
+        const QString statsDir = QFileInfo(statsPath).absolutePath();
+        QDir().mkpath(statsDir);
+        m_statsFileWatcher = new QFileSystemWatcher(this);
+        m_statsFileWatcher->addPath(statsDir);
+        if (QFileInfo::exists(statsPath))
+            m_statsFileWatcher->addPath(statsPath);
+        connect(m_statsFileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onStatsFileChanged);
+        connect(m_statsFileWatcher, &QFileSystemWatcher::directoryChanged, this,
+                &MainWindow::onStatsFileChanged);
+    }
+
     buildUi();
     onRefreshTargets();
 
@@ -268,11 +287,33 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // the primary way to stop a run either way.
     m_globalHotkey = new GlobalHotkey(this);
     connect(m_globalHotkey, &GlobalHotkey::triggered, this, &MainWindow::onGlobalEmergencyStop);
-    appendLog(m_globalHotkey->start()
+    const bool hotkeyRegistered = m_globalHotkey->start();
+    appendLog(hotkeyRegistered
                   ? I18n::t(QStringLiteral("グローバル緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を登録しました。"))
                   : I18n::t(QStringLiteral("グローバル緊急停止ホットキーを登録できませんでした"
                                     "（他のアプリが同じ組み合わせを使用している可能性があります）。"
                                     "「■ 停止」ボタンは通常どおり使用できます。")));
+    // 不具合報告H-17(低): this constructor runs *before* main.cpp ever calls
+    // runHeadless() (which is what sets m_headlessMode true), so
+    // appendLog() above -- whose stdout mirror is gated on m_headlessMode
+    // -- cannot yet know whether this is a headless invocation, and the
+    // message above is silently lost for one if registration failed (most
+    // notably: a GUI-mode ETG instance already running on the same X
+    // display holds this exact global key grab exclusively, so a second,
+    // headless instance's own registration always fails here -- leaving no
+    // indication anywhere in that headless process's own output that its
+    // emergency-stop hotkey simply does nothing). Print directly to
+    // stderr, unconditionally, for the failure case specifically -- the
+    // one case where not knowing this actually matters for how to stop a
+    // run in progress.
+    if (!hotkeyRegistered) {
+        std::fputs("EnduranceTestGUI: could not register the global emergency-stop hotkey "
+                   "(Ctrl+Alt+Shift+Esc) -- another instance or app on this display may already be "
+                   "using it. The emergency-stop hotkey will not work for this run; use the \"stop\" "
+                   "control instead.\n",
+                   stderr);
+        std::fflush(stderr);
+    }
 
     // 不具合報告2.5: a brand-new, never-touched session also has nothing
     // to lose -- see m_lastSavedPresetJson's own comment. Captured last,
@@ -405,18 +446,30 @@ void MainWindow::buildUi()
                                 "自動的に次を開始し、指定回数繰り返します。\n"
                                 "⟳連続実行: 常にこの回数だけ、対象アプリの終了→再起動→実行を繰り返します。")));
     controlsRow->addWidget(m_batchRunCountSpin);
-    m_batchProgressLabel = new QLabel(central);
-    controlsRow->addWidget(m_batchProgressLabel);
     bottomLayout->addLayout(controlsRow);
 
     auto *progressRow = new QHBoxLayout;
     m_resourceUsageLabel = new QLabel(QString(), central);
     m_elapsedLabel = new QLabel(I18n::t(QStringLiteral("経過: 0秒")), central);
     m_iterationLabel = new QLabel(I18n::t(QStringLiteral("実行回数: 0")), central);
+    // 不具合報告H-18(低、E-18の残り): previously lived in controlsRow,
+    // sharing a row with m_statusLabel (the stop-reason label E-18 made
+    // word-wrap to avoid growing the window's minimum width). At a narrow
+    // window width (820px in the original repro), that row's buttons +
+    // "連続実行回数:" spinbox + this label's own (non-wrapping) text left
+    // m_statusLabel squeezed down to its word-wrap minimum (one word per
+    // line) while this row's actual height stayed fixed at whatever a
+    // single line needed -- a long stop reason then had its lower lines
+    // clipped for as long as this label had any text (disappearing again,
+    // with the status message fully readable, the moment it went back to
+    // empty between continuous-run cycles). Moved to progressRow instead,
+    // which has no word-wrapping neighbor to squeeze.
+    m_batchProgressLabel = new QLabel(central);
     progressRow->addWidget(m_resourceUsageLabel);
     progressRow->addStretch();
     progressRow->addWidget(m_elapsedLabel);
     progressRow->addWidget(m_iterationLabel);
+    progressRow->addWidget(m_batchProgressLabel);
     bottomLayout->addLayout(progressRow);
 
     // このテスト設定について、これまでに記録された全実行結果からの
@@ -3824,6 +3877,19 @@ void MainWindow::onLoadInjectionWorkerStderr(qint64 pid, const QString &text)
     // when the requested memory amount couldn't actually be reached, which
     // previously went nowhere this log would ever show it.
     appendLog(I18n::t(QStringLiteral("負荷注入プロセス(pid=%1)からの出力: %2")).arg(pid).arg(text));
+}
+
+void MainWindow::onStatsFileChanged(const QString &path)
+{
+    // 不具合報告H-19(低): see m_statsFileWatcher's own comment. Some
+    // QFileSystemWatcher backends (inotify included, under certain rename/
+    // replace patterns) silently drop a file from the watch list once it
+    // fires -- re-adding it each time (a no-op if it's already watched, and
+    // harmless if the file doesn't exist right this instant) keeps this
+    // working for every subsequent write, not just the first.
+    if (QFileInfo::exists(path) && !m_statsFileWatcher->files().contains(path))
+        m_statsFileWatcher->addPath(path);
+    updateStatisticsDisplay();
 }
 
 void MainWindow::refreshLoadInjectionStatusLabel()

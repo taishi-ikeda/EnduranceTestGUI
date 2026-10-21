@@ -105,6 +105,35 @@ bool isDockOrDesktopWindow(Display *dpy, Window w)
     return isDockOrDesktop;
 }
 
+// 不具合報告H-20(低): collectWindows() below only ever excluded a window
+// whose _NET_WM_PID equals *this exact process's own* pid (getpid()) --
+// not any OTHER process also running the same EnduranceTestGUI binary. A
+// second ETG instance's own main window is, to that check, indistinguishable
+// from any other unrelated application's window, so it appeared in ①'s own
+// target-selection list right alongside genuine test targets and could even
+// end up the default selection -- starting a run that way has ETG operate
+// another ETG instance instead of an intended target. Comparing each
+// window's owning process's executable (via /proc/<pid>/exe, which the
+// kernel always resolves to the actual binary a process is running,
+// regardless of what window title/WM_CLASS that process's Qt happens to
+// set) against this process's own (/proc/self/exe) reliably identifies
+// "another instance of this exact program" without depending on anything
+// the other process's own UI could change. Returns false (don't exclude)
+// for anything this can't positively confirm -- a window this can't read
+// `/proc/<pid>/exe` for (the process already exited, or a permissions
+// quirk) is left to whatever other checks already apply to it, not
+// silently hidden.
+bool isAnotherInstanceOfThisApp(qint64 pid)
+{
+    if (pid <= 0)
+        return false;
+    const QString selfExe = QFileInfo(QStringLiteral("/proc/self/exe")).canonicalFilePath();
+    if (selfExe.isEmpty())
+        return false;
+    const QString otherExe = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).canonicalFilePath();
+    return !otherExe.isEmpty() && otherExe == selfExe;
+}
+
 qint64 windowPid(Display *dpy, Window w, Atom netWmPid)
 {
     Atom type;
@@ -278,6 +307,9 @@ QList<WindowInfo> collectWindows()
 
         qint64 pid = netWmPid != None ? windowPid(dpy, w, netWmPid) : -1;
         if (pid == selfPid)
+            continue;
+        // 不具合報告H-20(低): see isAnotherInstanceOfThisApp()'s own comment.
+        if (isAnotherInstanceOfThisApp(pid))
             continue;
         if (isDockOrDesktopWindow(dpy, w))
             continue;
@@ -1870,7 +1902,34 @@ QList<EditableFieldInfo> findEditableObjectsInRegion(qint64 expectedOwnerPid, co
     }
     unrefAll(apps);
     g_object_unref(desktop);
-    return result;
+    // 不具合報告H-15(低): collectEditableObjectsRecursive() adds a match for
+    // a usable editable node AND still recurses into its children -- some
+    // toolkits expose the exact same editable widget at more than one node
+    // in the accessibility tree (e.g. a composite field whose embedded text
+    // entry reports the identical ATSPI_STATE_EDITABLE/bounds as its own
+    // parent), which previously meant the same physical on-screen field
+    // could appear twice in `result` with identical bounds. The caller
+    // (RandomActionEngine::runOneAction()'s ActionKind::FuzzAllFieldsInRegion
+    // handling) then clicked and fuzzed that one field twice -- each with
+    // its own independently chosen random string -- with the second visibly
+    // overwriting the first, while a real, distinct field elsewhere in the
+    // same region could be left untouched entirely (identical-looking final
+    // content across fields was one way this surfaced). Collapsing
+    // identical-bounds entries down to one keeps each physical field
+    // represented exactly once.
+    QList<EditableFieldInfo> deduped;
+    for (const EditableFieldInfo &field : result) {
+        bool alreadyPresent = false;
+        for (const EditableFieldInfo &existing : deduped) {
+            if (existing.bounds == field.bounds) {
+                alreadyPresent = true;
+                break;
+            }
+        }
+        if (!alreadyPresent)
+            deduped.append(field);
+    }
+    return deduped;
 }
 
 QStringList listOpenContextMenuItems(qint64 /*expectedOwnerPid*/)

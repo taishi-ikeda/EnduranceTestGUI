@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileSystemWatcher>
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QMap>
@@ -213,6 +214,11 @@ private slots:
     // 不具合報告H-12(中): see LoadInjector::workerStderrOutput()'s own
     // comment.
     void onLoadInjectionWorkerStderr(qint64 pid, const QString &text);
+    // 不具合報告H-19(低): see m_statsFileWatcher's own comment. Handles both
+    // QFileSystemWatcher::fileChanged and ::directoryChanged (the latter so
+    // the very first write, before the file existed to watch directly, is
+    // also caught).
+    void onStatsFileChanged(const QString &path);
     // SPEC.md 追加実装依頼「負荷モニター」: manual export of m_loadMonitor's
     // current buffer (CSV + a PNG snapshot of the chart), independent of the
     // automatic save onRunSummaryReady() already does on an abnormal stop --
@@ -1118,6 +1124,16 @@ private:
     // Identifies "this exact ①②③ setup" (see TestStatistics::computeFingerprint);
     // kept up to date by updateStatisticsDisplay().
     QString m_currentConfigFingerprint;
+    // 不具合報告H-19(低、E-19の注記): changeEvent()'s own ActivationChange
+    // trigger (right above) only fires when this window regains activation
+    // -- it never fires at all if this window stays active the entire
+    // time another, separate `--run`/連続実行 process records a result
+    // (e.g. a cron-triggered headless invocation running while this GUI is
+    // simply left open and focused). Watches TestStatistics::
+    // historyFilePath() (crash_stats.jsonl) directly so a write from any
+    // process updates this window's own summary regardless of its own
+    // activation state. See onStatsFileChanged().
+    QFileSystemWatcher *m_statsFileWatcher = nullptr;
     // stepIndex -> crash count for m_currentConfigFingerprint, and the total
     // run count they're a fraction of -- cached here (rather than re-queried
     // per paint) so describeStep() can append a "⚠ クラッシュ N/M回" badge

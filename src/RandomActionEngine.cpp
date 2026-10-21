@@ -514,7 +514,9 @@ void RandomActionEngine::resume()
         if (m_holdDragWindowMinimized)
             m_holdDragWindowMinimized = false;
         m_holdDragRestorePending = false;
+        m_holdDragRestoreGraceUntilMs = 0;
         const QPoint resumePt = holdDragPathPoint(int(m_holdDragTickCount));
+        m_holdDragCurrentPt = resumePt;
         // 不具合報告D9(重大): previously pressed the button back down at
         // resumePt unconditionally -- if some other window had moved over
         // that point while paused (or the target itself had moved/closed),
@@ -1723,6 +1725,14 @@ constexpr int kMaxFuzzStringInactiveStrikes = 10;
 // comment).
 constexpr int kMaxHoldDragInactiveStrikes = 10;
 
+// 不具合報告H-02(高): how long after a window-op overlay's restore is
+// confirmed viewable (queryWindowBounds() succeeds) to still tolerate a
+// windowPidAtPoint() mismatch as "window manager still catching up" rather
+// than a real safety violation. Real hardware observed the mismatch
+// clearing itself roughly 130-140ms after restore; this is a deliberately
+// generous multiple of that.
+constexpr qint64 kHoldDragRestoreGraceMs = 500;
+
 // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.4: after this many
 // consecutive ticks of ActionKind::FuzzString or ActionKind::
 // FuzzAllFieldsInRegion finding no fuzz string candidate to use at all
@@ -2325,8 +2335,17 @@ void RandomActionEngine::continueHoldDrag()
         return;
     }
 
-    ++m_holdDragTickCount;
-    const QPoint nextPt = holdDragPathPoint(int(m_holdDragTickCount));
+    // 不具合報告H-03(中、E-02の残り): see m_holdDragNextMoveMs's own comment
+    // -- only actually advance the path / move the pointer on ticks where
+    // this gesture's own movement interval says it's due, not on every
+    // tick (which could be driven far more often by another overlay's
+    // much shorter due time).
+    const bool moveDue = elapsed >= m_holdDragNextMoveMs;
+    if (moveDue) {
+        ++m_holdDragTickCount;
+        m_holdDragCurrentPt = holdDragPathPoint(int(m_holdDragTickCount));
+    }
+    const QPoint nextPt = m_holdDragCurrentPt;
 
     // 不具合報告E-05(高、D9の修正が不完全): confirm the window-op overlay's
     // own restore (below) has actually taken effect before trusting it --
@@ -2344,6 +2363,11 @@ void RandomActionEngine::continueHoldDrag()
         if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, ignoredBounds)) {
             m_holdDragWindowMinimized = false;
             m_holdDragRestorePending = false;
+            // 不具合報告H-02: see m_holdDragRestoreGraceUntilMs's own
+            // comment -- queryWindowBounds() succeeding here only means the
+            // window is viewable again, not that the window manager has
+            // finished re-stacking/re-decorating it yet.
+            m_holdDragRestoreGraceUntilMs = elapsed + kHoldDragRestoreGraceMs;
         }
     }
 
@@ -2363,6 +2387,17 @@ void RandomActionEngine::continueHoldDrag()
     // while minimized, since there is no target-window point to move it to.
     if (!m_holdDragWindowMinimized &&
         PlatformAutomation::windowPidAtPoint(nextPt) != m_config.targetPid) {
+        // 不具合報告H-02(高): within kHoldDragRestoreGraceMs of a window-op
+        // overlay restore being confirmed viewable, the window manager may
+        // still be mid-restack/re-decorate, so a mismatch here doesn't yet
+        // mean "about to touch an unrelated window" -- retry instead of
+        // stopping, same as the keyboard-focus check's own bounded-retry
+        // below, rather than the normal zero-tolerance rule for this check.
+        if (elapsed < m_holdDragRestoreGraceUntilMs) {
+            const int remainingRetry = int(m_holdDragDurationMs - elapsed);
+            m_timer.start(qMax(1, qMin(m_holdDragStepIntervalMinMs, remainingRetry)));
+            return;
+        }
         doStop(I18n::t(QStringLiteral("対象アプリ以外のウィンドウを操作しそうになったため、安全のためテストを停止しました")),
                /*isAnomaly=*/true);
         return;
@@ -2392,8 +2427,14 @@ void RandomActionEngine::continueHoldDrag()
     // the window-op overlay has the target minimized -- see the safety-net
     // comment above. The window-op overlay itself (further below) still
     // runs every tick regardless, so the scheduled restore still happens.
-    if (!m_holdDragWindowMinimized) {
+    if (!m_holdDragWindowMinimized && moveDue) {
         PlatformAutomation::moveMouseWhileHeld(nextPt, m_holdDragButton);
+    }
+    if (moveDue) {
+        const int mLo = m_holdDragStepIntervalMinMs;
+        const int mHi = m_holdDragStepIntervalMaxMs;
+        const int moveInterval = mLo + (mHi > mLo ? int(m_rng.bounded(quint32(mHi - mLo + 1))) : 0);
+        m_holdDragNextMoveMs = elapsed + moveInterval;
     }
 
     // Wheel overlay (SPEC.md 想定パターンP3/P6、「0ms連打」「連打と完全停止
@@ -2453,7 +2494,28 @@ void RandomActionEngine::continueHoldDrag()
                     const int pHi = qMax(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
                                           m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
                     const int pause = qMax(0, pLo + (pHi > pLo ? int(m_rng.bounded(quint32(pHi - pLo + 1))) : 0));
-                    m_holdDragWheelPhaseEndMs = elapsed + pause;
+                    // 不具合報告H-03(中、E-02の残り): notchIntervalMin/MaxMs
+                    // is otherwise only ever consulted *between* notches of
+                    // the same burst (just above) -- a burst that always
+                    // contains exactly 1 notch (notchesPerBurstMin ==
+                    // notchesPerBurstMax == 1) never takes that branch, so
+                    // with pauseBetweenBurstsMs set to 0 the notch interval
+                    // setting had no effect on the resulting notch rate at
+                    // all (confirmed on real hardware: configuring 30ms or
+                    // 200ms produced the same ~5-6ms median either way).
+                    // Sampling the same interval here too and taking
+                    // whichever of it/pause is longer keeps a real "0ms
+                    // burst-to-burst, pause only" configuration (pause >>
+                    // interval) unaffected, while giving a steady single-
+                    // notch stream the notch interval's pacing it would
+                    // otherwise never get.
+                    const int niLo = qMin(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                          m_holdDragWheelOverlay.notchIntervalMaxMs);
+                    const int niHi = qMax(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                          m_holdDragWheelOverlay.notchIntervalMaxMs);
+                    const int notchIntervalSample =
+                        qMax(0, niLo + (niHi > niLo ? int(m_rng.bounded(quint32(niHi - niLo + 1))) : 0));
+                    m_holdDragWheelPhaseEndMs = elapsed + qMax(pause, notchIntervalSample);
                     m_holdDragWheelBurstActive = false;
                 }
             }
@@ -2532,16 +2594,19 @@ void RandomActionEngine::continueHoldDrag()
             elapsed + qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
     }
 
-    const int lo = m_holdDragStepIntervalMinMs;
-    const int hi = m_holdDragStepIntervalMaxMs;
-    const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
     // 不具合報告E-02(重大): the next tick must land no later than whichever
     // overlay has the soonest due time, or that overlay's own configured
-    // interval is meaningless -- previously this only ever used the
-    // mouse-movement step interval above, so any overlay interval shorter
-    // than that had no effect (see m_holdDragWheelNotchesRemaining's own
-    // comment for the wheel overlay's especially broken case).
-    int nextTickMs = interval;
+    // interval is meaningless -- previously this only ever used a freshly
+    // sampled mouse-movement interval here (not m_holdDragNextMoveMs's own
+    // actual due time), so any overlay interval shorter than that had no
+    // effect (see m_holdDragWheelNotchesRemaining's own comment for the
+    // wheel overlay's especially broken case) -- and 不具合報告H-03(中): that
+    // same fresh-every-tick sampling, combined with this function also
+    // moving the pointer unconditionally on every tick regardless of this
+    // value, was what let a much-shorter overlay due time silently drag the
+    // actual movement cadence along with it. Starting from
+    // m_holdDragNextMoveMs's real remaining time instead fixes both.
+    int nextTickMs = qMax(0, int(m_holdDragNextMoveMs - elapsed));
     if (!m_holdDragWindowMinimized && m_holdDragWheelOverlay.enabled) {
         const qint64 wheelDueMs = m_holdDragWheelBurstActive ? m_holdDragNextNotchMs : m_holdDragWheelPhaseEndMs;
         nextTickMs = qMin(nextTickMs, qMax(0, int(wheelDueMs - elapsed)));
@@ -2568,6 +2633,7 @@ void RandomActionEngine::finishHoldDrag(bool counts)
         m_holdDragWindowMinimized = false;
     }
     m_holdDragRestorePending = false;
+    m_holdDragRestoreGraceUntilMs = 0;
     PlatformAutomation::mouseButtonUp(m_holdDragButton);
     if (m_holdDragModifiers != Qt::NoModifier)
         PlatformAutomation::modifierKeysUp(m_holdDragModifiers);
@@ -3201,6 +3267,8 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_holdDragElapsedMs = 0;
         m_holdDragElapsed.start();
         m_holdDragTickCount = 0;
+        m_holdDragNextMoveMs = 0;  // due on the very first continueHoldDrag() tick
+        m_holdDragCurrentPt = m_holdDragStartPoint;
         m_holdDragInactiveStrikes = 0;
         m_holdDragPathShape = params.holdDragPathShape;
         const int extLo = qMin(params.holdDragPathExtentMinPx, params.holdDragPathExtentMaxPx);
@@ -3240,6 +3308,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_holdDragNextWindowOpMs = 0;
         m_holdDragWindowMinimized = false;
         m_holdDragRestorePending = false;
+        m_holdDragRestoreGraceUntilMs = 0;
 
         emit logMessage(I18n::t(QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"))
                             .arg(stepLabel)

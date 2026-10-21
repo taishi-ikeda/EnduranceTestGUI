@@ -3349,10 +3349,26 @@ bool MainWindow::beginRun(bool interactive)
     // the m_fullLogFile field comment for why this exists separately from
     // m_logView's capped display. Opened fresh per run; closed in
     // onEngineFinished().
-    if (fullLogOpened)
+    // 不具合報告H-04(中、E-16の修正による回帰): this `if`/`else` pair must
+    // stay directly attached to `fullLogOpened` -- the hold-drag warning
+    // block below has its own, separate `if (!m_headlessMode)` with no
+    // `else` of its own, so the two must never be merged into one
+    // if/else-if/else chain (that is exactly what regressed here: the
+    // "開けませんでした" line below used to be this `if`'s own `else`, but
+    // E-16's fix inserted the hold-drag warning's `if (!m_headlessMode)`
+    // directly in between with no braces, so the compiler bound this
+    // `else` to THAT `if` instead -- a classic dangling-else mistake.
+    // Headless runs (where !m_headlessMode is always false) then hit this
+    // `else` unconditionally on every run regardless of whether the log
+    // file actually opened, printing a false "開けませんでした" even on
+    // success and burying any real failure in CI log monitoring).
+    if (fullLogOpened) {
         appendLog(I18n::t(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
                                   "切れることなく全操作を記録): %1"))
                        .arg(logPath));
+    } else {
+        appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
+    }
 
     // 不具合報告D13(中)/E-16(低、D29と同じ理由でこの行自体もrunログに残って
     // いなかった): while a long-press drag is held, the pointer is
@@ -3385,8 +3401,6 @@ bool MainWindow::beginRun(bool interactive)
                                         "緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を使ってください。")));
         }
     }
-    else
-        appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
 
     // SPEC.md 追加実装依頼「負荷注入モード」: auto-link, only when enabled
     // and the link checkbox is checked, and only if nothing is already

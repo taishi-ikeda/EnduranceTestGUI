@@ -1528,9 +1528,23 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
     // and wrongly filter out the one genuine candidate -- scopedApplications()
     // already excludes ETG's own node unconditionally, so that candidate
     // would then always get skipped and nothing would ever be found).
+    //
+    // 不具合報告H-01(高): when expectedOwnerPid <= 0 (the target itself has
+    // no _NET_WM_PID, e.g. xmessage), scopedApplications() does not filter
+    // by pid at all -- so even when exactly one *other* AT-SPI application
+    // happens to be registered (an already-running GUI instance of ETG
+    // itself included: a different process, so not excluded by
+    // scopedApplications()'s own getpid() check), `apps.size() > 1` was
+    // false and the topmost-pid check below was skipped entirely, letting
+    // that one unrelated application win by default even though it isn't
+    // actually the topmost window at (x,y). The topmost check must also run
+    // whenever expectedOwnerPid <= 0, regardless of how many candidates
+    // scopedApplications() happens to return, since none of the pid<=0
+    // case's candidates have been vetted by pid at all.
     const QList<AtspiAccessible *> apps = scopedApplications(desktop, expectedOwnerPid);
+    const bool mustCheckTopmost = apps.size() > 1 || expectedOwnerPid <= 0;
     qint64 topmostPid = -1;
-    if (apps.size() > 1) {
+    if (mustCheckTopmost) {
         // windowPidAtPoint() already determines exactly which real OS
         // window is topmost at (x,y) via the X11 stacking order --
         // excludeSelf=true since ETG's own windows are never a candidate in
@@ -1539,7 +1553,7 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
         // produce a false negative, never a correct match.
         topmostPid = windowPidAtPoint(QPoint(x, y), /*excludeSelf=*/true);
         if (topmostPid <= 0) {
-            // 不具合報告E-10: couldn't positively determine which real
+            // 不具合報告E-10/H-01: couldn't positively determine which real
             // window is topmost at this point (it may simply lack
             // _NET_WM_PID, like xmessage) -- fail closed rather than fall
             // back to "whichever of several candidate applications happens
@@ -1553,7 +1567,7 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
     for (AtspiAccessible *app : apps) {
         if (hit)
             continue;
-        if (apps.size() > 1 && qint64(atspi_accessible_get_process_id(app, nullptr)) != topmostPid)
+        if (mustCheckTopmost && qint64(atspi_accessible_get_process_id(app, nullptr)) != topmostPid)
             continue;
         const gint windowCount = atspi_accessible_get_child_count(app, nullptr);
         for (gint w = 0; w < windowCount && !hit; ++w) {
@@ -1796,6 +1810,21 @@ AccessibleObjectHandle findAccessibleObject(qint64 expectedOwnerPid, const QStri
     // 不具合報告2.1/2.3(重大): scoped via scopedApplications() -- see its
     // comment -- instead of walking the full, unscoped desktop tree.
     AccessibleObjectHandle handle;
+
+    // 不具合報告H-01(高): unlike hitTestDesktop() (point-based: can fall
+    // back on windowPidAtPoint() to confirm which real window is topmost
+    // at a given screen point), this is a whole-tree role+name search with
+    // no single point to check topmost-ness against. When expectedOwnerPid
+    // <= 0 (the target has no _NET_WM_PID, e.g. xmessage),
+    // scopedApplications() lets through every *other* AT-SPI application
+    // unfiltered -- on real hardware this resolved a "名前付きオブジェクト"
+    // lookup to a same-named button in another already-running GUI
+    // instance of ETG itself rather than the pid-less target, and even
+    // executed its default action. There is no safe way to disambiguate
+    // here, so fail closed rather than resolve to an unverified candidate.
+    if (expectedOwnerPid <= 0)
+        return handle;
+
     AtspiAccessible *desktop = getUsableDesktop();
     if (!desktop)
         return handle;

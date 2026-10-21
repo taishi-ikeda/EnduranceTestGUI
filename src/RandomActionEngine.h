@@ -778,6 +778,23 @@ private:
     // Running offset from m_holdDragStartPoint for HoldDragPathShape::
     // RandomWalk only -- see holdDragPathPoint()'s own comment.
     QPoint m_holdDragCurrentOffset;
+    // 不具合報告H-03(中、E-02の残り): continueHoldDrag() ticks are scheduled
+    // to land whenever the soonest-due overlay (wheel/key/window-op) needs
+    // to act, which can be much more often than this gesture's own
+    // configured movement interval (m_holdDragStepIntervalMin/MaxMs) --
+    // most notably a 1-notch wheel burst, whose own "due" time is
+    // essentially immediate once its interval setting (misleadingly, see
+    // kHoldDragRestoreGraceMs's neighboring wheel-overlay comment) has no
+    // effect on it. Movement (and the path step/RandomWalk-offset advance
+    // that comes with it, via holdDragPathPoint()) must only actually
+    // happen on ticks where this due time has passed, not on every tick --
+    // otherwise the pointer visibly moves at whatever the busiest overlay's
+    // cadence is instead of the configured one. m_holdDragCurrentPt caches
+    // the last point actually computed/moved to, reused by the safety
+    // checks and the wheel overlay's own scroll() target on ticks where a
+    // fresh move isn't due.
+    qint64 m_holdDragNextMoveMs = 0;
+    QPoint m_holdDragCurrentPt;
     // Consecutive ticks in a row the safety checks below have found a
     // problem that might resolve itself within a tick or two (the target
     // process losing OS input focus, while modifier keys are held or the
@@ -841,6 +858,16 @@ private:
     // request, let the very next tick's safety check see the still-hidden
     // window as "not the target" and wrongly stop the run.
     bool m_holdDragRestorePending = false;
+    // 不具合報告H-02(高、E-05の修正が不完全): queryWindowBounds() reporting
+    // the window viewable again (above) does not mean the window manager
+    // has finished re-stacking/re-decorating it -- on real hardware the
+    // very next tick's windowPidAtPoint() check still saw some other
+    // window as topmost for roughly 130-140ms after that, wrongly stopping
+    // the run as "about to touch an unrelated window". Set to the elapsed
+    // time (continueHoldDrag()'s own `elapsed`) until which a topmost-pid
+    // mismatch is retried instead of treated as a real safety violation;
+    // 0 means no grace period is active.
+    qint64 m_holdDragRestoreGraceUntilMs = 0;
 
     // State for an in-progress ActionKind::FuzzString (SPEC.md 10
     // "ファジングテスト対応") whose delivery mode resolved to KeyByKey --

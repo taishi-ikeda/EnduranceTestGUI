@@ -1170,6 +1170,24 @@ QWidget *MainWindow::buildTargetColumn(QWidget *parent)
                                 "ダイアログのボタン押下・名前付きオブジェクトを使うステップは"
                                 "（設定したままでも）実行時にスキップされます。")));
     timingForm->addRow(QString(), m_disableAccessibilityCheck);
+    // 不具合報告H-06(中): this checkbox's value was previously only ever
+    // applied to the process-global accessibility-disabled flag
+    // (PlatformAutomation::setAccessibilityFeaturesDisabled()) once, at the
+    // start of RandomActionEngine::start() -- so turning it on, running
+    // once, then turning it back off left the global flag stuck disabled
+    // until the next "▶開始" (which re-applies config.
+    // disableAccessibilityFeatures, now false, at its own start). In the
+    // meantime, anything that queries the AT-SPI desktop directly rather
+    // than through a run -- most notably the "オブジェクトを指定..."
+    // picker's own getUsableDesktop() call -- silently got nothing back,
+    // with no indication why. Applying it immediately on every toggle (in
+    // addition to the run-start call, which still matters for a headless
+    // `--run` with no GUI checkbox to toggle at all) keeps the global flag
+    // in sync with this checkbox at all times, including right after
+    // loading a preset (loadPresetFromPath() sets this checkbox via
+    // setChecked(), which emits toggled() like any other change).
+    connect(m_disableAccessibilityCheck, &QCheckBox::toggled, this,
+            [](bool checked) { PlatformAutomation::setAccessibilityFeaturesDisabled(checked); });
 
     // SPEC.md 追加実装依頼「負荷注入モード」: own top-level group (not
     // nested inside m_timingGroup) so it stays enabled, and the manual
@@ -4019,7 +4037,14 @@ void MainWindow::checkHeadlessCompletion()
     // 不具合報告E-14(高): a termination signal counts as an abnormal end for
     // this process's own exit code the same way a crash/setup error already
     // does -- see m_terminatingViaSignal's own comment.
-    QCoreApplication::exit((m_headlessAnomalyOccurred || m_headlessSetupError || m_terminatingViaSignal) ? 1 : 0);
+    const int exitCode = (m_headlessAnomalyOccurred || m_headlessSetupError || m_terminatingViaSignal) ? 1 : 0;
+    // 不具合報告H-07(高): recorded in addition to (not instead of) the
+    // QCoreApplication::exit() call below -- see headlessExitRequested()'s
+    // own comment for why main.cpp needs this when this function is reached
+    // synchronously, before app.exec() has started.
+    m_headlessExitRequested = true;
+    m_headlessExitCode = exitCode;
+    QCoreApplication::exit(exitCode);
 }
 
 void MainWindow::waitForTargetThenContinueBatch()
@@ -4117,6 +4142,7 @@ void MainWindow::killTargetThenRelaunchForContinuousRun()
                                           "（再起動を検知したら自動的に次の実行を開始します）")));
     }
     m_continuousWaitPhase = ContinuousWaitPhase::WaitingForAppear;
+    m_continuousWaitAppearTimer.start();
     m_batchWaitTimer->start();
 }
 
@@ -4183,15 +4209,38 @@ void MainWindow::onBatchWaitTick()
                                               "起動します")));
             launchTargetAppFromConfiguredCommand();
             m_continuousWaitPhase = ContinuousWaitPhase::WaitingForAppear;
+            m_continuousWaitAppearTimer.start();
             return;
         }
         // WaitingForAppear
-        if (!tryReselectLastTarget())
+        if (tryReselectLastTarget()) {
+            m_batchWaitTimer->stop();
+            m_continuousWaitPhase = ContinuousWaitPhase::None;
+            appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
+            startRunAfterLaunchWait(/*interactive=*/false);
             return;
-        m_batchWaitTimer->stop();
-        m_continuousWaitPhase = ContinuousWaitPhase::None;
-        appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を検知しました。次の実行を開始します")));
-        startRunAfterLaunchWait(/*interactive=*/false);
+        }
+        // 不具合報告H-08(高): see m_continuousWaitAppearTimer's own comment
+        // -- give up rather than wait forever if the target still hasn't
+        // been found (most notably when targetAppNameHint is empty, which
+        // tryReselectLastTarget() can never resolve no matter how long this
+        // waits).
+        constexpr qint64 kAppearAbortAfterMs = 60000;
+        if (m_continuousWaitAppearTimer.elapsed() >= kAppearAbortAfterMs) {
+            appendLog(I18n::t(QStringLiteral("連続実行: 対象アプリの起動を%1秒待っても検知できないため、"
+                                              "連続実行を異常終了します"))
+                           .arg(kAppearAbortAfterMs / 1000));
+            m_batchWaitTimer->stop();
+            m_continuousWaitPhase = ContinuousWaitPhase::None;
+            m_batchModeActive = false;
+            m_continuousRunMode = false;
+            m_batchProgressLabel->setText(QString());
+            setControlsEnabled(true);
+            if (m_fullLogFile.isOpen())
+                m_fullLogFile.close();
+            m_headlessSetupError = true;
+            checkHeadlessCompletion();
+        }
         return;
     }
 

@@ -216,6 +216,15 @@ int main(int argc, char *argv[])
         // MainWindow::runHeadless()'s own comment.
         if (!window.runHeadless(parser.value(runOption), repeatCount))
             return 1;
+        // 不具合報告H-07(高): a config/setup error reached synchronously
+        // within runHeadless() itself (before this function's own
+        // app.exec() call below ever runs) already called
+        // QCoreApplication::exit() -- which has no effect with no event
+        // loop yet running to quit, silently losing the exit request and
+        // leaving app.exec() below run forever with nothing left to do.
+        // See MainWindow::headlessExitRequested()'s own comment.
+        if (window.headlessExitRequested())
+            return window.headlessExitCode();
         return app.exec();
     }
 

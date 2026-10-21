@@ -278,6 +278,20 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
                                 "ここで自由に編集できます（例:末尾の変化する部分を取り除く）。")));
     namePatternRow->addWidget(m_objectNamePatternEdit, 1);
     objectLayout->addLayout(namePatternRow);
+    // 不具合報告H-09(中、E-11の修正による回帰): m_lastAutoObjectNamePattern
+    // (a QString member) default-constructs to "", and nothing set it to
+    // match the field's own starting text above when reopening an
+    // *existing* region for editing. onNameMatchModeChanged()'s "only
+    // overwrite the field while it still holds exactly the last
+    // auto-derived value" guard then saw an empty field (as soon as the
+    // user cleared it) and an empty m_lastAutoObjectNamePattern as equal --
+    // "still the auto value, safe to replace" -- and silently refilled it
+    // from m_objectTarget.name on the next 照合方法 change, even though the
+    // user had just deliberately cleared it. Seeding this to the field's
+    // actual starting value keeps that guard correct for a freshly opened
+    // existing region exactly as it already was for a freshly picked one
+    // (onPickObject() sets both together, below).
+    m_lastAutoObjectNamePattern = initial.objectTarget.name;
     connect(m_nameMatchModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &NamedRegionEditorDialog::onNameMatchModeChanged);
 

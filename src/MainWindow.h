@@ -82,6 +82,21 @@ public:
     // instance -- same requirement "⟳ 連続実行" already has).
     bool runHeadless(const QString &presetPath, int repeatCount);
 
+    // 不具合報告H-07(高): true once checkHeadlessCompletion() has already
+    // called QCoreApplication::exit() -- which, called before the Qt event
+    // loop (QCoreApplication::exec()) has actually started, has no effect
+    // at all (there is no running loop for it to quit), silently losing the
+    // exit request. This can happen when a config/setup error is hit
+    // synchronously within runHeadless()'s own call (e.g. the PID-less
+    // "use the existing window" headless path can reach beginRun() -- and
+    // a config error in it -- before main.cpp ever reaches its own
+    // app.exec() call). main.cpp checks this right after runHeadless()
+    // returns and, if set, returns headlessExitCode() directly instead of
+    // calling app.exec() (which would otherwise just run forever with
+    // nothing left to do, until an external timeout killed the process).
+    bool headlessExitRequested() const { return m_headlessExitRequested; }
+    int headlessExitCode() const { return m_headlessExitCode; }
+
     // 不具合報告D4(重大): called from main.cpp's termination-signal handling
     // (see its own comment) once the signal has been safely relayed onto
     // the Qt event loop via a self-pipe -- never from inside the raw
@@ -973,6 +988,9 @@ private:
     // invocation's --repeat loop is enough to make the whole invocation's
     // exit code non-zero.
     bool m_headlessSetupError = false;
+    // 不具合報告H-07(高): see headlessExitRequested()'s own comment.
+    bool m_headlessExitRequested = false;
+    int m_headlessExitCode = 0;
     // Polls (via onBatchWaitTick()) for the target app to reappear between
     // batch runs when it isn't already back the instant one finishes --
     // whether the user relaunches it by hand or m_targetLaunchCommandEdit's
@@ -1024,6 +1042,20 @@ private:
     // per cycle instead of resending it every tick while waiting the extra
     // grace period out.
     bool m_continuousWaitForceKilled = false;
+    // 不具合報告H-08(高)「対象名のヒントが空のプリセットで--runすると、
+    // 対象を起動した後、永久に待ち続ける」: WaitingForAppear had no time
+    // limit at all, mirroring WaitingForExit's own pre-1.3-fix bug.
+    // tryReselectLastTarget() (what onBatchWaitTick() polls every tick to
+    // notice the relaunched target) unconditionally returns false whenever
+    // m_lastTargetAppName is empty (e.g. a preset saved while no target was
+    // selected, so targetAppNameHint is "") -- a condition no amount of
+    // waiting can ever resolve, regardless of whether the launched target
+    // app itself comes up fine. Starting by killTargetThenRelaunchForContinuousRun()
+    // and by onBatchWaitTick()'s own WaitingForExit->WaitingForAppear
+    // transition, the moment either enters WaitingForAppear; read each tick
+    // to abort (same shape as WaitingForExit's own kAbortAfterMs) if the
+    // target still hasn't been found after kAppearAbortAfterMs.
+    QElapsedTimer m_continuousWaitAppearTimer;
     // True from onStart() (when its "対象ツールの起動から開始する" checkbox
     // is checked) until the launched target is detected and the run
     // actually begins -- tells onBatchWaitTick() that the run about to

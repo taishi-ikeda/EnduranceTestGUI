@@ -554,6 +554,20 @@ void RandomActionEngine::resume()
             PlatformAutomation::activateProcess(m_config.targetPid);
         m_timer.start(kFuzzStringKeyIntervalMs);
     } else {
+        // 不具合報告H-05(中、以前の版から存在): between discrete actions
+        // (nothing mid-flight -- no TypingBurst/HoldDrag/FuzzString/
+        // FuzzAllFieldsInRegion/待機 in progress -- the common case for an
+        // ordinary single-shot action like Key or a non-continuous
+        // FuzzString send), resume() previously called scheduleNext()
+        // directly with no focus reclaim at all, unlike every branch
+        // above. Clicking this application's own StopPanel "‖ 一時停止"/
+        // "▶ 再開" necessarily gives THIS window OS-level input focus
+        // first, so the very next scheduled action's own active-process
+        // safety check then saw ETG itself as active instead of the
+        // target and stopped the run with "対象アプリがアクティブでない
+        // ため…".
+        if (m_config.keepTargetActive)
+            PlatformAutomation::activateProcess(m_config.targetPid);
         scheduleNext();
     }
     m_resourceTimer.start();

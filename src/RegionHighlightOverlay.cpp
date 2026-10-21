@@ -169,13 +169,33 @@ protected:
                 // newlines), capped so it never tries to extend past this
                 // screen's own right edge.
                 const QFontMetrics fm(labelFont);
-                const QStringList lines = label.split(QLatin1Char('\n'));
-                int textWidth = 0;
-                for (const QString &line : lines)
-                    textWidth = qMax(textWidth, fm.horizontalAdvance(line));
-                const int maxWidth = qMax(160, width() - first.left());
-                const int bgWidth = qMin(qMax(160, qMax(first.width(), textWidth + 16)), maxWidth);
-                const int bgHeight = fm.lineSpacing() * lines.size() + 8;
+                // 不具合報告H-10(中、D-16の修正の副作用): previously sized
+                // bgWidth to fit the label's own full single-line text
+                // width (capped only by this screen's own right edge), so
+                // Qt::TextWordWrap's wrap basis ended up at least as wide
+                // as the unwrapped text itself and therefore never actually
+                // wrapped -- a long label (several referencing step names,
+                // or a named region with a deliberately long name) just
+                // kept extending rightward instead, far enough on real
+                // hardware to land on top of (and be overdrawn by) a
+                // completely different region's own label several hundred
+                // pixels away. Capping the usable width to a small,
+                // text-length-independent constant and measuring the
+                // actual wrapped bounding rect at that width (via
+                // QFontMetrics::boundingRect() with Qt::TextWordWrap, which
+                // -- unlike the previous per-'\n'-line split -- correctly
+                // accounts for wrap-induced line breaks too, not just
+                // literal ones) fixes both: a long label now wraps
+                // vertically within a bounded width instead of growing
+                // horizontally without limit, and no longer reaches into a
+                // neighboring region's own label.
+                constexpr int kLabelMaxWidthPx = 320;
+                const int maxWidth = qMax(160, qMin(kLabelMaxWidthPx, width() - first.left()));
+                const int bgWidth = qMax(160, qMin(maxWidth, first.width()));
+                const QRect wrapRect(0, 0, qMax(1, bgWidth - 16), 100000);
+                const QRect textBounds =
+                    fm.boundingRect(wrapRect, Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, label);
+                const int bgHeight = textBounds.height() + 8;
                 const QRect labelBg(first.left(), qMax(0, first.top() - bgHeight - 2), bgWidth, bgHeight);
                 p.fillRect(labelBg, QColor(0, 150, 0, 220));
                 p.setPen(Qt::white);

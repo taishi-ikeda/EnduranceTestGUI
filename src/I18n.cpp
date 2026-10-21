@@ -314,6 +314,7 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("ユーザーにより停止されました"), QStringLiteral("Stopped by the user")},
         {QStringLiteral("%1を受信したため、テストを中断して終了します"),
          QStringLiteral("Received %1, interrupting the test and exiting")},
+        {QStringLiteral("%1を受信したため中断されました"), QStringLiteral("Interrupted by receiving %1")},
         {QStringLiteral("ランダム"), QStringLiteral("Random")},
         {QStringLiteral("リサイズ"), QStringLiteral("Resize")},
         {QStringLiteral("リソース使用状況: メモリ %1 MB, CPU %2%"), QStringLiteral("Resource usage: Memory %1 MB, CPU %2%")},
@@ -571,6 +572,8 @@ const QHash<QString, QString> &translationTable()
                 "追加してください（デフォルトまたはそのステップの専用設定）。"), QStringLiteral("%1 has menu item selection (by item name) enabled. Please add at least one candidate item name (in the default or that step's own settings).")},
         {QStringLiteral("メニュー項目選択（番号指定）を有効にした%1があります。候補の番号を最低1つ"
                 "追加してください（デフォルトまたはそのステップの専用設定）。"), QStringLiteral("%1 has menu item selection (by position) enabled. Please add at least one candidate position (in the default or that step's own settings).")},
+        {QStringLiteral("「ダイアログのボタンを押す」を有効にした%1があります。候補ボタン名を"
+            "最低1つ追加してください（デフォルトまたはそのステップの専用設定）。"), QStringLiteral("%1 has \"Press a dialog button\" enabled. Please add at least one candidate button name (in the default or that step's own settings).")},
         {QStringLiteral("他のアプリケーションを操作するための権限が許可されていません。"
                                               "設定を許可してから、もう一度「開始」を押してください。"), QStringLiteral("Permission to control other applications has not been granted. Please grant it in settings, then press \"Start\" again.")},
         {QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
@@ -1374,6 +1377,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("負荷注入を開始できません"), QStringLiteral("Can't Start Load Injection")},
         {QStringLiteral("負荷注入プロセス(pid=%1)が予期せず終了しました（終了コード%2）"),
          QStringLiteral("Load injection process (pid=%1) exited unexpectedly (exit code %2)")},
+        {QStringLiteral("負荷注入プロセス(pid=%1)からの出力: %2"),
+         QStringLiteral("Output from load injection process (pid=%1): %2")},
         {QStringLiteral("loadstress_helper実行ファイルが見つかりません（%1 に配置されている必要があります）"),
          QStringLiteral("Couldn't find the loadstress_helper executable (it must be placed in %1)")},
         {QStringLiteral("負荷注入プロセスの起動に失敗しました: %1"),

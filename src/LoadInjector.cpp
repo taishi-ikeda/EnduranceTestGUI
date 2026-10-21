@@ -109,6 +109,8 @@ bool LoadInjector::start(int processCount, int memoryMbPerProcess, MemoryLoadMod
                                                                           : QStringLiteral("single")});
         connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
                 &LoadInjector::onWorkerFinished);
+        // 不具合報告H-12: see workerStderrOutput()'s own comment.
+        connect(process, &QProcess::readyReadStandardError, this, &LoadInjector::onWorkerStderrReady);
         process->start();
         if (!process->waitForStarted(3000)) {
             errorMessage =
@@ -155,4 +157,21 @@ void LoadInjector::onWorkerFinished(int exitCode, QProcess::ExitStatus exitStatu
     if (process)
         process->deleteLater();
     emit workerExitedUnexpectedly(pid, exitCode);
+}
+
+void LoadInjector::onWorkerStderrReady()
+{
+    // 不具合報告H-12: relayed as it arrives (not batched until exit) --
+    // see workerStderrOutput()'s own comment for why that matters for a
+    // worker that keeps running afterward.
+    auto *process = qobject_cast<QProcess *>(sender());
+    if (!process)
+        return;
+    const QByteArray raw = process->readAllStandardError();
+    if (raw.isEmpty())
+        return;
+    const QString text = QString::fromUtf8(raw).trimmed();
+    if (text.isEmpty())
+        return;
+    emit workerStderrOutput(process->processId(), text);
 }

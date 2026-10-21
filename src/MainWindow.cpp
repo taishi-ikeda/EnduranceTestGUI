@@ -198,6 +198,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_loadInjector = new LoadInjector(this);
     connect(m_loadInjector, &LoadInjector::workerExitedUnexpectedly, this,
             &MainWindow::onLoadInjectionWorkerExited);
+    // 不具合報告H-12(中): relay a worker's own stderr (most notably
+    // loadstress_helper's own "fragmented allocation stopped after N of
+    // the requested M MB" diagnostic) into this run's own log -- see
+    // LoadInjector::workerStderrOutput()'s own comment.
+    connect(m_loadInjector, &LoadInjector::workerStderrOutput, this,
+            &MainWindow::onLoadInjectionWorkerStderr);
 
     // SPEC.md 追加実装依頼「負荷モニター」: constructed unconditionally (it's
     // a cheap QObject whose QTimer is never started unless its enable
@@ -1880,9 +1886,29 @@ void MainWindow::onRestoreWindowSize()
         appendLog(I18n::t(QStringLiteral("ウィンドウサイズの変更に失敗しました。")));
         return;
     }
-    appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
-                  .arg(m_savedWindowSize.width())
-                  .arg(m_savedWindowSize.height()));
+    // 不具合報告H-14(低、3.5の修正の残り): resizeWindow() returning true only
+    // means the request itself could be sent -- it says nothing about
+    // whether the window manager/target app actually honored it (e.g. the
+    // target enforces its own minimum size larger than what was
+    // requested). applySavedWindowGeometryIfEnabled() (連続実行の自動適用
+    // 経路) already re-queries and compares actual vs. requested size for
+    // exactly this reason -- this button's own handler had never been
+    // given the same treatment, so it kept reporting success unconditionally.
+    QThread::msleep(150);
+    QRect actualBounds;
+    if (PlatformAutomation::queryWindowBounds(target.windowId, target.pid, actualBounds) &&
+        actualBounds.size() == m_savedWindowSize) {
+        appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズに変更しました: 幅%1 高さ%2"))
+                      .arg(m_savedWindowSize.width())
+                      .arg(m_savedWindowSize.height()));
+    } else {
+        appendLog(I18n::t(QStringLiteral("保存したウィンドウサイズへの変更に失敗しました"
+                                          "（要求: 幅%1 高さ%2、実際: 幅%3 高さ%4）"))
+                      .arg(m_savedWindowSize.width())
+                      .arg(m_savedWindowSize.height())
+                      .arg(actualBounds.width())
+                      .arg(actualBounds.height()));
+    }
 }
 
 void MainWindow::refreshSavedWindowSizeLabel()
@@ -1933,9 +1959,24 @@ void MainWindow::onRestoreWindowPos()
         appendLog(I18n::t(QStringLiteral("ウィンドウ位置の変更に失敗しました。")));
         return;
     }
-    appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
-                  .arg(m_savedWindowPos.x())
-                  .arg(m_savedWindowPos.y()));
+    // 不具合報告H-14(低、3.5の修正の残り): see onRestoreWindowSize()'s
+    // identical comment -- moveWindow() returning true doesn't mean the
+    // window actually ended up there.
+    QThread::msleep(150);
+    QRect actualBounds;
+    if (PlatformAutomation::queryWindowBounds(target.windowId, target.pid, actualBounds) &&
+        actualBounds.topLeft() == m_savedWindowPos) {
+        appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置に変更しました: x%1 y%2"))
+                      .arg(m_savedWindowPos.x())
+                      .arg(m_savedWindowPos.y()));
+    } else {
+        appendLog(I18n::t(QStringLiteral("保存したウィンドウ位置への変更に失敗しました"
+                                          "（要求: x%1 y%2、実際: x%3 y%4）"))
+                      .arg(m_savedWindowPos.x())
+                      .arg(m_savedWindowPos.y())
+                      .arg(actualBounds.topLeft().x())
+                      .arg(actualBounds.topLeft().y()));
+    }
 }
 
 void MainWindow::refreshSavedWindowPosLabel()
@@ -2911,6 +2952,23 @@ bool MainWindow::validateStepActionConfig(const RegionStep &step, const QString 
             return false;
         }
     }
+    // 不具合報告H-11(低): a DialogButtonPress member with no candidate
+    // button names configured (easy to end up with via a hand-edited/
+    // JSON-constructed preset, where RandomActionEngine::runOneAction()'s
+    // own "ダイアログのボタン名が設定されていません"
+    // ActionOutcome::SkippedNoCount isn't counted toward any stop
+    // condition) previously went undetected until runtime, where it then
+    // repeated that same uncounted skip roughly every 350ms indefinitely
+    // -- the task/step it belongs to never advances and the run never
+    // naturally ends on its own. Same "catch a certain-to-spin
+    // configuration before the run starts" treatment as every other empty-
+    // candidate-list check above.
+    if (step.enableDialogButtonPress && params.dialogButtonNames.isEmpty()) {
+        errorMessage = I18n::t(QStringLiteral("「ダイアログのボタンを押す」を有効にした%1があります。候補ボタン名を"
+            "最低1つ追加してください（デフォルトまたはそのステップの専用設定）。"))
+                           .arg(stepLabel);
+        return false;
+    }
     return true;
 }
 
@@ -3598,15 +3656,31 @@ void MainWindow::releaseHeldInputForTermination(int signum)
 #endif
     appendLog(I18n::t(QStringLiteral("%1を受信したため、テストを中断して終了します")).arg(signalName));
 
+    // 不具合報告H-13(低): this used to deliberately skip onStop()'s other
+    // bookkeeping (batch-mode flags) on the theory that none of it matters
+    // since the process is about to exit regardless -- but
+    // m_engine->stop() below synchronously cascades all the way through to
+    // onEngineFinished() -> continueBatchIfNeeded(), which (seeing
+    // m_batchModeActive still true) logged "連続実行が完了しました（N/N回）"
+    // even though a batch/連続実行 run interrupted by a signal is not a
+    // completed one. Clearing these first makes continueBatchIfNeeded()
+    // take its "not an active batch" branch instead, same as onStop()'s own
+    // manual-stop handling.
+    m_batchModeActive = false;
+    m_continuousRunMode = false;
+    m_continuousWaitPhase = ContinuousWaitPhase::None;
+    m_launchBeforeStartPending = false;
+
     // 不具合報告D4(重大): engine->stop() itself no-ops if nothing is running
     // (RandomActionEngine::stop()'s own guard), and does nothing at all if
     // m_engine was never constructed -- both fine, there is then nothing
-    // held to release. Deliberately does none of onStop()'s other
-    // bookkeeping (batch-mode flags, log messages) since the process is
-    // about to exit regardless; only the physical-input release performed
+    // held to release. Only the physical-input release performed
     // unconditionally inside RandomActionEngine::doStop() matters here.
+    // 不具合報告H-13(低): pass an explicit reason instead of the default
+    // "ユーザーにより停止されました" -- this wasn't the user pressing
+    // "■停止", it's this process being asked to terminate.
     if (m_engine)
-        m_engine->stop();
+        m_engine->stop(I18n::t(QStringLiteral("%1を受信したため中断されました")).arg(signalName));
 }
 
 void MainWindow::onContinuousRun()
@@ -3741,6 +3815,15 @@ void MainWindow::onLoadInjectionWorkerExited(qint64 pid, int exitCode)
                    .arg(pid)
                    .arg(exitCode));
     refreshLoadInjectionStatusLabel();
+}
+
+void MainWindow::onLoadInjectionWorkerStderr(qint64 pid, const QString &text)
+{
+    // 不具合報告H-12(中): see LoadInjector::workerStderrOutput()'s own
+    // comment -- most notably surfaces loadstress_helper's own diagnostic
+    // when the requested memory amount couldn't actually be reached, which
+    // previously went nowhere this log would ever show it.
+    appendLog(I18n::t(QStringLiteral("負荷注入プロセス(pid=%1)からの出力: %2")).arg(pid).arg(text));
 }
 
 void MainWindow::refreshLoadInjectionStatusLabel()

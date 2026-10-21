@@ -198,18 +198,34 @@ int main(int argc, char **argv)
             const std::size_t mappingSize = chunkSize + kGuardPageBytes;
             void *mapped = ::mmap(nullptr, mappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (mapped == MAP_FAILED) {
-                // 不具合報告F-03: report, rather than silently stop here --
-                // this process's own stderr isn't currently surfaced into
-                // EnduranceTestGUI's own log (LoadInjector only watches for
-                // this process exiting, not anything it prints), but this
-                // is still strictly better than no record at all existing
-                // anywhere (e.g. for a user who redirects/checks this
-                // process's own output directly, or a future enhancement
-                // that does relay it).
+                // 不具合報告H-12(中、F-03の残り): this process's own stderr
+                // is now relayed into EnduranceTestGUI's own log by
+                // LoadInjector (see its own comment) -- no longer "nobody
+                // reads this" the way this comment used to say.
+                //
+                // 不具合報告H-12: the previous wording ("likely hit this
+                // process's vm.max_map_count") asserted a single cause
+                // whenever mmap() failed here, but ENOMEM -- the error this
+                // actually hits in practice -- is documented (man 2 mmap)
+                // to mean *either* "no memory is available" (real memory
+                // exhaustion, e.g. an RSS/address-space limit like
+                // `prlimit --as` or the host's own available RAM) *or*
+                // "the process's maximum number of mappings would have
+                // been exceeded" (vm.max_map_count) -- the same errno
+                // covers both, and this process has no way to tell which
+                // one actually happened from errno alone. State both
+                // possibilities rather than asserting the wrong one.
+                const char *causeHint =
+                    errno == ENOMEM
+                        ? "errno=ENOMEM: either this process ran out of available memory/address space "
+                          "(e.g. a ulimit/prlimit --as limit, or the host's own RAM+swap), or it hit "
+                          "this process's vm.max_map_count mapping-count limit -- this process cannot "
+                          "tell which from errno alone"
+                        : "unexpected errno for mmap()";
                 std::fprintf(stderr,
                              "loadstress_helper: fragmented allocation stopped after %zu of the requested "
-                             "%zu MB (mmap failed, errno=%d) -- likely hit this process's vm.max_map_count\n",
-                             (byteCount - remaining) / (1024 * 1024), byteCount / (1024 * 1024), errno);
+                             "%zu MB (mmap failed, errno=%d: %s)\n",
+                             (byteCount - remaining) / (1024 * 1024), byteCount / (1024 * 1024), errno, causeHint);
                 break;
             }
             // 不具合報告F-02: the guard is this mapping's own trailing

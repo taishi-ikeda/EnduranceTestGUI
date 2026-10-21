@@ -70,8 +70,22 @@ signals:
     // target-app anomaly.
     void workerExitedUnexpectedly(qint64 pid, int exitCode);
 
+    // 不具合報告H-12(中、F-03の残り): a worker's own stderr (most notably
+    // loadstress_helper's "fragmented allocation stopped after N of the
+    // requested M MB" diagnostic -- see LoadStressHelperMain.cpp's own
+    // comment) previously went nowhere anyone would see it short of
+    // redirecting/inspecting that child process's output directly --
+    // EnduranceTestGUI's own log never reflected that the requested amount
+    // wasn't actually reached. Relayed as each worker writes to its own
+    // stderr (not just once at exit -- a worker that hits this keeps
+    // running afterward with whatever it did manage to allocate, so
+    // waiting for exit would mean never surfacing it at all for a normal,
+    // still-running injection).
+    void workerStderrOutput(qint64 pid, const QString &text);
+
 private slots:
     void onWorkerFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void onWorkerStderrReady();
 
 private:
     // Absolute path to the loadstress_helper executable, expected to sit

@@ -137,7 +137,14 @@ public:
     // region. Safe to call with an empty list (headless mode: no panel is
     // ever shown, so there's nothing to exclude).
     void setSelfExcludedScreenRects(const QList<QRect> &rects) { m_selfExcludedScreenRects = rects; }
-    void stop();
+    // 不具合報告H-13(低): `reason`, when non-empty, overrides the default
+    // "ユーザーにより停止されました" summary -- used by MainWindow's signal-
+    // termination path, where that default text (and the batch/連続実行
+    // completion message continueBatchIfNeeded() would otherwise also log
+    // right after, since stop() alone has no way to know the caller is
+    // about to tear the whole process down rather than genuinely finish a
+    // batch) is misleading about what actually happened.
+    void stop(const QString &reason = QString());
     void pause();
     void resume();
     bool isRunning() const { return m_running; }

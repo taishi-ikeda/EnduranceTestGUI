@@ -403,11 +403,11 @@ void RandomActionEngine::startSetupOnly(const TestConfig &config)
     m_setupOnlyRun = true;
 }
 
-void RandomActionEngine::stop()
+void RandomActionEngine::stop(const QString &reason)
 {
     if (!m_running)
         return;
-    doStop(I18n::t(QStringLiteral("ユーザーにより停止されました")));
+    doStop(reason.isEmpty() ? I18n::t(QStringLiteral("ユーザーにより停止されました")) : reason);
 }
 
 void RandomActionEngine::pause()

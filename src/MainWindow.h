@@ -210,6 +210,9 @@ private slots:
     // it is.
     void onToggleLoadInjectionManual();
     void onLoadInjectionWorkerExited(qint64 pid, int exitCode);
+    // 不具合報告H-12(中): see LoadInjector::workerStderrOutput()'s own
+    // comment.
+    void onLoadInjectionWorkerStderr(qint64 pid, const QString &text);
     // SPEC.md 追加実装依頼「負荷モニター」: manual export of m_loadMonitor's
     // current buffer (CSV + a PNG snapshot of the chart), independent of the
     // automatic save onRunSummaryReady() already does on an abnormal stop --

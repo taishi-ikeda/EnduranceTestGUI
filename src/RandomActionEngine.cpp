@@ -513,6 +513,7 @@ void RandomActionEngine::resume()
         // never press the button back down while it's still hidden.
         if (m_holdDragWindowMinimized)
             m_holdDragWindowMinimized = false;
+        m_holdDragRestorePending = false;
         const QPoint resumePt = holdDragPathPoint(int(m_holdDragTickCount));
         // 不具合報告D9(重大): previously pressed the button back down at
         // resumePt unconditionally -- if some other window had moved over
@@ -1335,7 +1336,11 @@ QPoint RandomActionEngine::pickRandomPoint(const QList<QRect> &includeRegions,
 
         const QPoint pt(chosen->x() + int(m_rng.bounded(quint32(qMax(1, chosen->width())))),
                          chosen->y() + int(m_rng.bounded(quint32(qMax(1, chosen->height())))));
-        if (!pointExcluded(pt, excludeRegions)) {
+        // 不具合報告E-08(中、D2の修正の副作用): ETG's own always-on-top
+        // stop/pause panel is excluded the same way a configured exclude
+        // region is -- see m_selfExcludedScreenRects' own comment for why
+        // this engine needs to know about it at all.
+        if (!pointExcluded(pt, excludeRegions) && !pointExcluded(pt, m_selfExcludedScreenRects)) {
             ok = true;
             return pt;
         }
@@ -1592,8 +1597,22 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
             if (!candidates.isEmpty()) {
                 const QString chosen = candidates[int(m_rng.bounded(quint32(candidates.size())))];
                 selected = PlatformAutomation::clickContextMenuItem(chosen, m_config.targetPid);
-                if (selected)
+                if (selected) {
                     desc += I18n::t(QStringLiteral(" → メニュー項目「%1」を選択")).arg(chosen);
+                } else {
+                    // 不具合報告E-13(高): previously silent -- clickContextMenuItem()
+                    // itself already correctly declines to report success
+                    // it can't back up (不具合報告D8: most notably, on a Qt
+                    // target, whose QMenu has no AT-SPI exposure at all, the
+                    // keyboard type-ahead fallback can only send a
+                    // candidate's first character when that character has
+                    // an actual keysym/keycode mapping -- never true for
+                    // non-Latin-1 text, Japanese item names included), but
+                    // nothing here then told the user it had actually failed
+                    // instead of simply finding no configured candidate to
+                    // try at all.
+                    emit logMessage(I18n::t(QStringLiteral("メニュー項目「%1」を選べませんでした")).arg(chosen));
+                }
             }
         } else {  // ByIndex
             QList<int> validIndices;
@@ -1608,8 +1627,14 @@ bool RandomActionEngine::handlePossibleContextMenu(const ActionParams &params, Q
             if (!validIndices.isEmpty()) {
                 const int chosen = validIndices[int(m_rng.bounded(quint32(validIndices.size())))];
                 selected = PlatformAutomation::clickContextMenuItemAt(chosen, m_config.targetPid);
-                if (selected)
+                if (selected) {
                     desc += I18n::t(QStringLiteral(" → メニュー項目(上から%1番目)を選択")).arg(chosen + 1);
+                } else {
+                    // 不具合報告E-13(高、ByName側と同じ理由): see its own
+                    // comment just above.
+                    emit logMessage(
+                        I18n::t(QStringLiteral("メニュー項目(上から%1番目)を選べませんでした")).arg(chosen + 1));
+                }
             }
         }
     }
@@ -2072,8 +2097,18 @@ void RandomActionEngine::performTaskAction(const RegionStep &task)
     // keypress, racing with/overriding the button's own effect. Grant a
     // short grace period so that check stays suppressed for a few ticks
     // instead -- see m_popupDialogCloseGraceStrikes's own comment.
-    if (member.targetsPopupDialog && kind == ActionKind::DialogButtonPress)
-        m_popupDialogCloseGraceStrikes = kMaxPopupDialogCloseGraceStrikes;
+    //
+    // 不具合報告E-07(高、D10の修正が不完全): only *decided* here, not
+    // applied yet -- a DialogButtonPress member is typically the LAST member
+    // of its task (the common, natural way to structure one: open a dialog,
+    // then press its button), in which case advanceToNextStep() below
+    // (which resets m_popupDialogCloseGraceStrikes to 0, same as
+    // m_currentTaskMemberIndex) runs in this exact same tick. Setting the
+    // grace counter before that call, as this used to, had it wiped out
+    // again before the very next tick could ever consume it -- applying it
+    // afterward instead (see below) means it survives regardless of whether
+    // this task just happened to finish.
+    const bool grantPopupDialogCloseGrace = member.targetsPopupDialog && kind == ActionKind::DialogButtonPress;
 
     ++m_currentTaskMemberIndex;
     if (m_currentTaskMemberIndex >= task.taskMembers.size()) {
@@ -2081,6 +2116,8 @@ void RandomActionEngine::performTaskAction(const RegionStep &task)
         emit iterationCountChanged(m_iterationCount);
         advanceToNextStep();  // resets m_currentTaskMemberIndex back to 0
     }
+    if (grantPopupDialogCloseGrace)
+        m_popupDialogCloseGraceStrikes = kMaxPopupDialogCloseGraceStrikes;
 
     scheduleNext();
 }
@@ -2291,6 +2328,25 @@ void RandomActionEngine::continueHoldDrag()
     ++m_holdDragTickCount;
     const QPoint nextPt = holdDragPathPoint(int(m_holdDragTickCount));
 
+    // 不具合報告E-05(高、D9の修正が不完全): confirm the window-op overlay's
+    // own restore (below) has actually taken effect before trusting it --
+    // see m_holdDragRestorePending's own comment for why the window-op
+    // branch itself no longer clears m_holdDragWindowMinimized directly.
+    // Runs every tick (not just the overlay's own, typically much coarser,
+    // due interval) via the same cheap, non-blocking queryWindowBounds()
+    // check ManualRecorder::start() polls with after its own
+    // activateProcess() call, so the safety check/mouse movement below
+    // resume as soon as the window manager has actually remapped the
+    // window -- usually within one or two ticks -- rather than only once
+    // the overlay happens to reconsider its own next operation.
+    if (m_holdDragRestorePending) {
+        QRect ignoredBounds;
+        if (PlatformAutomation::queryWindowBounds(m_config.targetWindowId, m_config.targetPid, ignoredBounds)) {
+            m_holdDragWindowMinimized = false;
+            m_holdDragRestorePending = false;
+        }
+    }
+
     // Safety net, same zero-tolerance rule as Click/Drag's own one-shot
     // check (SPEC.md 6.7): the pointer is about to move onto `nextPt`
     // while a real mouse button is held, so a mismatch here means it's
@@ -2342,32 +2398,39 @@ void RandomActionEngine::continueHoldDrag()
 
     // Wheel overlay (SPEC.md 想定パターンP3/P6、「0ms連打」「連打と完全停止
     // の繰り返し」): alternates burst/pause phases -- see
-    // HoldDragWheelOverlay's own comment. A phase transition out of a pause
-    // becomes due on this tick but the burst itself fires on the *next*
-    // due tick (at most one extra m_holdDragStepIntervalMs of delay) --
-    // simpler than restructuring this into a loop, and well within this
-    // feature's own timing granularity.
-    if (!m_holdDragWindowMinimized && m_holdDragWheelOverlay.enabled &&
-        elapsed >= m_holdDragWheelPhaseEndMs) {
+    // HoldDragWheelOverlay's own comment.
+    //
+    // 不具合報告E-02(重大、D14の修正が不完全): sends at most one notch per
+    // continueHoldDrag() tick instead of looping through a whole burst with
+    // a synchronous QThread::msleep() between each notch -- that blocked
+    // this engine's own GUI/event-loop thread for the entire burst (the
+    // emergency-stop hotkey, stop panel, and this gesture's own duration/
+    // safety checks all stop responding for as long as that takes -- up to
+    // the settings screen's own notch-count/interval upper bounds, on the
+    // order of hours), and never ran at all for a 1-notch burst (the loop's
+    // "gap between notches" step needs at least 2 notches to ever execute),
+    // so that configuration's own notch-interval setting had no effect.
+    // m_holdDragWheelNotchesRemaining/m_holdDragNextNotchMs track a burst's
+    // progress across ticks the same way m_holdDragNextKeyMs already does
+    // for the key overlay; see continueHoldDrag()'s own end-of-function
+    // scheduling for how the next tick is timed to land exactly when the
+    // next notch (or phase change) is actually due, instead of only at the
+    // coarser, unrelated mouse-movement step interval.
+    if (!m_holdDragWindowMinimized && m_holdDragWheelOverlay.enabled) {
         if (m_holdDragWheelBurstActive) {
-            const int nLo = qMin(m_holdDragWheelOverlay.notchesPerBurstMin,
-                                  m_holdDragWheelOverlay.notchesPerBurstMax);
-            const int nHi = qMax(m_holdDragWheelOverlay.notchesPerBurstMin,
-                                  m_holdDragWheelOverlay.notchesPerBurstMax);
-            const int notches = qMax(1, nLo + (nHi > nLo ? int(m_rng.bounded(quint32(nHi - nLo + 1))) : 0));
-            // 不具合報告D14(中): notchIntervalMin/MaxMs was previously read
-            // nowhere at all -- every notch in a burst fired back-to-back
-            // with no pacing between them, regardless of this setting.
-            // A short synchronous sleep between notches (not after the
-            // last one, so it doesn't eat into the following pause phase)
-            // mirrors the same brief same-tick pacing other single-tick
-            // multi-step actions in this file already use (e.g.
-            // sendNamedKey()'s press/release gap).
-            const int iLo = qMin(m_holdDragWheelOverlay.notchIntervalMinMs,
-                                  m_holdDragWheelOverlay.notchIntervalMaxMs);
-            const int iHi = qMax(m_holdDragWheelOverlay.notchIntervalMinMs,
-                                  m_holdDragWheelOverlay.notchIntervalMaxMs);
-            for (int i = 0; i < notches; ++i) {
+            if (m_holdDragWheelNotchesRemaining == 0) {
+                // Just entered this burst (gesture start, or right after
+                // the preceding pause phase ended) -- roll how many notches
+                // it will contain and fire the first one immediately.
+                const int nLo = qMin(m_holdDragWheelOverlay.notchesPerBurstMin,
+                                      m_holdDragWheelOverlay.notchesPerBurstMax);
+                const int nHi = qMax(m_holdDragWheelOverlay.notchesPerBurstMin,
+                                      m_holdDragWheelOverlay.notchesPerBurstMax);
+                m_holdDragWheelNotchesRemaining =
+                    qMax(1, nLo + (nHi > nLo ? int(m_rng.bounded(quint32(nHi - nLo + 1))) : 0));
+                m_holdDragNextNotchMs = elapsed;
+            }
+            if (elapsed >= m_holdDragNextNotchMs) {
                 // 不具合報告D26(低): previously always scrolled the same
                 // direction (dy=+1), so a target whose wheel binding is
                 // zoom (SPEC.md 想定パターンP6) pinned itself at its zoom
@@ -2376,22 +2439,27 @@ void RandomActionEngine::continueHoldDrag()
                 // direction per notch keeps it moving throughout.
                 const int dy = (m_rng.bounded(2u) == 0) ? 1 : -1;
                 PlatformAutomation::scroll(nextPt, 0, dy);
-                if (i + 1 < notches) {
-                    const int notchGap = qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
-                    if (notchGap > 0)
-                        QThread::msleep(notchGap);
+                --m_holdDragWheelNotchesRemaining;
+                if (m_holdDragWheelNotchesRemaining > 0) {
+                    const int iLo = qMin(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                          m_holdDragWheelOverlay.notchIntervalMaxMs);
+                    const int iHi = qMax(m_holdDragWheelOverlay.notchIntervalMinMs,
+                                          m_holdDragWheelOverlay.notchIntervalMaxMs);
+                    m_holdDragNextNotchMs =
+                        elapsed + qMax(0, iLo + (iHi > iLo ? int(m_rng.bounded(quint32(iHi - iLo + 1))) : 0));
+                } else {
+                    const int pLo = qMin(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
+                                          m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
+                    const int pHi = qMax(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
+                                          m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
+                    const int pause = qMax(0, pLo + (pHi > pLo ? int(m_rng.bounded(quint32(pHi - pLo + 1))) : 0));
+                    m_holdDragWheelPhaseEndMs = elapsed + pause;
+                    m_holdDragWheelBurstActive = false;
                 }
             }
-            const int pLo = qMin(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
-                                  m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
-            const int pHi = qMax(m_holdDragWheelOverlay.pauseBetweenBurstsMinMs,
-                                  m_holdDragWheelOverlay.pauseBetweenBurstsMaxMs);
-            const int pause = qMax(0, pLo + (pHi > pLo ? int(m_rng.bounded(quint32(pHi - pLo + 1))) : 0));
-            m_holdDragWheelPhaseEndMs = elapsed + pause;
-            m_holdDragWheelBurstActive = false;
-        } else {
+        } else if (elapsed >= m_holdDragWheelPhaseEndMs) {
             m_holdDragWheelBurstActive = true;
-            m_holdDragWheelPhaseEndMs = elapsed;
+            m_holdDragWheelNotchesRemaining = 0;  // roll a fresh count on the next tick, above
         }
     }
 
@@ -2443,9 +2511,19 @@ void RandomActionEngine::continueHoldDrag()
             } else if (!m_holdDragWindowMinimized) {
                 PlatformAutomation::minimizeWindow(m_config.targetPid, m_config.targetWindowId);
                 m_holdDragWindowMinimized = true;
-            } else {
+            } else if (!m_holdDragRestorePending) {
+                // 不具合報告E-05(高): activateProcess() here only *requests*
+                // the restore -- the window manager remapping/repositioning
+                // the window happens on its own schedule, not synchronously
+                // with this call (same underlying race as 不具合報告E-04's
+                // preflight check). Clearing m_holdDragWindowMinimized right
+                // here, before that has actually happened, let the very next
+                // tick's safety check see the still-not-yet-remapped window
+                // as "not the target" and stop the run. Left true (so the
+                // safety check/mouse movement stay skipped) until the
+                // top-of-function check above actually confirms it.
                 PlatformAutomation::activateProcess(m_config.targetPid);
-                m_holdDragWindowMinimized = false;
+                m_holdDragRestorePending = true;
             }
         }
         const int iLo = qMin(m_holdDragWindowOpOverlay.intervalMinMs, m_holdDragWindowOpOverlay.intervalMaxMs);
@@ -2457,8 +2535,23 @@ void RandomActionEngine::continueHoldDrag()
     const int lo = m_holdDragStepIntervalMinMs;
     const int hi = m_holdDragStepIntervalMaxMs;
     const int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
+    // 不具合報告E-02(重大): the next tick must land no later than whichever
+    // overlay has the soonest due time, or that overlay's own configured
+    // interval is meaningless -- previously this only ever used the
+    // mouse-movement step interval above, so any overlay interval shorter
+    // than that had no effect (see m_holdDragWheelNotchesRemaining's own
+    // comment for the wheel overlay's especially broken case).
+    int nextTickMs = interval;
+    if (!m_holdDragWindowMinimized && m_holdDragWheelOverlay.enabled) {
+        const qint64 wheelDueMs = m_holdDragWheelBurstActive ? m_holdDragNextNotchMs : m_holdDragWheelPhaseEndMs;
+        nextTickMs = qMin(nextTickMs, qMax(0, int(wheelDueMs - elapsed)));
+    }
+    if (m_holdDragKeyOverlay.enabled && m_holdDragModifiers == Qt::NoModifier)
+        nextTickMs = qMin(nextTickMs, qMax(0, int(m_holdDragNextKeyMs - elapsed)));
+    if (m_holdDragWindowOpOverlay.enabled)
+        nextTickMs = qMin(nextTickMs, qMax(0, int(m_holdDragNextWindowOpMs - elapsed)));
     const int remaining = int(m_holdDragDurationMs - elapsed);
-    m_timer.start(qMax(1, qMin(interval, remaining)));
+    m_timer.start(qMax(1, qMin(nextTickMs, remaining)));
 }
 
 void RandomActionEngine::finishHoldDrag(bool counts)
@@ -2474,6 +2567,7 @@ void RandomActionEngine::finishHoldDrag(bool counts)
         PlatformAutomation::activateProcess(m_config.targetPid);
         m_holdDragWindowMinimized = false;
     }
+    m_holdDragRestorePending = false;
     PlatformAutomation::mouseButtonUp(m_holdDragButton);
     if (m_holdDragModifiers != Qt::NoModifier)
         PlatformAutomation::modifierKeysUp(m_holdDragModifiers);
@@ -3122,6 +3216,7 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_holdDragWheelOverlay = params.holdDragWheelOverlay;
         m_holdDragWheelBurstActive = true;
         m_holdDragWheelPhaseEndMs = 0;  // due on the very first continueHoldDrag() tick
+        m_holdDragWheelNotchesRemaining = 0;  // roll a fresh count on that first tick
 
         m_holdDragKeyOverlay = params.holdDragKeyOverlay;
         m_holdDragNextKeyMs = 0;
@@ -3144,10 +3239,22 @@ RandomActionEngine::ActionOutcome RandomActionEngine::runOneAction(const RegionS
         m_holdDragWindowOpOverlay = params.holdDragWindowOpOverlay;
         m_holdDragNextWindowOpMs = 0;
         m_holdDragWindowMinimized = false;
+        m_holdDragRestorePending = false;
 
         emit logMessage(I18n::t(QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"))
                             .arg(stepLabel)
                             .arg(duration));
+        // 不具合報告E-15(低): D-05がこのスタイル（修飾キー保持）ではキー
+        // 重ね打ち自体を一切発火させないようにした際、その安全側の判断を
+        // 設定画面にもログにも出していなかった。無言で0回送られるのを見て
+        // 「設定が反映されていない／壊れている」と誤解されないよう、ここで
+        // 一度だけ明示する。
+        if (m_holdDragKeyOverlay.enabled && m_holdDragModifiers != Qt::NoModifier) {
+            emit logMessage(I18n::t(QStringLiteral("%1: 修飾キーを保持する長押しのため、ドラッグ中のキー入力の"
+                                            "重ね打ちは安全のため送信されません（Ctrl等との組み合わせで意図"
+                                            "しないショートカットが発火するのを防ぐため）。"))
+                                .arg(stepLabel));
+        }
 
         const int lo = m_holdDragStepIntervalMinMs;
         const int hi = m_holdDragStepIntervalMaxMs;

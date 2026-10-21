@@ -11,6 +11,7 @@
 
 #if defined(Q_OS_UNIX)
 #include <csignal>
+#include <cstdlib>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -29,6 +30,20 @@ namespace
 // again -- a real problem on a shared/CI machine where this is not the only
 // thing using that X session.
 //
+// 不具合報告E-06(高、D4の抜け道): SIGHUP (closing the terminal/an SSH
+// disconnect -- plausibly the single most likely real-world way this
+// process actually gets killed) and SIGABRT (abort()/ASan and similar
+// detected-corruption aborts) are handled the same way below. SIGABRT is
+// best-effort only, not guaranteed: glibc's abort() restores SIGABRT's
+// default disposition and re-raises it immediately once a caught instance's
+// handler returns, specifically so the process is guaranteed to actually
+// terminate even with a handler installed -- there may simply not be time
+// left for the event loop this handler defers to ever get a turn before
+// that second, uncatchable raise arrives. SIGKILL cannot be caught by any
+// process, by definition (not handled here at all; a stuck-input scenario
+// from one requires an external watcher process, outside this one's own
+// control, to notice and clean up after it -- SPEC.md 8章の既知の制約参照).
+//
 // A signal handler itself cannot safely call into Qt/X11/AT-SPI (none of
 // those are async-signal-safe) -- the standard "self-pipe" trick relays the
 // signal onto the normal Qt event loop instead: the handler only writes one
@@ -36,9 +51,16 @@ namespace
 // watching the other end runs the actual cleanup from ordinary event-loop
 // context once the loop next turns.
 int g_terminationSocketPair[2] = {-1, -1};
+// Which signal actually triggered the most recent write to the pipe above --
+// only ever read back from the (single-threaded) Qt event loop that the
+// notifier below runs on, so a plain global is fine despite being written
+// from a signal handler (sig_atomic_t's whole purpose is making exactly this
+// safe without needing a lock a signal handler couldn't take anyway).
+volatile sig_atomic_t g_terminationSignal = 0;
 
-void handleTerminationSignal(int)
+void handleTerminationSignal(int signum)
 {
+    g_terminationSignal = signum;
     const char byte = 1;
     // Best-effort: if this write somehow fails there is nothing safe left to
     // do from inside a signal handler, so the return value is deliberately
@@ -58,18 +80,49 @@ void installTerminationSignalHandling(MainWindow *window)
     action.sa_flags = SA_RESTART;
     sigaction(SIGTERM, &action, nullptr);
     sigaction(SIGINT, &action, nullptr);
+    sigaction(SIGHUP, &action, nullptr);
+    sigaction(SIGABRT, &action, nullptr);
 
-    // Owned by `window` via QObject parent-child so it is torn down with
-    // the application; must outlive this function, hence `new` rather than
-    // a local/stack object.
+    // 不具合報告E-09(高): previously disabled this notifier for good the
+    // very first time it fired, before calling QCoreApplication::quit() --
+    // which, for a visible top-level window, triggers that window's own
+    // closeEvent() (see MainWindow::closeEvent()'s own updated comment).
+    // An unattended run with unsaved changes then hung forever on a
+    // confirmation dialog nobody was there to answer, with every
+    // subsequent SIGTERM/SIGINT silently ignored (this notifier was already
+    // disabled, so their own writes to the pipe were never even read). That
+    // specific hang no longer happens (closeEvent() now recognizes this
+    // exact situation and skips the confirmation on its own), but this
+    // notifier is also deliberately left enabled from here on regardless,
+    // as a second line of defense: if anything else ever left the shutdown
+    // stuck for some other reason, a second signal still forces an
+    // immediate, unconditional exit rather than silently doing nothing.
     auto *notifier = new QSocketNotifier(g_terminationSocketPair[1], QSocketNotifier::Read, window);
-    QObject::connect(notifier, &QSocketNotifier::activated, window, [window, notifier]() {
-        char byte;
-        (void)!::read(g_terminationSocketPair[1], &byte, sizeof(byte));
-        notifier->setEnabled(false);
-        window->releaseHeldInputForTermination();
-        QCoreApplication::quit();
-    });
+    auto *attemptCount = new int(0);  // owned by the lambda capture below, freed with it
+    QObject::connect(notifier, &QSocketNotifier::activated, window,
+                      [window, attemptCount]() {
+                          char byte;
+                          (void)!::read(g_terminationSocketPair[1], &byte, sizeof(byte));
+                          const int signum = g_terminationSignal;
+                          window->releaseHeldInputForTermination(signum);
+                          ++*attemptCount;
+                          if (*attemptCount >= 2) {
+                              // Already tried the ordinary way once and
+                              // whatever that triggered hasn't actually
+                              // exited yet -- stop waiting on Qt's own
+                              // shutdown path (which could in principle
+                              // still be stuck on something this process
+                              // doesn't know about) and force it immediately.
+                              // _Exit() skips atexit()/static-destructor
+                              // cleanup entirely, which is fine: the one
+                              // thing that genuinely needed to happen
+                              // (releasing physically-held input) was just
+                              // done above, synchronously, by
+                              // releaseHeldInputForTermination().
+                              std::_Exit(1);
+                          }
+                          QCoreApplication::exit(1);
+                      });
 }
 
 }  // namespace

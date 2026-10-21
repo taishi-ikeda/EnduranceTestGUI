@@ -92,6 +92,7 @@ private slots:
     void onRemoveSelectedExcludeRegion();
     void onModeChanged();
     void onPickObject();
+    void onNameMatchModeChanged();
     void onAddSweepWaypoint();
     void onRemoveSelectedSweepWaypoint();
     void onAccept();
@@ -148,6 +149,29 @@ private:
     // 不具合報告D28: how ObjectTarget::name is compared at runtime -- see
     // ObjectNameMatchMode's own comment (TestConfig.h).
     QComboBox *m_nameMatchModeCombo = nullptr;
+    // 不具合報告E-11(重大、D28の修正が不完全): the actual pattern used at
+    // runtime (what result() copies into NamedRegion::objectTarget.name) --
+    // before this field existed, that was always whatever onPickObject()
+    // captured verbatim (the object's full accessible name, including any
+    // live/changing part, e.g. "ボタン1\n左:20 ..."), with no way to shorten
+    // it into just the fixed prefix/pattern that前方一致/正規表現 actually
+    // need to keep matching once that name changes -- making those two
+    // modes effectively unusable from the GUI (a hand-edited preset JSON was
+    // the only way). Initialized to `initial.objectTarget.name` verbatim
+    // (already the real saved pattern for an existing region, not something
+    // to re-derive) -- see onPickObject()/onNameMatchModeChanged() for how a
+    // *fresh* pick instead seeds this with a mode-appropriate default the
+    // user can edit from there.
+    QLineEdit *m_objectNamePatternEdit = nullptr;
+    // The value this dialog itself last put in m_objectNamePatternEdit (from
+    // a fresh onPickObject() pick, possibly re-derived once more by
+    // onNameMatchModeChanged() if the mode changes before the user edits it
+    // by hand) -- deliberately left empty at construction (never set from
+    // `initial`) so reopening an *existing* region never treats its already-
+    // saved, possibly hand-written pattern as "still the auto value", which
+    // would let a later mode switch silently clobber it. Same role as
+    // m_lastAutoName above, scoped to this one field instead.
+    QString m_lastAutoObjectNamePattern;
     QCheckBox *m_useDefaultActionCheck = nullptr;
     QSpinBox *m_reresolveIntervalSpin = nullptr;
 

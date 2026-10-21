@@ -172,6 +172,7 @@ TaskEditorDialog::TaskEditorDialog(const RegionStep &initialTask, RegionEditCont
 
     refreshMemberList();
     loadMemberEditorForSelection();
+    updateMemberButtonsEnabled();
 }
 
 QString TaskEditorDialog::describeMember(const RegionStep &member, int index) const
@@ -285,6 +286,17 @@ void TaskEditorDialog::onMemberSelectionChanged()
 {
     flushMemberEditor();
     loadMemberEditorForSelection();
+    updateMemberButtonsEnabled();
+}
+
+void TaskEditorDialog::updateMemberButtonsEnabled()
+{
+    const int row = m_memberListWidget->currentRow();
+    const bool hasSelection = row >= 0 && row < m_members.size();
+    m_editMemberButton->setEnabled(hasSelection);
+    m_removeMemberButton->setEnabled(hasSelection);
+    m_moveMemberUpButton->setEnabled(hasSelection && row > 0);
+    m_moveMemberDownButton->setEnabled(hasSelection && row < m_members.size() - 1);
 }
 
 void TaskEditorDialog::onAddMember()
@@ -343,10 +355,16 @@ void TaskEditorDialog::onRemoveSelectedMember()
     m_members.removeAt(row);
     refreshMemberList();
     const int newRow = qMin(row, m_members.size() - 1);
-    if (newRow >= 0)
+    if (newRow >= 0) {
         m_memberListWidget->setCurrentRow(newRow);
-    else
+    } else {
+        // No row left at all (the last member was just removed) --
+        // setCurrentRow() above is what would otherwise trigger
+        // onMemberSelectionChanged()'s own updateMemberButtonsEnabled()
+        // call; nothing else does so when the list becomes empty instead.
         loadMemberEditorForSelection();
+        updateMemberButtonsEnabled();
+    }
 }
 
 void TaskEditorDialog::onMoveMemberUp()

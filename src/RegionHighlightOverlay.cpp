@@ -57,14 +57,6 @@ public:
     {
         m_screen = screen;
         m_entries = entries;
-        // Only re-grab the screen if this window isn't already showing on
-        // top of it: once it's visible, grabbing would just capture our
-        // own window (whatever we last painted) instead of the real
-        // desktop content underneath. isVisible() is false the first time
-        // this is called and again after every hide() (RegionHighlightOverlay::
-        // hide(), e.g. while RegionSelectorOverlay is up, or once the owning
-        // dialog closes) -- so a fresh snapshot is grabbed each time this
-        // highlight reappears, not just once ever.
         // Restricted to this screen's *available* geometry (excluding the
         // menu bar/Dock/panel strip the OS reserves for itself), not its
         // full physical bounds -- see OverlayGeometry::virtualDesktopGeometry()'s
@@ -75,16 +67,32 @@ public:
         // off by roughly the strip's size from what was asked for (and from
         // what this background snapshot/m_origin below assume).
         const QRect screenGeom = m_screen->availableGeometry();
-        if (!m_useRealTransparency && !isVisible()) {
-            // See settleDesktopBeforeSnapshot()'s comment: this window is
-            // typically re-shown right after RegionSelectorOverlay (or this
-            // same overlay's previous hide()) has just closed/hidden, and
-            // grabbing immediately can otherwise capture that leftover
-            // content instead of the real desktop. Cropped to screenGeom so
-            // the grabbed content lines up with this window's own bounds --
-            // grabWindow(0)'s x/y/w/h are relative to the screen's own
-            // top-left, hence subtracting screen->geometry() (not
-            // screenGeom itself) here.
+        if (!m_useRealTransparency) {
+            // 不具合報告E-12(中、PointHighlightOverlayの同名不具合と同根):
+            // re-grab every time setContent() is called (not just the first
+            // time, or after a hide()), hiding first if already visible --
+            // grabbing while this exact window is still the thing covering
+            // the screen would just recapture its own last-painted frame,
+            // not the real desktop underneath (that's what the previous
+            // "only while !isVisible()" guard here was protecting against).
+            // NamedRegionEditorDialog keeps this window shown continuously
+            // for its whole rectangle-mode editing session, calling
+            // setContent() again on every add/remove-rectangle action *and*
+            // on every edit of the "名前" field (see onModeChanged()'s own
+            // m_nameEdit::textChanged connection) -- skipping the re-grab on
+            // those later calls painted the (possibly changed) highlight
+            // over an increasingly stale snapshot from whenever this window
+            // was first shown, under any non-compositing window manager
+            // (m_useRealTransparency false), hiding the dialog's own live
+            // field updates behind a frozen frame even though clicks/typing
+            // still correctly reached it underneath (this window has always
+            // been WA_TransparentForMouseEvents, unlike D20's fix for
+            // PointHighlightOverlay/RegionHighlightOverlay's sibling click-
+            // through issue) -- so it only ever looked frozen, not actually
+            // was. See settleDesktopBeforeSnapshot()'s own comment for why
+            // settling first matters here too, same as the very first grab.
+            if (isVisible())
+                hide();
             settleDesktopBeforeSnapshot();
             const QPoint availOffsetInScreen = screenGeom.topLeft() - screen->geometry().topLeft();
             m_background = screen->grabWindow(0, availOffsetInScreen.x(), availOffsetInScreen.y(),

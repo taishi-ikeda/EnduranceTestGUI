@@ -181,7 +181,20 @@ bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
     // expand the client rect by it when present. Absent (a non-EWMH WM, or
     // a genuinely undecorated/override-redirect window), the client rect
     // is already the whole of what's on screen, so it's left unchanged.
+    // 不具合報告E-03(重大、D6の修正が不完全): the fallback below must trigger
+    // whenever THIS WINDOW doesn't have _NET_FRAME_EXTENTS actually set on
+    // it, not merely whenever the atom itself has never been interned on
+    // the X server at all. XInternAtom(..., True) only returns None in the
+    // latter, much narrower case -- and the atom gets interned the moment
+    // *any* EWMH-aware client (any Qt app, ETG itself included) has ever
+    // run, which is true of essentially every realistic desktop session.
+    // The original D6 fix's `if (netFrameExtents != None)` therefore almost
+    // never took the `else` fallback branch in practice, even against a
+    // window whose own owner never set the property -- gotFrameExtents
+    // below instead tracks whether *this property read, on this window,*
+    // actually produced the expected 4 CARDINAL values.
     const Atom netFrameExtents = XInternAtom(dpy, "_NET_FRAME_EXTENTS", True);
+    bool gotFrameExtents = false;
     if (netFrameExtents != None) {
         Atom type;
         int format;
@@ -193,18 +206,20 @@ bool windowScreenBounds(Display *dpy, Window w, QRect &outBounds)
             if (type == XA_CARDINAL && nItems == 4) {
                 const long *extents = reinterpret_cast<long *>(data);
                 bounds.adjust(-int(extents[0]), -int(extents[2]), int(extents[1]), int(extents[3]));
+                gotFrameExtents = true;
             }
             XFree(data);
         }
-    } else {
-        // 不具合報告D6(重大): _NET_FRAME_EXTENTS isn't set at all on some
-        // window managers (confirmed by deliberately removing the property
-        // in testing; some real non-EWMH-frame-extents WMs are expected to
-        // behave the same way). Fall back to walking up the window tree to
-        // find the WM's own reparenting frame -- the direct child of the
-        // root window that is an ancestor of (or equal to) w -- and use
-        // *its* rect instead, so the hit-test still covers the titlebar
-        // even without the property.
+    }
+    if (!gotFrameExtents) {
+        // 不具合報告D6(重大): _NET_FRAME_EXTENTS isn't set on this window
+        // (confirmed by deliberately removing the property in testing; some
+        // real non-EWMH-frame-extents WMs are expected to behave the same
+        // way). Fall back to walking up the window tree to find the WM's
+        // own reparenting frame -- the direct child of the root window that
+        // is an ancestor of (or equal to) w -- and use *its* rect instead,
+        // so the hit-test still covers the titlebar even without the
+        // property.
         Window root = DefaultRootWindow(dpy);
         Window cur = w;
         Window parent = 0;
@@ -910,7 +925,7 @@ static bool isSelfClickThroughWindow(Display *dpy, Window w)
     return clickThrough;
 }
 
-qint64 windowPidAtPoint(const QPoint &pt)
+qint64 windowPidAtPoint(const QPoint &pt, bool excludeSelf)
 {
     Display *dpy = display();
     if (!dpy)
@@ -970,7 +985,7 @@ qint64 windowPidAtPoint(const QPoint &pt)
         // (the full-screen selection/highlight overlays) should be skipped;
         // any other self-owned window blocks the hit-test like any other
         // app's window would, so the run safely stops instead of clicking it.
-        if (pid == selfPid && isSelfClickThroughWindow(dpy, w))
+        if (pid == selfPid && (excludeSelf || isSelfClickThroughWindow(dpy, w)))
             continue;
         QRect bounds;
         if (!windowScreenBounds(dpy, w, bounds))
@@ -1498,18 +1513,47 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
     // filter by pid at all, so some other unrelated application's widget
     // (even one sitting entirely behind the real topmost window at this
     // point -- this app's own already-running interactive GUI included)
-    // could win purely by happening to be enumerated first. windowPidAtPoint()
-    // already determines exactly which real OS window is topmost at (x,y)
-    // via the X11 stacking order -- reuse it here and restrict the fan-out
-    // below to just that one application's AT-SPI node when it resolves to
-    // something, instead of trying every scoped-in application blindly.
-    const qint64 topmostPid = windowPidAtPoint(QPoint(x, y));
+    // could win purely by happening to be enumerated first.
+    //
+    // Z-order disambiguation is only actually needed when scopedApplications()
+    // itself leaves more than one candidate application -- the common case
+    // of a real expectedOwnerPid already narrows `apps` down to exactly the
+    // intended target (scopedApplications() requires an exact pid match
+    // whenever expectedOwnerPid > 0), so there is nothing left to
+    // disambiguate and, just as importantly, no need to fail if the topmost
+    // pid can't be pinned down right now (不具合報告E-01: while a "名前付き
+    // オブジェクト" picker session is open, ObjectPickerOverlay is itself a
+    // real, non-click-through ETG window covering the whole screen, so
+    // windowPidAtPoint() would otherwise report ETG itself as topmost here
+    // and wrongly filter out the one genuine candidate -- scopedApplications()
+    // already excludes ETG's own node unconditionally, so that candidate
+    // would then always get skipped and nothing would ever be found).
     const QList<AtspiAccessible *> apps = scopedApplications(desktop, expectedOwnerPid);
+    qint64 topmostPid = -1;
+    if (apps.size() > 1) {
+        // windowPidAtPoint() already determines exactly which real OS
+        // window is topmost at (x,y) via the X11 stacking order --
+        // excludeSelf=true since ETG's own windows are never a candidate in
+        // `apps` to begin with (scopedApplications() always excludes them),
+        // so letting one of them count as "topmost" here would only ever
+        // produce a false negative, never a correct match.
+        topmostPid = windowPidAtPoint(QPoint(x, y), /*excludeSelf=*/true);
+        if (topmostPid <= 0) {
+            // 不具合報告E-10: couldn't positively determine which real
+            // window is topmost at this point (it may simply lack
+            // _NET_WM_PID, like xmessage) -- fail closed rather than fall
+            // back to "whichever of several candidate applications happens
+            // to be enumerated first", which can silently resolve to the
+            // wrong one.
+            unrefAll(apps);
+            return nullptr;
+        }
+    }
     AtspiAccessible *hit = nullptr;
     for (AtspiAccessible *app : apps) {
         if (hit)
             continue;
-        if (topmostPid > 0 && qint64(atspi_accessible_get_process_id(app, nullptr)) != topmostPid)
+        if (apps.size() > 1 && qint64(atspi_accessible_get_process_id(app, nullptr)) != topmostPid)
             continue;
         const gint windowCount = atspi_accessible_get_child_count(app, nullptr);
         for (gint w = 0; w < windowCount && !hit; ++w) {
@@ -1538,6 +1582,16 @@ AtspiAccessible *hitTestDesktop(AtspiAccessible *desktop, int x, int y, qint64 e
 // matching everything.
 bool matchesObjectName(const QString &candidate, const QString &pattern, NameMatchMode mode)
 {
+    // 不具合報告E-11(重大、D28の修正が不完全): an empty pattern under
+    // StartsWith (QString::startsWith("") is always true) or Regex (an empty
+    // QRegularExpression matches trivially at position 0 of anything)
+    // previously matched every candidate indiscriminately -- in practice,
+    // whichever widget the search happened to visit first, silently
+    // operating on the wrong one instead of the intended "nothing is
+    // configured to match, so match nothing" fail-closed behavior Exact
+    // already has for free (a real accessible name is never itself empty).
+    if (mode != NameMatchMode::Exact && pattern.isEmpty())
+        return false;
     switch (mode) {
     case NameMatchMode::StartsWith:
         return candidate.startsWith(pattern);

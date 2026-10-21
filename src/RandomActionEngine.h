@@ -120,6 +120,23 @@ public:
     // nothing to run and this falls through to start()'s own normal
     // "nothing configured" handling.
     void startSetupOnly(const TestConfig &config);
+    // 不具合報告E-08(中、D2の修正の副作用): MainWindow's own floating stop/
+    // pause panel (and anything else like it) is a real, visible,
+    // always-on-top ETG window once D-02's fix made windowPidAtPoint()
+    // correctly treat it as "not the target" -- exactly the intended
+    // behavior at the safety-check level (a click that actually lands on it
+    // must still be caught), but with nothing here telling pickRandomPoint()
+    // to simply never pick a candidate point there in the first place, an
+    // ordinary "対象GUIの全領域" region that happens to be maximized under
+    // the panel kept choosing points under it, triggering that same safety
+    // stop as if it were a genuine anomaly merely from normal use (a
+    // maximized target window is not unusual). Call this (MainWindow does,
+    // right after creating/positioning m_stopPanel, before start()) with the
+    // screen rect(s) of every such ETG-owned window currently showing;
+    // pickRandomPoint() then excludes them exactly like a configured exclude
+    // region. Safe to call with an empty list (headless mode: no panel is
+    // ever shown, so there's nothing to exclude).
+    void setSelfExcludedScreenRects(const QList<QRect> &rects) { m_selfExcludedScreenRects = rects; }
     void stop();
     void pause();
     void resume();
@@ -586,6 +603,11 @@ private:
     void checkMemoryLeakTrend(qint64 nowMs, double memoryMb);
 
     TestConfig m_config;
+    // 不具合報告E-08(中): set via setSelfExcludedScreenRects() -- see that
+    // method's own comment. Persists across a run's whole lifetime
+    // (whatever MainWindow last set it to, typically once right before
+    // start()); never populated by this engine itself.
+    QList<QRect> m_selfExcludedScreenRects;
     // Startup setup-phase state (SPEC.md 6.x "起動時セットアップ"): while
     // m_inSetupPhase is true, performRandomAction() runs
     // performSetupAction() instead of the normal randomized-step logic.
@@ -772,6 +794,25 @@ private:
     // each tick in continueHoldDrag() against m_holdDragElapsedMs.
     bool m_holdDragWheelBurstActive = false;
     qint64 m_holdDragWheelPhaseEndMs = 0;
+    // 不具合報告E-02(重大、D14の修正が不完全): how many notches are still
+    // left to send in the burst currently in progress, and when the next
+    // one of them is due. continueHoldDrag() used to send every notch of a
+    // burst back-to-back in a single call, paced only by a synchronous
+    // QThread::msleep() between them -- which (a) blocked the Qt event loop
+    // (this engine's own GUI thread) for the whole burst, making the
+    // emergency-stop hotkey/stop panel/pause unresponsive for as long as a
+    // large notch count times its interval could reach (hours, at the
+    // settings screen's own upper bounds), and (b) never ran at all for a
+    // 1-notch burst (the loop's own "notch gap" step is skipped whenever
+    // there is only one notch to send), so that configuration's own notch
+    // interval setting had no effect whatsoever. Sending at most one notch
+    // per continueHoldDrag() tick instead -- like m_holdDragNextKeyMs
+    // already does for the key overlay -- fixes both: no tick ever blocks,
+    // and the configured interval is honored by scheduling the *next* tick
+    // for exactly when it's next due (see continueHoldDrag()'s own
+    // end-of-function scheduling).
+    int m_holdDragWheelNotchesRemaining = 0;
+    qint64 m_holdDragNextNotchMs = 0;
     HoldDragKeyOverlay m_holdDragKeyOverlay;
     qint64 m_holdDragNextKeyMs = 0;
     // The character/named-key candidate pool for the key overlay -- same
@@ -785,8 +826,21 @@ private:
     // Whether the target window is currently minimized by this gesture's
     // own window-op overlay (so continueHoldDrag() knows to restore it
     // before the gesture ends, and doesn't pick "minimize" again while
-    // already minimized).
+    // already minimized). Also still true for a short window after
+    // restoring it has been *requested* -- see m_holdDragRestorePending.
     bool m_holdDragWindowMinimized = false;
+    // 不具合報告E-05(高、D9の修正が不完全): true from the moment the
+    // window-op overlay requests the restore (calls activateProcess()) in
+    // continueHoldDrag() until a later tick's queryWindowBounds() call
+    // confirms the window is actually viewable again -- the window manager
+    // remapping it happens on its own schedule, not synchronously with that
+    // request. m_holdDragWindowMinimized itself is deliberately left true
+    // for that whole stretch (keeping the safety check/mouse movement
+    // skipped, same as while genuinely minimized), only clearing once this
+    // flag's own confirmation succeeds -- clearing it eagerly, right at the
+    // request, let the very next tick's safety check see the still-hidden
+    // window as "not the target" and wrongly stop the run.
+    bool m_holdDragRestorePending = false;
 
     // State for an in-progress ActionKind::FuzzString (SPEC.md 10
     // "ファジングテスト対応") whose delivery mode resolved to KeyByKey --

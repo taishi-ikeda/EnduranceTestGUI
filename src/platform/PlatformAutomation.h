@@ -298,7 +298,20 @@ ResponsivenessCheck checkWindowResponsive(quint32 windowId, qint64 pid);
 // or -1 if none (e.g. empty desktop, or only this process's own windows
 // are there). Used to verify a click/drag/scroll is about to hit the
 // intended target window.
-qint64 windowPidAtPoint(const QPoint &pt);
+//
+// `excludeSelf` (不具合報告E-01): when true, never returns this process's
+// own pid even for one of its own ordinary (non-click-through) windows --
+// used by the AT-SPI/accessibility desktop hit-test (Automation_linux.cpp's
+// hitTestDesktop()) to find whichever *other* application is topmost at a
+// point, since ETG's own windows (most notably ObjectPickerOverlay, a real,
+// non-click-through window while a "名前付きオブジェクト" picker session is
+// in progress) are never themselves a valid hit-test target and must not be
+// allowed to make that search think nothing else is there. Safety-check
+// callers (this function's main purpose -- see this section's own header
+// comment) must keep the default (false): there, an ETG window genuinely
+// being topmost (e.g. the run-control stop/pause panel) is exactly the
+// unsafe condition 不具合報告D2 needs reported, not papered over.
+qint64 windowPidAtPoint(const QPoint &pt, bool excludeSelf = false);
 
 // pid of the currently active/frontmost application, or -1 if unknown.
 // Used to verify keyboard input (key taps, shortcuts) is actually going

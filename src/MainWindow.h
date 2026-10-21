@@ -82,7 +82,7 @@ public:
     // instance -- same requirement "⟳ 連続実行" already has).
     bool runHeadless(const QString &presetPath, int repeatCount);
 
-    // 不具合報告D4(重大): called from main.cpp's SIGTERM/SIGINT handling
+    // 不具合報告D4(重大): called from main.cpp's termination-signal handling
     // (see its own comment) once the signal has been safely relayed onto
     // the Qt event loop via a self-pipe -- never from inside the raw
     // signal handler itself, since this ends up calling into X11/AT-SPI
@@ -93,7 +93,9 @@ public:
     // down -- left held, they would otherwise persist at the X server
     // after this process exits, corrupting every subsequent click/keypress
     // on the whole display until something else presses and releases them.
-    void releaseHeldInputForTermination();
+    // `signum`: which signal actually triggered this, purely for the log
+    // message identifying it (不具合報告E-14).
+    void releaseHeldInputForTermination(int signum);
 
 protected:
     // SPEC.md 不具合報告 E6: previously closed immediately with no warning,
@@ -103,6 +105,18 @@ protected:
     // confirm-before-discard pattern onLoadPreset() already uses for the
     // exact same data.
     void closeEvent(QCloseEvent *event) override;
+    // 不具合報告E-19(低): TestStatistics itself already re-syncs from disk
+    // on every read (see its own 1.3-era comment -- crash_stats.jsonl is a
+    // shared log any number of separate headless `--run` invocations can
+    // append to concurrently with this GUI), but nothing previously ever
+    // called updateStatisticsDisplay() again on its own while this window
+    // just sat open with no user action in it -- its summary (and ②'s own
+    // per-step crash badges) stayed stuck at whatever it last was until the
+    // next preset load/run. Refreshing whenever this window becomes the
+    // active one again is a reasonable proxy for "the user just switched
+    // back to look at this after doing something else (e.g. a terminal
+    // running one or more `--run` invocations)", with no added polling.
+    void changeEvent(QEvent *event) override;
 
 private slots:
     void onRefreshTargets();
@@ -930,6 +944,19 @@ private:
     // whole invocation, and decides the process's final exit code.
     bool m_headlessMode = false;
     bool m_headlessAnomalyOccurred = false;
+    // 不具合報告E-09/E-14(高): set by releaseHeldInputForTermination()
+    // before anything else, so that (a) closeEvent() (GUI mode) skips its
+    // usual unsaved-changes confirmation -- nobody is there to answer a
+    // modal dialog once this process has already been asked to terminate,
+    // and leaving it up forever was the whole bug (a second, or even a
+    // dozenth, SIGTERM/SIGINT was never read again either, since the
+    // self-pipe's own notifier had already been permanently disabled after
+    // the first one) -- and (b) checkHeadlessCompletion() (headless mode)
+    // reports a non-zero exit code / this process's own log reflects that
+    // the run was externally interrupted, rather than reading exactly like
+    // a deliberate, successful "■ 停止"/clean completion a calling CI job
+    // could not otherwise tell apart from one.
+    bool m_terminatingViaSignal = false;
     // 不具合報告(無人実行・共有環境で静かに眠るもの) 1.1: set by beginRun()
     // on any of its own non-interactive failure paths (missing
     // accessibility trust, a config error such as a step referencing a

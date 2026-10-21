@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <csignal>
 #include <cstdio>
 
 #include <QAbstractItemView>
@@ -36,6 +37,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSettings>
@@ -121,6 +123,34 @@ QList<RegionStep> stepsFromClipboardJson(const QString &text)
             result.append(regionStepFromJson(v.toObject()));
     }
     return result;
+}
+
+// 不具合報告E-04(高): activateProcess() (called just before this) only
+// *requests* that the window manager raise/focus the target -- the actual
+// restack happens on the WM's own schedule, not synchronously with that
+// call. Checking windowPidAtPoint() only once, immediately afterward, could
+// therefore still see whatever was on top a moment ago (most notably: this
+// very main window, if it happens to overlap the target's center -- D-02
+// made ETG's own ordinary windows count as a legitimate hit here, so this
+// regressed once that landed). Poll briefly instead of failing outright --
+// same "give the WM a moment, same window either way" rationale and timing
+// as ManualRecorder::start()'s own kRestoreRetryAttempts/kRestoreRetryDelayMs
+// (~60ms observed for openbox in this project's own sandbox; a target that
+// was already frontmost succeeds on the very first attempt and never sleeps
+// at all).
+constexpr int kActivateRetryAttempts = 15;
+constexpr int kActivateRetryDelayMs = 50;
+
+bool confirmTargetTopmostAfterActivate(qint64 targetPid, const QPoint &checkPoint)
+{
+    if (PlatformAutomation::windowPidAtPoint(checkPoint) == targetPid)
+        return true;
+    for (int attempt = 0; attempt < kActivateRetryAttempts; ++attempt) {
+        QThread::msleep(kActivateRetryDelayMs);
+        if (PlatformAutomation::windowPidAtPoint(checkPoint) == targetPid)
+            return true;
+    }
+    return false;
 }
 }  // namespace
 
@@ -322,6 +352,18 @@ void MainWindow::buildUi()
         I18n::t(QStringLiteral("対象ウィンドウを、耐久テストの実行中かどうかに関わらず連番のPNG画像として"
                                 "記録し続けます（手動操作の確認用）。")));
     m_statusLabel = new QLabel(I18n::t(QStringLiteral("待機中")), central);
+    // 不具合報告E-18(低): a long stop reason (onStop()'s "停止: %1", most
+    // notably E-04's own detailed message) previously forced this label's
+    // sizeHint() -- and, via m_controlsRow's QHBoxLayout, this whole
+    // window's minimum width -- out to however wide that one line of text
+    // needed to be, shrinking it back down being impossible once the
+    // window manager had already moved/resized the window to fit (SPEC.md
+    // 不具合報告E-18 自身の repro). Word-wrapping it (same convention as
+    // every other explanatory QLabel in this file) makes its minimum width
+    // based on its longest single word instead, so a long message simply
+    // wraps onto more lines/takes more height in this row rather than
+    // ever growing the window's own width.
+    m_statusLabel->setWordWrap(true);
     controlsRow->addWidget(m_startButton);
     controlsRow->addWidget(m_continuousRunButton);
     controlsRow->addWidget(m_stopButton);
@@ -1347,7 +1389,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // comment -- not the raw buildPresetJson().
     const QByteArray currentPresetJson =
         QJsonDocument(buildPresetJsonForDirtyCheck()).toJson(QJsonDocument::Compact);
-    if (m_headlessMode || currentPresetJson == m_lastSavedPresetJson) {
+    // 不具合報告E-09(高): same "nothing can answer a modal dialog" rationale
+    // as m_headlessMode just above -- a termination signal means this
+    // process has already been asked to exit, with no one left to click
+    // "はい"/"いいえ". Previously this still blocked on the confirmation,
+    // which (since QCoreApplication::exit()/quit() trigger this exact
+    // closeEvent() on a visible top-level window) hung the whole shutdown
+    // indefinitely; see m_terminatingViaSignal's own comment.
+    if (m_headlessMode || m_terminatingViaSignal || currentPresetJson == m_lastSavedPresetJson) {
         event->accept();
         return;
     }
@@ -1361,6 +1410,17 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->accept();
     else
         event->ignore();
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    // 不具合報告E-19(低): see this override's own header comment. Checks
+    // isActiveWindow() (not just that an ActivationChange event merely
+    // occurred, which also fires when this window *loses* activation)
+    // since only becoming active again is the signal worth acting on here.
+    if (event->type() == QEvent::ActivationChange && isActiveWindow())
+        updateStatisticsDisplay();
 }
 
 void MainWindow::onRefreshTargets()
@@ -2877,6 +2937,34 @@ TestConfig MainWindow::buildConfigFromUi(bool &ok, QString &errorMessage) const
     config.defaultActionParams = m_defaultActionParams;
     config.fuzzStringCorpus = m_fuzzStringCorpus;
 
+    // 不具合報告E-11(重大): NamedRegionEditorDialog::onAccept()が同じ検証を
+    // 作成/編集時に行うが、プリセットJSONを手編集（または他ツールで生成）
+    // した場合はそこを経由しないため、実行開始前にもう一度ここで検証する。
+    // 不正な正規表現はmatchesObjectName()側で既にfail-closed（マッチしない）
+    // だが、それだと実行開始後に「対象領域が見つからない」という事実と違う
+    // 理由で止まってしまう（原因がパターンの誤りだとは分からない）ため、
+    // ここで明示的なエラーにする。
+    for (const NamedRegion &region : config.namedRegions) {
+        if (!region.isObjectTarget)
+            continue;
+        if (region.objectTarget.nameMatchMode == ObjectNameMatchMode::Exact)
+            continue;
+        if (region.objectTarget.name.isEmpty()) {
+            errorMessage = I18n::t(QStringLiteral("名前付きオブジェクト「%1」の「名前/パターン」が"
+                                            "空です（前方一致/正規表現では、どの部品にも一致しません）。"
+                                            "操作領域の編集でパターンを入力してください。"))
+                               .arg(region.name);
+            return config;
+        }
+        if (region.objectTarget.nameMatchMode == ObjectNameMatchMode::Regex &&
+            !QRegularExpression(region.objectTarget.name).isValid()) {
+            errorMessage = I18n::t(QStringLiteral("名前付きオブジェクト「%1」の「名前/パターン」が"
+                                            "正しい正規表現ではありません。操作領域の編集で修正してください。"))
+                               .arg(region.name);
+            return config;
+        }
+    }
+
     for (int i = 0; i < m_steps.size(); ++i) {
         const RegionStep &step = m_steps[i];
         if (step.isWaitStep)
@@ -3124,7 +3212,7 @@ bool MainWindow::beginRun(bool interactive)
     QRect targetBounds;
     if (PlatformAutomation::queryWindowBounds(config.targetWindowId, config.targetPid, targetBounds)) {
         PlatformAutomation::activateProcess(config.targetPid);
-        if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
+        if (!confirmTargetTopmostAfterActivate(config.targetPid, targetBounds.center())) {
             // 不具合報告D33(低): the generic message below never
             // distinguished "couldn't confirm" from the much more specific
             // "the window's own center point isn't on any real screen at
@@ -3215,32 +3303,12 @@ bool MainWindow::beginRun(bool interactive)
     // that never reaches checkHeadlessCompletion()).
     if (!m_headlessMode)
         m_stopPanel->show();
-
-    // 不具合報告D13(中): while a long-press drag is held, the pointer is
-    // continuously moved back onto its own path every tick (継続時間は最大
-    // 10分まで設定可能), so a real mouse click can never land on the
-    // floating stop panel's own "■ 停止" button until the gesture ends on
-    // its own. This is a structural limitation of the feature, not a bug
-    // to fix -- warn once up front (not headless: there is no panel to
-    // click there in the first place) so the user knows the global
-    // emergency-stop hotkey is the only way to interrupt it early.
-    if (!m_headlessMode) {
-        const auto stepHasHoldDrag = [](const RegionStep &s) { return s.enableHoldDrag; };
-        bool anyHoldDrag = false;
-        for (const RegionStep &s : config.steps) {
-            if (stepHasHoldDrag(s) ||
-                std::any_of(s.groupMembers.cbegin(), s.groupMembers.cend(), stepHasHoldDrag) ||
-                std::any_of(s.taskMembers.cbegin(), s.taskMembers.cend(), stepHasHoldDrag)) {
-                anyHoldDrag = true;
-                break;
-            }
-        }
-        if (anyHoldDrag) {
-            appendLog(I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）を含むステップがあります。長押し中は"
-                                        "画面上の「■ 停止」をマウスでは押せません。中断したい場合は、グローバル"
-                                        "緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を使ってください。")));
-        }
-    }
+    // 不具合報告E-08(中): its own screen rect is already final (set by its
+    // constructor, called just above) regardless of show() -- see
+    // RandomActionEngine::setSelfExcludedScreenRects()'s own comment. Empty
+    // in headless mode, where it's never shown at all and so can never
+    // actually be hit.
+    m_engine->setSelfExcludedScreenRects(m_headlessMode ? QList<QRect>{} : QList<QRect>{m_stopPanel->geometry()});
 
     // SPEC.md 不具合報告E7「実行のたびにログ表示が消える」: this used to
     // unconditionally clear() here, wiping out not just the previous
@@ -3285,6 +3353,38 @@ bool MainWindow::beginRun(bool interactive)
         appendLog(I18n::t(QStringLiteral("完全なログをこのファイルに逐次保存します（画面表示とは別に、途中で"
                                   "切れることなく全操作を記録): %1"))
                        .arg(logPath));
+
+    // 不具合報告D13(中)/E-16(低、D29と同じ理由でこの行自体もrunログに残って
+    // いなかった): while a long-press drag is held, the pointer is
+    // continuously moved back onto its own path every tick (継続時間は最大
+    // 10分まで設定可能), so a real mouse click can never land on the
+    // floating stop panel's own "■ 停止" button until the gesture ends on
+    // its own. This is a structural limitation of the feature, not a bug
+    // to fix -- warn once up front (not headless: there is no panel to
+    // click there in the first place) so the user knows the global
+    // emergency-stop hotkey is the only way to interrupt it early. Moved to
+    // after the log-file open above (it used to run before it, landing at
+    // the tail of the *previous* run's log file instead of this run's own
+    // one -- the exact same ordering mistake D-29 already fixed for the
+    // "実行開始"/"連続実行" lines just above, just not yet applied to this
+    // later-added warning).
+    if (!m_headlessMode) {
+        const auto stepHasHoldDrag = [](const RegionStep &s) { return s.enableHoldDrag; };
+        bool anyHoldDrag = false;
+        for (const RegionStep &s : config.steps) {
+            if (stepHasHoldDrag(s) ||
+                std::any_of(s.groupMembers.cbegin(), s.groupMembers.cend(), stepHasHoldDrag) ||
+                std::any_of(s.taskMembers.cbegin(), s.taskMembers.cend(), stepHasHoldDrag)) {
+                anyHoldDrag = true;
+                break;
+            }
+        }
+        if (anyHoldDrag) {
+            appendLog(I18n::t(QStringLiteral("長押しドラッグ（カメラ操作等）を含むステップがあります。長押し中は"
+                                        "画面上の「■ 停止」をマウスでは押せません。中断したい場合は、グローバル"
+                                        "緊急停止ホットキー（Ctrl+Alt+Shift+Esc）を使ってください。")));
+        }
+    }
     else
         appendLog(I18n::t(QStringLiteral("完全なログファイルを開けませんでした（画面表示のみになります）: %1")).arg(logPath));
 
@@ -3344,7 +3444,7 @@ void MainWindow::onTestSetupActions()
     QRect targetBounds;
     if (PlatformAutomation::queryWindowBounds(config.targetWindowId, config.targetPid, targetBounds)) {
         PlatformAutomation::activateProcess(config.targetPid);
-        if (PlatformAutomation::windowPidAtPoint(targetBounds.center()) != config.targetPid) {
+        if (!confirmTargetTopmostAfterActivate(config.targetPid, targetBounds.center())) {
             QMessageBox::warning(
                 this, I18n::t(QStringLiteral("安全確認に失敗しました")),
                 I18n::t(QStringLiteral("対象ウィンドウが安全に操作できることを確認できなかったため、開始できません。\n\n"
@@ -3369,6 +3469,8 @@ void MainWindow::onTestSetupActions()
     // the same way for consistency and in case that ever changes.
     if (!m_headlessMode)
         m_stopPanel->show();
+    // See beginRun()'s identical call (不具合報告E-08).
+    m_engine->setSelfExcludedScreenRects(m_headlessMode ? QList<QRect>{} : QList<QRect>{m_stopPanel->geometry()});
 
     // See beginRun()'s identical comment (SPEC.md 不具合報告E7).
     appendLog(I18n::t(QStringLiteral("────── 実行開始 ──────")));
@@ -3442,8 +3544,28 @@ bool MainWindow::runHeadless(const QString &presetPath, int repeatCount)
     return true;
 }
 
-void MainWindow::releaseHeldInputForTermination()
+void MainWindow::releaseHeldInputForTermination(int signum)
 {
+    // 不具合報告E-09/E-14(高): set first, before m_engine->stop() below can
+    // synchronously cascade into checkHeadlessCompletion() (headless mode)
+    // or, if this were ever reached while a GUI window is visible, before
+    // QCoreApplication::exit() (called right after this, back in main.cpp)
+    // could trigger closeEvent() -- see m_terminatingViaSignal's own comment
+    // for what each of those then do differently as a result.
+    m_terminatingViaSignal = true;
+    QString signalName = QStringLiteral("signal %1").arg(signum);
+    if (signum == SIGTERM)
+        signalName = QStringLiteral("SIGTERM");
+    else if (signum == SIGINT)
+        signalName = QStringLiteral("SIGINT");
+    else if (signum == SIGABRT)
+        signalName = QStringLiteral("SIGABRT");
+#ifdef SIGHUP
+    else if (signum == SIGHUP)
+        signalName = QStringLiteral("SIGHUP");
+#endif
+    appendLog(I18n::t(QStringLiteral("%1を受信したため、テストを中断して終了します")).arg(signalName));
+
     // 不具合報告D4(重大): engine->stop() itself no-ops if nothing is running
     // (RandomActionEngine::stop()'s own guard), and does nothing at all if
     // m_engine was never constructed -- both fine, there is then nothing
@@ -3880,7 +4002,10 @@ void MainWindow::checkHeadlessCompletion()
     // self-test) means a run that never started at all is no longer
     // indistinguishable, from the calling shell/CI's point of view, from a
     // genuinely clean run that simply had nothing go wrong.
-    QCoreApplication::exit((m_headlessAnomalyOccurred || m_headlessSetupError) ? 1 : 0);
+    // 不具合報告E-14(高): a termination signal counts as an abnormal end for
+    // this process's own exit code the same way a crash/setup error already
+    // does -- see m_terminatingViaSignal's own comment.
+    QCoreApplication::exit((m_headlessAnomalyOccurred || m_headlessSetupError || m_terminatingViaSignal) ? 1 : 0);
 }
 
 void MainWindow::waitForTargetThenContinueBatch()

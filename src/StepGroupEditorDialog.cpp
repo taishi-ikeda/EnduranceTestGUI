@@ -191,6 +191,7 @@ StepGroupEditorDialog::StepGroupEditorDialog(const RegionStep &initialGroup, Reg
 
     refreshMemberList();
     loadMemberEditorForSelection();
+    updateMemberButtonsEnabled();
 }
 
 QString StepGroupEditorDialog::describeMember(const RegionStep &member, int index) const
@@ -319,6 +320,17 @@ void StepGroupEditorDialog::onMemberSelectionChanged()
 {
     flushMemberEditor();
     loadMemberEditorForSelection();
+    updateMemberButtonsEnabled();
+}
+
+void StepGroupEditorDialog::updateMemberButtonsEnabled()
+{
+    const int row = m_memberListWidget->currentRow();
+    const bool hasSelection = row >= 0 && row < m_members.size();
+    m_editMemberButton->setEnabled(hasSelection);
+    m_removeMemberButton->setEnabled(hasSelection);
+    m_moveMemberUpButton->setEnabled(hasSelection && row > 0);
+    m_moveMemberDownButton->setEnabled(hasSelection && row < m_members.size() - 1);
 }
 
 void StepGroupEditorDialog::onAddMember()
@@ -374,10 +386,15 @@ void StepGroupEditorDialog::onRemoveSelectedMember()
     m_members.removeAt(row);
     refreshMemberList();
     const int newRow = qMin(row, m_members.size() - 1);
-    if (newRow >= 0)
+    if (newRow >= 0) {
         m_memberListWidget->setCurrentRow(newRow);
-    else
+    } else {
+        // See TaskEditorDialog::onRemoveSelectedMember()'s identical
+        // comment -- no row left at all to trigger setCurrentRow()'s own
+        // onMemberSelectionChanged()/updateMemberButtonsEnabled() call.
         loadMemberEditorForSelection();
+        updateMemberButtonsEnabled();
+    }
 }
 
 void StepGroupEditorDialog::onMoveMemberUp()

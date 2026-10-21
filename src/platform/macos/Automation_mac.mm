@@ -1011,6 +1011,11 @@ static bool getElementBounds(AXUIElementRef node, QRect &out)
 // AXUIElement-based backend.
 static bool matchesObjectName(const QString &candidate, const QString &pattern, NameMatchMode mode)
 {
+    // 不具合報告E-11(重大、Linux版と同じ目的): see
+    // Automation_linux.cppの同名関数の自分自身のコメント -- 空パターンの
+    // 無差別一致を防ぐ。
+    if (mode != NameMatchMode::Exact && pattern.isEmpty())
+        return false;
     switch (mode) {
     case NameMatchMode::StartsWith:
         return candidate.startsWith(pattern);

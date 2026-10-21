@@ -37,16 +37,31 @@ public:
         m_labels = labels;
         m_intervalMarks = intervalMarks;
         m_jitterPx = jitterPx;
-        // See RegionHighlightOverlay::setContent()'s identical guard: only
-        // re-grab while not already visible, so a still-visible window
-        // doesn't capture its own last-painted frame instead of the real
-        // desktop, and settle first so a just-closed overlay (e.g.
-        // PointPickerOverlay, dismissed right before this call) has
-        // actually finished unmapping before the raw grab (SPEC.md 6.13).
-        if (!isVisible()) {
-            settleDesktopBeforeSnapshot();
-            m_background = screen->grabWindow(0);
-        }
+        // 不具合報告E-12(中、D20の修正による回帰): re-grab the background
+        // every time this is called, not just the first time this window is
+        // ever shown. The original "only grab while !isVisible()" guard
+        // existed because grabWindow() while this very overlay is already
+        // the thing covering the screen would just recapture its own last-
+        // painted frame instead of the real desktop -- so hide() first
+        // (only actually needed when already visible) to get the real
+        // desktop back on screen before grabbing again. This matters
+        // because, unlike PointPickerOverlay's own strictly one-shot,
+        // modal use of the same snapshot trick (see
+        // grabVirtualDesktopSnapshot()'s own comment: "only safe for an
+        // overlay shown briefly and modally"), NamedRegionEditorDialog
+        // keeps this one window shown continuously for the rest of its own
+        // sweep-mode editing session, calling setContent() again on every
+        // waypoint add/remove and every "ランダム幅"/"間隔" spin-box edit --
+        // every one of those calls after the very first repainted the new
+        // markers over an increasingly stale snapshot from whenever picking
+        // first began, hiding that dialog's own live field updates entirely
+        // (even though clicks/typing still correctly reached it underneath --
+        // D-20's click-through fix -- so it only ever looked frozen, rather
+        // than actually being so).
+        if (isVisible())
+            hide();
+        settleDesktopBeforeSnapshot();
+        m_background = screen->grabWindow(0);
         show();
         const QRect screenGeom = m_screen->geometry();
         setGeometry(screenGeom);

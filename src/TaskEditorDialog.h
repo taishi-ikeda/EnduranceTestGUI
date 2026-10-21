@@ -51,6 +51,18 @@ private:
     void refreshMemberList();
     void flushMemberEditor();
     void loadMemberEditorForSelection();
+    // 不具合報告E-17(低): m_editMemberButton/m_removeMemberButton/
+    // m_moveMemberUpButton/m_moveMemberDownButton had no enabled-state logic
+    // at all -- left at their default-constructed (always enabled) state
+    // regardless of whether anything was actually selected, unlike ②の
+    // ステップ一覧やStepGroupEditorDialogの同種のボタン (不具合報告D18と同じ
+    // 種類の見た目の不整合、ただし原因はcurrentRow()判定ではなく判定自体が
+    // 無いこと). Called from onMemberSelectionChanged() (so every selection
+    // change updates it) and once explicitly right after this dialog's
+    // initial refreshMemberList() (a brand-new, empty task never fires
+    // currentRowChanged at all, so that call is the only place this ever
+    // happens for it).
+    void updateMemberButtonsEnabled();
 
     // Own copy (not a pointer into MainWindow's) -- see StepGroupEditorDialog's
     // identical member comment.

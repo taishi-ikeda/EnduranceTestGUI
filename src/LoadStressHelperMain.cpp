@@ -1,4 +1,6 @@
 #include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <csignal>
@@ -29,13 +31,37 @@ void handleSignal(int) { g_stop.store(true); }
 // mmap internally.
 constexpr std::size_t kFragmentedChunkBytes = 256 * 1024;
 
-// Size of the unmapped-access (PROT_NONE) guard page placed after every
+// Size of the unmapped-access (PROT_NONE) guard region placed after every
 // fragmented-mode chunk -- see that branch's own comment for why it's
 // needed at all (preventing the kernel from merging adjacent chunks back
-// into one VMA). One page is enough: the guard's own job is only to make
-// the chunk on either side of it non-adjacent in the sense vma_merge()
-// cares about, not to reserve any particular amount of address space.
+// into one VMA), and for why it's now carved out of the *same* mmap() call
+// as its chunk (不具合報告F-02) rather than requested as its own separate
+// mmap(). Also doubles as the stride used to prefault every page of a
+// chunk right after mapping it (不具合報告F-01, see that loop's own
+// comment) -- one page is enough for either purpose, and this is at least
+// as large as any real page size this is likely to run on (4KiB on
+// x86_64; touching more often than a larger real page size requires is
+// harmless, just slightly redundant).
 constexpr std::size_t kGuardPageBytes = 4096;
+
+// 不具合報告F-03(中): upper bound on how many (chunk + guard) mapping pairs
+// fragmented mode will ever create, however large the requested total is --
+// each pair costs 2 VMAs, and Linux's default vm.max_map_count (65530) is a
+// hard per-process ceiling on how many a process can ever hold at once; once
+// hit, mmap() starts failing not just for further chunks here but
+// potentially for anything else this process might otherwise need to
+// allocate too. Rather than silently stop fragmenting partway through an
+// oversized request (the previous behavior -- found, for a large enough
+// request, to silently cap out around 8GB regardless of how much more was
+// asked for), the chunk size itself scales up with the requested total
+// (see byteCount/kMaxFragmentCount below) so the mapping count this loop
+// can ever produce stays well under that ceiling at any size this helper's
+// own command-line MB argument can realistically request. Ordinary
+// requests (well under kMaxFragmentCount * kFragmentedChunkBytes, i.e. up
+// to about 2GB) are completely unaffected -- kFragmentedChunkBytes itself
+// still wins the std::max() below, so chunk size/fragmentation granularity
+// stays exactly as before.
+constexpr std::size_t kMaxFragmentCount = 8192;
 }  // namespace
 
 // Standalone CPU+memory load-generator helper, launched as a separate OS
@@ -131,28 +157,79 @@ int main(int argc, char **argv)
         // storage above; nothing other than this process ever needs any of
         // them back sooner.
         //
-        // A PROT_NONE guard page follows each data chunk. Without it, the
-        // kernel's own vma_merge() quietly coalesces consecutive mmap()
-        // calls that land adjacent to each other (the common case, since
-        // nothing else is allocating in between) and share the same
-        // protection/flags back into a single VMA -- found via
-        // /proc/<pid>/maps while verifying this feature: the "fragmented"
-        // mode produced exactly the same single-mapping layout as "single"
-        // without this, defeating the entire point of the option. The guard
-        // page's differing protection breaks that merge on both sides, so
-        // each data chunk keeps its own distinct mapping.
+        // 不具合報告F-03: scales up with the request so the mapping count
+        // below stays bounded -- see kMaxFragmentCount's own comment.
+        // Rounded up to a multiple of kGuardPageBytes (this platform's own
+        // page size, in practice): mprotect() below requires its address
+        // argument to be page-aligned, and silently fails (EINVAL) if it
+        // isn't -- found, while verifying this very scaling, that an
+        // unrounded chunk size (e.g. 9000MB/kMaxFragmentCount = 1,152,000
+        // bytes, not a multiple of 4096) left every guard's mprotect() call
+        // failing this way, with the return value going unchecked, so every
+        // chunk's own guard silently never took effect -- right back to
+        // vma_merge() coalescing adjacent chunks into a handful of huge
+        // VMAs instead of thousands of genuinely separate ones.
+        const std::size_t rawChunkBytes = byteCount / kMaxFragmentCount;
+        const std::size_t chunkBytes =
+            rawChunkBytes > kFragmentedChunkBytes
+                ? ((rawChunkBytes + kGuardPageBytes - 1) / kGuardPageBytes) * kGuardPageBytes
+                : kFragmentedChunkBytes;
+
+        // A PROT_NONE guard region follows each data chunk, carved out of
+        // the very same mmap() call as its chunk via mprotect() (不具合報告
+        // F-02(中)) rather than requested as its own separate mmap(): the
+        // kernel decides where each independent mmap() call's own address
+        // range actually lands, with no guarantee that two consecutive
+        // calls end up adjacent to each other -- found, while verifying
+        // this very guard-page mechanism, to leave a meaningful fraction of
+        // guards *not* adjacent to the chunk they were meant to separate
+        // (landing in some other address-space gap instead), in which case
+        // the *chunks* on either side of that gap ended up adjacent to each
+        // other and sharing the same protection/flags instead -- right back
+        // to the kernel's own vma_merge() silently coalescing them into one
+        // VMA, the exact failure this whole mechanism exists to prevent
+        // (see kGuardPageBytes' own comment for vma_merge() itself). A
+        // single mmap() call spanning chunk+guard together has no such
+        // ambiguity: whatever address the kernel picks, the guard is
+        // necessarily the tail end of that same contiguous range.
         std::size_t remaining = byteCount;
         while (remaining > 0) {
-            const std::size_t chunkSize = remaining < kFragmentedChunkBytes ? remaining : kFragmentedChunkBytes;
-            void *mapped = ::mmap(nullptr, chunkSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-            if (mapped == MAP_FAILED)
-                break;  // best-effort: address space/VMA-count limit reached -- touch whatever mapped so far
+            const std::size_t chunkSize = remaining < chunkBytes ? remaining : chunkBytes;
+            const std::size_t mappingSize = chunkSize + kGuardPageBytes;
+            void *mapped = ::mmap(nullptr, mappingSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (mapped == MAP_FAILED) {
+                // 不具合報告F-03: report, rather than silently stop here --
+                // this process's own stderr isn't currently surfaced into
+                // EnduranceTestGUI's own log (LoadInjector only watches for
+                // this process exiting, not anything it prints), but this
+                // is still strictly better than no record at all existing
+                // anywhere (e.g. for a user who redirects/checks this
+                // process's own output directly, or a future enhancement
+                // that does relay it).
+                std::fprintf(stderr,
+                             "loadstress_helper: fragmented allocation stopped after %zu of the requested "
+                             "%zu MB (mmap failed, errno=%d) -- likely hit this process's vm.max_map_count\n",
+                             (byteCount - remaining) / (1024 * 1024), byteCount / (1024 * 1024), errno);
+                break;
+            }
+            // 不具合報告F-02: the guard is this mapping's own trailing
+            // kGuardPageBytes -- see this branch's own top comment.
+            ::mprotect(static_cast<unsigned char *>(mapped) + chunkSize, kGuardPageBytes, PROT_NONE);
+            // 不具合報告F-01: fault every page of this chunk into residency
+            // right now, matching single mode's own std::vector(byteCount, 0)
+            // above (which faults its whole allocation in immediately, as a
+            // side effect of zero-filling it). Without this, only the
+            // touching loop below ever faults pages in, at a fixed rate (a
+            // few KB per outer loop pass) regardless of how many chunks
+            // there are to get through first --
+            // observed taking on the order of minutes to become fully
+            // resident for a GB-scale request, during which a short test run
+            // could easily finish before the configured amount of memory
+            // pressure was ever actually applied at all.
+            for (std::size_t off = 0; off < chunkSize; off += kGuardPageBytes)
+                static_cast<volatile unsigned char *>(mapped)[off] = 0;
             spans.push_back({static_cast<volatile unsigned char *>(mapped), chunkSize});
             remaining -= chunkSize;
-            // Best-effort: if this fails there's simply no guard between
-            // this chunk and the next (they may end up merged with each
-            // other), not a reason to stop fragmenting the rest.
-            ::mmap(nullptr, kGuardPageBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         }
     }
 

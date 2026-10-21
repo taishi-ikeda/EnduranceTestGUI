@@ -62,6 +62,9 @@ private:
     void refreshMemberList();
     void flushMemberEditor();
     void loadMemberEditorForSelection();
+    // 不具合報告E-17(低、TaskEditorDialogの同名不具合と同根): see that
+    // class's own identical method's comment.
+    void updateMemberButtonsEnabled();
 
     // Own copy (not a pointer into MainWindow's) since this dialog wraps
     // stepsReferencing() below to also consider its own in-progress

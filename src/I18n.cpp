@@ -22,6 +22,9 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral(" | [カスタム設定]"), QStringLiteral(" | [Custom settings]")},
         {QStringLiteral(" → メニュー項目(上から%1番目)を選択"), QStringLiteral(" → Select menu item (position %1 from top)")},
         {QStringLiteral(" → メニュー項目「%1」を選択"), QStringLiteral(" → Select menu item \"%1\"")},
+        {QStringLiteral("メニュー項目「%1」を選べませんでした"), QStringLiteral("Could not select menu item \"%1\"")},
+        {QStringLiteral("メニュー項目(上から%1番目)を選べませんでした"),
+         QStringLiteral("Could not select menu item (position %1 from top)")},
         {QStringLiteral(" 操作ごと"), QStringLiteral(" actions")},
         {QStringLiteral(" 秒"), QStringLiteral(" sec")},
         {QStringLiteral("%1/操作領域_%2_%3_%4.png"), QStringLiteral("%1/region_%2_%3_%4.png")},
@@ -291,6 +294,12 @@ const QHash<QString, QString> &translationTable()
          QStringLiteral("Hold-drag (%1 button, %2 ms, %3 movements)")},
         {QStringLiteral("%1: 長押しドラッグを開始します（%2 ms間）"),
          QStringLiteral("%1: Starting a hold-drag (%2 ms)")},
+        {QStringLiteral("%1: 修飾キーを保持する長押しのため、ドラッグ中のキー入力の"
+                        "重ね打ちは安全のため送信されません（Ctrl等との組み合わせで意図"
+                        "しないショートカットが発火するのを防ぐため）。"),
+         QStringLiteral("%1: Because this hold-drag holds a modifier key down, its key-overlay "
+                        "keystrokes are not sent at all, for safety (to avoid firing unintended "
+                        "shortcuts in combination with Ctrl and similar).")},
         {QStringLiteral("中"), QStringLiteral("Middle")},
         {QStringLiteral("ファイル"), QStringLiteral("File")},
         {QStringLiteral("ファイルに書き込めませんでした。"), QStringLiteral("Could not write the file.")},
@@ -303,6 +312,8 @@ const QHash<QString, QString> &translationTable()
         {QStringLiteral("メンバー（各ステップの重みに応じてランダムに選ばれます）:"),
          QStringLiteral("Members (chosen randomly according to each one's weight):")},
         {QStringLiteral("ユーザーにより停止されました"), QStringLiteral("Stopped by the user")},
+        {QStringLiteral("%1を受信したため、テストを中断して終了します"),
+         QStringLiteral("Received %1, interrupting the test and exiting")},
         {QStringLiteral("ランダム"), QStringLiteral("Random")},
         {QStringLiteral("リサイズ"), QStringLiteral("Resize")},
         {QStringLiteral("リソース使用状況: メモリ %1 MB, CPU %2%"), QStringLiteral("Resource usage: Memory %1 MB, CPU %2%")},
@@ -1123,6 +1134,20 @@ const QHash<QString, QString> &translationTable()
                         "that includes its click count), \"Starts with\" or \"Regular expression\" lets "
                         "it keep re-resolving to the same object despite that. Leave this as \"Exact "
                         "match\" otherwise.")},
+        {QStringLiteral("名前/パターン:"), QStringLiteral("Name/pattern:")},
+        {QStringLiteral("実際の照合に使われる文字列です。「完全一致」「前方一致」ではそのままの"
+                        "文字列として、「正規表現」ではQtの正規表現として解釈されます。"
+                        "「オブジェクトを指定...」で拾った名前を元に自動入力されますが、"
+                        "ここで自由に編集できます（例:末尾の変化する部分を取り除く）。"),
+         QStringLiteral("This is the string actually used for matching. Under \"Exact match\"/\"Starts "
+                        "with\" it's used literally; under \"Regular expression\" it's interpreted as a "
+                        "Qt regular expression. It's auto-filled from whatever \"Pick Object...\" picked "
+                        "up, but you can freely edit it here (e.g. to strip off a changing suffix).")},
+        {QStringLiteral("「名前/パターン」を入力してください"
+                        "（空のままでは、どの部品にも一致しません）。"),
+         QStringLiteral("Please enter a \"Name/pattern\" (left empty, it will never match any object).")},
+        {QStringLiteral("「名前/パターン」が正しい正規表現ではありません。"),
+         QStringLiteral("\"Name/pattern\" is not a valid regular expression.")},
         {QStringLiteral("再解決の間隔（この部品の位置を再検索する頻度）:"),
          QStringLiteral("Re-resolve interval (how often to re-search for this object's position):")},
         {QStringLiteral("ステップが変わるたびのみ"), QStringLiteral("Only when the step changes")},

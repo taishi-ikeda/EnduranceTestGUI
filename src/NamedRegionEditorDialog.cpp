@@ -11,6 +11,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QRegularExpression>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -260,6 +261,25 @@ NamedRegionEditorDialog::NamedRegionEditorDialog(const NamedRegion &initial, con
     nameMatchModeRow->addWidget(m_nameMatchModeCombo);
     nameMatchModeRow->addStretch();
     objectLayout->addLayout(nameMatchModeRow);
+
+    // 不具合報告E-11(重大): the照合方法 combo alone left no way to actually
+    // edit *what* is matched -- it was always whatever onPickObject() last
+    // captured verbatim, which for前方一致 needs to be shortened to just the
+    // fixed prefix, and for正規表現 needs to actually be regex syntax (not
+    // arbitrary UI text that happens to contain regex metacharacters). See
+    // m_objectNamePatternEdit's own header comment.
+    auto *namePatternRow = new QHBoxLayout;
+    namePatternRow->addWidget(new QLabel(I18n::t(QStringLiteral("名前/パターン:")), m_objectModeGroup));
+    m_objectNamePatternEdit = new QLineEdit(initial.objectTarget.name, m_objectModeGroup);
+    m_objectNamePatternEdit->setToolTip(
+        I18n::t(QStringLiteral("実際の照合に使われる文字列です。「完全一致」「前方一致」ではそのままの"
+                                "文字列として、「正規表現」ではQtの正規表現として解釈されます。"
+                                "「オブジェクトを指定...」で拾った名前を元に自動入力されますが、"
+                                "ここで自由に編集できます（例:末尾の変化する部分を取り除く）。")));
+    namePatternRow->addWidget(m_objectNamePatternEdit, 1);
+    objectLayout->addLayout(namePatternRow);
+    connect(m_nameMatchModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &NamedRegionEditorDialog::onNameMatchModeChanged);
 
     m_useDefaultActionCheck = new QCheckBox(
         I18n::t(QStringLiteral("クリック操作では、座標の代わりにこの部品の既定アクションを直接実行する\n"
@@ -540,9 +560,40 @@ void NamedRegionEditorDialog::onPickObject()
         m_objectTarget.occurrenceIndex = occurrenceIndex;
         m_objectPicked = true;
         m_lastPickedBounds = info.bounds;
+        // 不具合報告E-11: seed the editable pattern field from this fresh
+        // pick -- literal text for完全一致/前方一致, but escaped into a
+        // literal-matching regex for正規表現 (QRegularExpression::escape()),
+        // so a freshly-picked object matches itself exactly under whichever
+        // mode is already selected, rather than the picked name's own
+        // regex-metacharacters (parens, dots, ...) being misinterpreted as
+        // regex syntax the user never asked for. Tracked as "the auto
+        // value" so onNameMatchModeChanged() can still re-derive it if the
+        // mode changes next, right up until the user types something else.
+        const auto mode = static_cast<ObjectNameMatchMode>(m_nameMatchModeCombo->currentData().toInt());
+        const QString autoPattern =
+            mode == ObjectNameMatchMode::Regex ? QRegularExpression::escape(info.name) : info.name;
+        m_objectNamePatternEdit->setText(autoPattern);
+        m_lastAutoObjectNamePattern = autoPattern;
         updateObjectInfoLabel();
     }
     updateHighlight();
+}
+
+void NamedRegionEditorDialog::onNameMatchModeChanged()
+{
+    // Only while the field still holds exactly what this dialog itself last
+    // put there automatically -- same "still the auto value, safe to
+    // replace" guard as m_lastAutoName's own mode-switch handling above (see
+    // m_lastAutoObjectNamePattern's header comment for why an *existing*
+    // region's already-saved pattern never starts out matching this, so
+    // reopening one to edit never risks this silently rewriting it).
+    if (m_objectNamePatternEdit->text() != m_lastAutoObjectNamePattern)
+        return;
+    const auto mode = static_cast<ObjectNameMatchMode>(m_nameMatchModeCombo->currentData().toInt());
+    const QString autoPattern =
+        mode == ObjectNameMatchMode::Regex ? QRegularExpression::escape(m_objectTarget.name) : m_objectTarget.name;
+    m_objectNamePatternEdit->setText(autoPattern);
+    m_lastAutoObjectNamePattern = autoPattern;
 }
 
 void NamedRegionEditorDialog::updateObjectInfoLabel()
@@ -715,6 +766,31 @@ void NamedRegionEditorDialog::onAccept()
                                   I18n::t(QStringLiteral("「オブジェクトを指定...」で部品を選択してください。")));
             return;
         }
+        // 不具合報告E-11(重大): an empty pattern previously matched
+        // everything under前方一致 (QString::startsWith("") is always true)
+        // and trivially under正規表現 too -- silently resolving to
+        // whichever object happened to be found first, not "nothing", which
+        // is the fail-closed behavior actually wanted here (matchesObjectName()
+        // itself now also refuses to match an empty pattern, but catching it
+        // here means a clear message instead of a confusing "対象領域が見つ
+        // からない" stop partway through a run). An invalid正規表現 pattern
+        // already fails closed at match time (never matches anything), but
+        // that is just as unhelpful to discover only after a run has
+        // started -- validate it compiles right here instead.
+        const ObjectNameMatchMode mode =
+            static_cast<ObjectNameMatchMode>(m_nameMatchModeCombo->currentData().toInt());
+        const QString pattern = m_objectNamePatternEdit->text();
+        if (mode != ObjectNameMatchMode::Exact && pattern.isEmpty()) {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("「名前/パターン」を入力してください"
+                                                          "（空のままでは、どの部品にも一致しません）。")));
+            return;
+        }
+        if (mode == ObjectNameMatchMode::Regex && !QRegularExpression(pattern).isValid()) {
+            QMessageBox::warning(this, I18n::t(QStringLiteral("入力エラー")),
+                                  I18n::t(QStringLiteral("「名前/パターン」が正しい正規表現ではありません。")));
+            return;
+        }
     } else if (m_sweepModeRadio->isChecked()) {
         if (m_sweepWaypoints.size() < 2) {
             QMessageBox::warning(
@@ -742,6 +818,11 @@ NamedRegion NamedRegionEditorDialog::result() const
         // target region (RandomActionEngine::resolveObjectTargetRegion()
         // resolves its bounds dynamically instead).
         region.objectTarget = m_objectTarget;
+        // 不具合報告E-11: the actual pattern used at runtime is whatever is
+        // currently in the editable field, not necessarily the same as the
+        // last-picked object's raw accessible name (m_objectTarget.name) --
+        // see m_objectNamePatternEdit's own header comment.
+        region.objectTarget.name = m_objectNamePatternEdit->text();
         region.objectTarget.nameMatchMode =
             static_cast<ObjectNameMatchMode>(m_nameMatchModeCombo->currentData().toInt());
         region.objectTarget.useDefaultAction = m_useDefaultActionCheck->isChecked();

@@ -349,8 +349,15 @@ static CGPoint toCGPoint(const QPoint &pt)
     return CGPointMake(pt.x(), pt.y());
 }
 
-qint64 windowPidAtPoint(const QPoint &pt)
+qint64 windowPidAtPoint(const QPoint &pt, bool excludeSelf)
 {
+    // `excludeSelf` (不具合報告E-01, Linux-only so far): this function
+    // already unconditionally skips every one of this process's own
+    // windows below (see the `ownerPid == selfPid` check and its comment),
+    // regardless of `excludeSelf`'s value, for the reasons explained there.
+    // The parameter still needs to exist here so this function's signature
+    // matches its declaration in PlatformAutomation.h.
+    (void)excludeSelf;
     // 不具合報告1.1(重大、Linux上で確認されたが同じ経路のためmacOSにも適用):
     // fail closed for any point outside every connected screen's real
     // bounds -- see the identical comment in Automation_linux.cpp's own

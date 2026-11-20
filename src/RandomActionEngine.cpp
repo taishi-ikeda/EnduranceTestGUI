@@ -387,6 +387,16 @@ void RandomActionEngine::start(const TestConfig &config)
         emit logMessage(I18n::t(QStringLiteral("起動時セットアップを開始します（%1件） -- 完了後にランダム操作を開始します"))
                              .arg(m_config.setupActions.size()));
     }
+    // 不具合報告(実行スピードが設定より遅い): start()/resume() are the only
+    // two scheduleNext() callers reached directly from a UI action rather
+    // than from within a performRandomAction() tick -- m_actionProcessingTimer
+    // would otherwise still hold whatever it was left at (default-
+    // constructed/never started here, since this is the very first
+    // scheduleNext() call of a fresh run) or, for resume(), however long
+    // this run had been paused for. Explicitly starting it fresh right
+    // here keeps scheduleNext()'s own compensation a no-op for this call,
+    // same as before that feature existed.
+    m_actionProcessingTimer.start();
     scheduleNext();
     m_resourceTimer.start();
     m_hangCheckTimer.start();
@@ -568,6 +578,13 @@ void RandomActionEngine::resume()
         // ため…".
         if (m_config.keepTargetActive)
             PlatformAutomation::activateProcess(m_config.targetPid);
+        // 不具合報告(実行スピードが設定より遅い): see start()'s identical
+        // comment -- without this, scheduleNext() would subtract however
+        // long this run had just been paused for (m_actionProcessingTimer
+        // is otherwise only ever restarted at the top of each
+        // performRandomAction() tick, none of which ran while paused),
+        // collapsing the post-resume interval down to its 1ms floor.
+        m_actionProcessingTimer.start();
         scheduleNext();
     }
     m_resourceTimer.start();
@@ -1527,6 +1544,19 @@ void RandomActionEngine::scheduleNext()
     int interval = lo + (hi > lo ? int(m_rng.bounded(quint32(hi - lo + 1))) : 0);
     if (m_slowdownActive)
         interval *= kAutoSlowdownIntervalMultiplier;
+    // 不具合報告(実行スピードが設定より遅い): see m_actionProcessingTimer's
+    // own comment -- "操作間隔" is meant to be the gap between one
+    // dispatched action and the next, not an extra delay tacked on *after*
+    // whatever time the action just performed already took to process.
+    // Previously this always waited the full freshly-chosen `interval`
+    // regardless of that, so any action kind with real synchronous work of
+    // its own (a right click's context-menu wait, a double-click's
+    // inter-click gap, an AT-SPI round trip, ...) made the realized gap
+    // longer than configured by however long that took. Subtracting it
+    // here brings the next dispatch back toward the originally intended
+    // timing instead of stacking on top of it; clamped to at least 1ms by
+    // the qMax() below the same as before.
+    interval -= int(m_actionProcessingTimer.elapsed());
     m_timer.start(qMax(1, interval));
 }
 
@@ -1854,6 +1884,18 @@ bool RandomActionEngine::handleUnexpectedWindows()
 
 void RandomActionEngine::performRandomAction()
 {
+    // 不具合報告(実行スピードが設定より遅い): see m_actionProcessingTimer's
+    // own comment and scheduleNext()'s. Restarted unconditionally on every
+    // tick (including a continuation tick for an in-progress HoldDrag/
+    // TypingBurst/FuzzString/FuzzAllFieldsInRegion -- those manage their
+    // own per-tick pacing directly via m_timer.start() and never consult
+    // this, so restarting it here for them is harmless) so it always
+    // reflects "time spent since this exact tick's handler started"
+    // whenever scheduleNext() is eventually reached, however many nested
+    // calls later (performGroupAction()/performTaskAction(), or one of the
+    // various finishX() completion paths).
+    m_actionProcessingTimer.start();
+
     if (!m_running || m_paused)
         return;
 

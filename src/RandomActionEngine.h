@@ -656,6 +656,20 @@ private:
     // soon as a ping succeeds again; scheduleNext() multiplies the action
     // interval by kAutoSlowdownIntervalMultiplier while this is true.
     bool m_slowdownActive = false;
+    // 不具合報告(実行スピードが設定より遅い): restarted at the very top of
+    // every performRandomAction() tick, so scheduleNext() can subtract
+    // however long *this* tick's own synchronous processing actually took
+    // (an AT-SPI/X11 round trip, or one of the handful of QThread::msleep()
+    // waits a few action kinds genuinely need -- e.g. ~150ms for a right
+    // click's context-menu render-wait, ~80ms for a double-click's own
+    // inter-click gap) from the next randomly chosen interval. Without
+    // this, that processing time was added ON TOP of the configured
+    // interval instead of counting toward it, so the actual gap between
+    // two dispatched actions ended up longer than configured -- and,
+    // depending on which action kind happened to be picked each time, by
+    // an amount that varied tick to tick, matching the reported "sometimes
+    // slower than configured" symptom. See scheduleNext()'s own comment.
+    QElapsedTimer m_actionProcessingTimer;
     // See TestConfig::debuggerModeEnabled. Set the first time
     // sampleResourceUsage() finds a debugger attached to the target while
     // that option is off, so the mismatch is logged once per run rather
